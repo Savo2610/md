@@ -137,6 +137,7 @@ export function start() {
       b.addEventListener('click', () => account.login('/home'));
       foot.append(el('p', { class: 'hint' }, b, ', um deine Dokumente auf allen Geräten zu haben und mit Tags zu ordnen.'));
     }
+    if (account.enabled) foot.append(el('p', { class: 'hint' }, el('a', { href: '/datenschutz' }, 'Datenschutz')));
   }
 
   search.addEventListener('input', render);

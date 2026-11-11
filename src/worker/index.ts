@@ -45,7 +45,7 @@ export { Account } from './account';
 
 const ADMIN_TTL = 12 * 3600;
 const MAX_IMAGE = 6 * 1024 * 1024;
-const RESERVED = new Set(['api', 'auth', 'admin', 'home', 'i', 'assets', 'fonts', 'icons', 'new', 'robots.txt', 'favicon.svg', 'favicon.ico', 'sw.js', 'manifest.webmanifest', 'apple-touch-icon.png']);
+const RESERVED = new Set(['api', 'auth', 'admin', 'home', 'datenschutz', 'i', 'assets', 'fonts', 'icons', 'new', 'robots.txt', 'favicon.svg', 'favicon.ico', 'sw.js', 'manifest.webmanifest', 'apple-touch-icon.png']);
 /** Statische Dateien, die direkt aus public/ kommen. */
 const STATIC_FILES = new Set(['/favicon.svg', '/sw.js', '/manifest.webmanifest', '/apple-touch-icon.png']);
 const IMAGE_TYPES: Record<string, string> = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/avif': 'avif' };
@@ -518,6 +518,7 @@ export default {
     if (path === '/admin') {
       return page('Übersicht', '<main id="app"></main>', { page: 'admin' });
     }
+    if (path === '/datenschutz') return privacyPage();
     if (path.startsWith('/i/')) {
       const [, , doc, file] = path.split('/');
       const id = doc ? normalizeId(doc) : null;
@@ -552,6 +553,39 @@ export default {
     return docPage(req, env, id);
   },
 } satisfies ExportedHandler<Env>;
+
+/** Datenschutzerklärung (verlangt Google für den Login). Ohne Skript, nur Text. */
+function privacyPage(): Response {
+  const html = `<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Datenschutz – md</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="${manifest.css}">
+</head>
+<body>
+<main><article class="doc">
+<h1>Datenschutz</h1>
+<p>md.veerka.mp ist ein privat betriebener Markdown-Editor. Hier steht, welche Daten dabei anfallen.</p>
+<h2>Dokumente</h2>
+<p>Was du schreibst, wird gespeichert, damit es unter seiner Adresse abrufbar ist. Wer die Adresse kennt, kann ein Dokument lesen; bearbeiten kann nur, wer den Bearbeiten-Link hat. Dokumente, die 12 Monate niemand geöffnet hat, werden samt Bildern gelöscht. Suchmaschinen sind ausgesperrt.</p>
+<h2>Ohne Anmeldung</h2>
+<p>Die Liste „zuletzt geöffnet“ und die Bearbeitungsrechte liegen nur in deinem Browser. Beim Anlegen eines Dokuments prüft Cloudflare Turnstile, ob ein Mensch schreibt. Die IP-Adresse wird kurzzeitig für eine Begrenzung der Anfragen verwendet und nicht dauerhaft gespeichert.</p>
+<h2>Mit Google anmelden (optional)</h2>
+<p>Meldest du dich an, erhält md von Google deine Google-Konto-ID, deinen Namen, deine E-Mail-Adresse und dein Profilbild. Damit wird ein Konto angelegt, in dem deine Dokumentliste, die Bearbeitungsrechte und deine Tags liegen. Name, E-Mail und Bild stehen in einem Sitzungs-Cookie in deinem Browser. Es gibt keine Werbung, kein Tracking und keine Weitergabe an Dritte. Unter „Konto löschen“ (Übersicht, oben rechts) kannst du Konto, Liste und Tags jederzeit löschen; die Dokumente selbst bleiben unter ihren Adressen bestehen.</p>
+<h2>Hosting</h2>
+<p>Die Seite läuft bei Cloudflare (Workers, Speicher in Durable Objects und R2). Cloudflare verarbeitet dabei technisch notwendige Verbindungsdaten.</p>
+<h2>Kontakt</h2>
+<p>Fragen und Löschwünsche: <a href="mailto:savogniner@gmail.com">savogniner@gmail.com</a></p>
+<p><a href="/home">Zur Übersicht</a></p>
+</article></main>
+</body>
+</html>`;
+  return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=3600', 'content-security-policy': CSP } });
+}
 
 function moved(to: string, suffix: string): Response {
   return new Response(null, { status: 301, headers: { location: `/${encodeURIComponent(to)}${suffix}`, 'cache-control': 'no-store' } });
