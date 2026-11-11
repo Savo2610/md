@@ -1,7 +1,7 @@
 // Der Editor: CodeMirror 6 + Yjs. Wird erst geladen, wenn jemand bearbeitet,
 // damit die reine Ansicht schnell bleibt.
 
-import { EditorView, keymap, drawSelection, placeholder, ViewPlugin, Decoration, type DecorationSet, type ViewUpdate, dropCursor } from '@codemirror/view';
+import { EditorView, keymap, drawSelection, placeholder, ViewPlugin, Decoration, WidgetType, type DecorationSet, type ViewUpdate, dropCursor } from '@codemirror/view';
 import { EditorState, EditorSelection, Compartment, RangeSetBuilder, type Extension } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
@@ -345,6 +345,90 @@ function slashSource(items: Slash[]) {
   };
 }
 
+// ── Link-Adressen einklappen ────────────────────────────────────────────────
+// [Text](https://lange-adresse) erscheint als [Text]↗, solange der Cursor
+// nicht im Link steht. Im Dokument bleibt es normales Markdown.
+
+class LinkFold extends WidgetType {
+  constructor(readonly url: string, readonly pos: number) { super(); }
+  eq(other: LinkFold) { return other.url === this.url && other.pos === this.pos; }
+  toDOM(view: EditorView) {
+    const el = document.createElement('span');
+    el.className = 'cm-linkfold';
+    el.textContent = '↗';
+    el.title = this.url;
+    el.setAttribute('aria-label', `Link: ${this.url}`);
+    el.addEventListener('mousedown', e => {
+      e.preventDefault();
+      view.dispatch({ selection: { anchor: this.pos } });
+      view.focus();
+    });
+    return el;
+  }
+  ignoreEvent() { return false; }
+}
+
+const linkFolding = ViewPlugin.fromClass(class {
+  decorations: DecorationSet;
+  constructor(view: EditorView) { this.decorations = this.build(view); }
+  update(u: ViewUpdate) {
+    if (u.docChanged || u.selectionSet || u.viewportChanged || u.focusChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) {
+      this.decorations = this.build(u.view);
+    }
+  }
+  build(view: EditorView): DecorationSet {
+    const b = new RangeSetBuilder<Decoration>();
+    const sel = view.state.selection.ranges;
+    for (const { from, to } of view.visibleRanges) {
+      syntaxTree(view.state).iterate({
+        from, to,
+        enter: node => {
+          if (node.name !== 'Link' && node.name !== 'Image') return;
+          const marks: { from: number; to: number }[] = [];
+          let urlNode: { from: number; to: number } | null = null;
+          for (let c = node.node.firstChild; c; c = c.nextSibling) {
+            if (c.name === 'LinkMark') marks.push({ from: c.from, to: c.to });
+            else if (c.name === 'URL') urlNode = { from: c.from, to: c.to };
+          }
+          // Erwartet: [ ] ( … ) – sonst (Referenz-Links, leere Adresse) nichts tun.
+          if (!urlNode || marks.length < 4) return false;
+          const open = marks[marks.length - 2], close = marks[marks.length - 1];
+          if (view.state.sliceDoc(open.from, open.to) !== '(' || view.state.sliceDoc(close.from, close.to) !== ')') return false;
+          if (view.state.doc.lineAt(open.from).number !== view.state.doc.lineAt(close.to).number) return false;
+          const touched = sel.some(r => r.to >= node.from && r.from <= node.to);
+          if (touched) return false;
+          const url = view.state.sliceDoc(urlNode.from, urlNode.to);
+          b.add(open.from, close.to, Decoration.replace({ widget: new LinkFold(url, urlNode.from) }));
+          return false;
+        },
+      });
+    }
+    return b.finish();
+  }
+}, { decorations: v => v.decorations });
+
+// ── Links einfügen ──────────────────────────────────────────────────────────
+
+const URL_ONLY = /^https?:\/\/[^\s<>"]+$/i;
+
+/** Linktext darf keine eckigen Klammern enthalten, die das Markdown brechen. */
+const escapeLabel = (t: string) => t.replace(/([\\[\]])/g, '\\$1');
+
+function domainOf(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
+}
+
+/** Steht die Position in Code oder schon in einer Link-Adresse? Dann normal einfügen. */
+function inCodeOrUrl(state: EditorState, pos: number): boolean {
+  // Offener Inline-Code (`… ohne schließendes `) ist für den Parser noch kein Code.
+  const line = state.doc.lineAt(pos);
+  if ((state.sliceDoc(line.from, pos).match(/`/g) || []).length % 2 === 1) return true;
+  for (let n: ReturnType<ReturnType<typeof syntaxTree>['resolveInner']> | null = syntaxTree(state).resolveInner(pos, -1); n; n = n.parent) {
+    if (['URL', 'InlineCode', 'FencedCode', 'CodeBlock', 'Autolink', 'LinkLabel'].includes(n.name)) return true;
+  }
+  return false;
+}
+
 // ── Auswahl-Leiste ──────────────────────────────────────────────────────────
 
 function selectionToolbar(): Extension {
@@ -524,6 +608,46 @@ export function mountEditor(o: EditorOptions): EditorHandle {
     }
   }
 
+  /**
+   * Eingefügte Adresse: Mit markiertem Text wird der zum Linktext. Ohne
+   * Markierung steht erst die Domain da; den Seitentitel holt der Server
+   * und ersetzt sie, falls in der Zwischenzeit niemand den Link geändert hat.
+   */
+  function pasteLink(url: string) {
+    const { state } = view;
+    const sel = state.selection.main;
+    const selected = state.sliceDoc(sel.from, sel.to);
+    if (inCodeOrUrl(state, sel.from) || (sel.empty && /\]\($/.test(state.sliceDoc(sel.from - 2, sel.from)))) {
+      view.dispatch(state.replaceSelection(url), { userEvent: 'input.paste' });
+      return;
+    }
+    if (!sel.empty && !selected.includes('\n') && !URL_ONLY.test(selected.trim())) {
+      const insert = `[${escapeLabel(selected)}](${url})`;
+      view.dispatch({ changes: { from: sel.from, to: sel.to, insert }, selection: { anchor: sel.from + insert.length }, userEvent: 'input.paste' });
+      return;
+    }
+    const placeholder = escapeLabel(domainOf(url));
+    const insert = `[${placeholder}](${url})`;
+    view.dispatch({ changes: { from: sel.from, to: sel.to, insert }, selection: { anchor: sel.from + insert.length }, userEvent: 'input.paste' });
+    fetchTitle(url).then(title => {
+      if (!title || title === placeholder) return;
+      replaceText(insert, `[${escapeLabel(title)}](${url})`);
+    });
+  }
+
+  async function fetchTitle(url: string): Promise<string> {
+    // Ein neues Dokument wird gerade durch das Einfügen angelegt – abwarten.
+    if (!created) await (creating ?? Promise.resolve(false));
+    if (!created) return '';
+    try {
+      const res = await fetch(`/api/docs/${encodeURIComponent(o.id)}/title?url=${encodeURIComponent(url)}`, { headers: o.auth() });
+      if (!res.ok) return '';
+      return String((await res.json()).title || '');
+    } catch {
+      return '';
+    }
+  }
+
   function replaceText(find: string, insert: string) {
     const idx = view.state.doc.toString().indexOf(find);
     if (idx === -1) return;
@@ -553,7 +677,8 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         EditorView.lineWrapping,
         indentUnit.of('  '),
         EditorState.tabSize.of(2),
-        markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
+        // pasteURLAsLink aus: Einfügen von Links regelt pasteLink() (inkl. Seitentitel).
+        markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true, pasteURLAsLink: false }),
         syntaxHighlighting(highlight),
         theme,
         search({ top: false }),
@@ -561,14 +686,21 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         placeholder(o.exists ? '' : 'Einfach losschreiben. Mit / am Zeilenanfang fügst du Tabellen, Boxen, Bilder und mehr ein.'),
         spellComp.of(spellAttrs(o.spellcheck)),
         spellExclusions,
+        linkFolding,
         yCollab(ytext, awareness, { undoManager }),
         selectionToolbar(),
         EditorView.domEventHandlers({
           paste(e, v) {
             const files = [...(e.clipboardData?.files || [])];
-            if (!files.some(f => f.type.startsWith('image/'))) return false;
+            if (files.some(f => f.type.startsWith('image/'))) {
+              e.preventDefault();
+              insertImages(files, v.state.selection.main.head);
+              return true;
+            }
+            const text = (e.clipboardData?.getData('text/plain') || '').trim();
+            if (!URL_ONLY.test(text)) return false;
             e.preventDefault();
-            insertImages(files, v.state.selection.main.head);
+            pasteLink(text);
             return true;
           },
           drop(e, v) {

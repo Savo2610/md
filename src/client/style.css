@@ -166,6 +166,9 @@ body[data-mode="split"] { --measure: 34rem; }
 
 /* Editor-Feinheiten, die das Theme nicht abdeckt */
 .cm-editor .cm-scroller { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+/* Eingeklappte Link-Adresse: [Text]↗ – Klick oder Cursor in den Link zeigt sie. */
+.cm-linkfold { color: var(--markup); cursor: pointer; font-size: .85em; padding: 0 .1em; }
+.cm-linkfold:hover { color: var(--accent); }
 
 /* Auswahl-Leiste */
 .seltools {

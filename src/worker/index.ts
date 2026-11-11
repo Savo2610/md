@@ -17,6 +17,7 @@
 //   POST   /api/docs/<id>/images     Bild hochladen (X-Edit-Key)
 //   POST   /api/docs/<id>/pin        behalten ja/nein (Admin)
 //   POST   /api/docs/<id>/rename     neue Adresse (X-Edit-Key); die alte leitet weiter
+//   GET    /api/docs/<id>/title?url= Seitentitel für eingefügte Links (X-Edit-Key)
 //   GET    /api/docs/<id>/ws         WebSocket fürs gemeinsame Bearbeiten
 //   POST   /api/unlock               2FA-Code → Bearbeitungsschlüssel für ein Dokument,
 //                                    oder (ohne Dokument) Admin-Token für /admin
@@ -270,6 +271,13 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
     return json({ id: to, url: docUrl(req, to) });
   }
 
+  if (action === 'title' && method === 'GET') {
+    if (!(await canEdit(req, env, id))) return fail(401, 'Keine Berechtigung.');
+    const { success } = await env.UPLOAD_LIMIT.limit({ key: ip(req) });
+    if (!success) return fail(429, 'Zu viele Anfragen.');
+    return json({ title: await pageTitle(url.searchParams.get('url') || '') });
+  }
+
   if (action === 'pin' && method === 'POST') {
     if (!(await isAdmin(req, env))) return fail(401, 'Nicht freigeschaltet.');
     const body = await req.json<{ pinned?: boolean }>().catch(() => ({} as { pinned?: boolean }));
@@ -278,6 +286,52 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
   }
 
   return fail(404, 'Unbekannt.');
+}
+
+/**
+ * Holt den Titel einer Seite für eingefügte Links: og:title, sonst <title>.
+ * Nur http(s), keine IP-Adressen, höchstens 4 Sekunden und 256 KB.
+ */
+async function pageTitle(raw: string): Promise<string> {
+  let target: URL;
+  try { target = new URL(raw); } catch { return ''; }
+  if (!/^https?:$/.test(target.protocol)) return '';
+  if (/^[\d.]+$|^\[|^localhost$/i.test(target.hostname) || !target.hostname.includes('.')) return '';
+  try {
+    const res = await fetch(target.toString(), {
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; md-link-preview)', accept: 'text/html', 'accept-language': 'de,en;q=0.8' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok || !(res.headers.get('content-type') || '').includes('html') || !res.body) return '';
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let html = '';
+    while (html.length < 256 * 1024) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      html += dec.decode(value, { stream: true });
+      if (/<\/title>|<body/i.test(html)) break;
+    }
+    reader.cancel().catch(() => {});
+    const og = /<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']*)["']/i.exec(html)
+      || /<meta[^>]+content=["']([^"']*)["'][^>]*property=["']og:title["']/i.exec(html);
+    const t = og?.[1] || /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] || '';
+    return decodeEntities(t).replace(/\s+/g, ' ').trim().slice(0, 140);
+  } catch {
+    return '';
+  }
+}
+
+function decodeEntities(s: string): string {
+  const named: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', ndash: '–', mdash: '—', auml: 'ä', ouml: 'ö', uuml: 'ü', Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü', szlig: 'ß' };
+  return s.replace(/&(#x[\da-f]+|#\d+|\w+);/gi, (m, e: string) => {
+    if (e[0] === '#') {
+      const n = e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return Number.isFinite(n) && n > 0 && n < 0x110000 ? String.fromCodePoint(n) : m;
+    }
+    return named[e] ?? m;
+  });
 }
 
 async function readMarkdownBody(req: Request): Promise<{ markdown: string; id?: string }> {
