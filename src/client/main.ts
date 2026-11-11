@@ -9,7 +9,8 @@ import { titleOf, slugify } from '../shared/title';
 import { $, el, dialog, toast, store, adminToken, unlockDialog, recent, ago } from './ui';
 
 interface Boot {
-  page: 'doc' | 'admin';
+  page: 'doc' | 'admin' | 'home';
+  build?: string;
   id?: string;
   exists?: boolean;
   siteKey?: string;
@@ -18,11 +19,11 @@ interface Boot {
 
 const boot: Boot = JSON.parse($('#boot')!.textContent || '{}');
 
-if (boot.page === 'admin') {
-  import('./admin').then(m => m.start());
-} else {
-  startDoc(boot);
-}
+/** Als App vom Homescreen gestartet (nicht im Browser-Tab). */
+const standalone = matchMedia('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
+/** Schmaler Bildschirm: kompakte Leiste mit Bearbeiten/Fertig und Menü als Blatt. */
+const compactQuery = matchMedia('(max-width: 600px)');
+if (standalone) document.documentElement.classList.add('standalone');
 
 type Mode = 'view' | 'edit' | 'split';
 
@@ -71,8 +72,12 @@ function startDoc(boot: Boot) {
   const bar = el('header', { id: 'bar' });
   const left = el('div', { class: 'bar-left' });
   const right = el('nav', { class: 'bar-right' });
-  const brand = el('button', { type: 'button', class: 'brand', title: 'Neues Dokument und zuletzt geöffnete', 'aria-haspopup': 'dialog' }, 'md');
-  brand.addEventListener('click', openRecent);
+  // In der installierten App führt „md“ zurück zur Übersicht, im Browser
+  // öffnet es das kleine Menü mit „Neues Dokument“ und den letzten Dokumenten.
+  const brand = standalone
+    ? el('a', { class: 'brand', href: '/home', title: 'Alle Dokumente' }, '‹ md')
+    : el('button', { type: 'button', class: 'brand', title: 'Neues Dokument und zuletzt geöffnete', 'aria-haspopup': 'dialog' }, 'md');
+  if (!standalone) brand.addEventListener('click', openRecent);
   const status = el('span', { class: 'status', role: 'status' });
   const peers = el('span', { class: 'peers' });
   left.append(brand, status, peers);
@@ -91,8 +96,24 @@ function startDoc(boot: Boot) {
     return b;
   };
 
+  compactQuery.addEventListener('change', () => {
+    if (compactQuery.matches && mode === 'split') setMode('edit');
+    else renderBar();
+  });
+
   function renderBar() {
     right.replaceChildren();
+    if (compactQuery.matches) {
+      // Handy: ein Knopf wie in Notizen-Apps, alles andere im Menü.
+      if (canEdit()) {
+        right.append(mode === 'view'
+          ? button('Bearbeiten', 'Bearbeiten', () => setMode('edit'), 't strong')
+          : button('Fertig', 'Fertig – zur Ansicht', () => setMode('view'), 't strong'));
+      }
+      right.append(button('⋯', 'Mehr', more, 't more'));
+      renderStatus();
+      return;
+    }
     if (canEdit()) {
       // Umschalter: immer an derselben Stelle, der aktive Modus ist unterstrichen.
       const sw = el('div', { class: 'switch', role: 'tablist', 'aria-label': 'Modus' });
@@ -117,7 +138,7 @@ function startDoc(boot: Boot) {
     const s = lastStatus;
     let icon = '', title = '', state = '';
     if (mode !== 'view' && exists && s) {
-      if (s.status === 'offline') { icon = ICONS.offline; title = 'Offline – Änderungen werden nachgereicht, sobald die Verbindung wieder da ist'; state = 'offline'; }
+      if (s.status === 'offline') { icon = ICONS.offline; title = 'Offline – auf diesem Gerät gespeichert, wird nachgereicht, sobald die Verbindung wieder da ist'; state = 'offline'; }
       else if (s.status === 'connecting' || !s.synced) { icon = ICONS.saving; title = 'Verbinde …'; state = 'busy'; }
       else if (s.pending) { icon = ICONS.saving; title = 'Speichert …'; state = 'busy'; }
       else if (s.status === 'online') { icon = ICONS.saved; title = 'Alles gespeichert'; state = 'saved'; }
@@ -232,6 +253,7 @@ function startDoc(boot: Boot) {
     recent.touch(id, '', true);
     turnstile?.remove();
     renderBar();
+    cachePage();
     return true;
   }
 
@@ -363,9 +385,12 @@ function startDoc(boot: Boot) {
   }
 
   function more() {
-    const items: [string, () => void][] = [
-      ['Herunterladen (.md)', () => { if (exists) location.href = `/${encodeURIComponent(id)}.md?download=1`; else toast('Noch leer.'); }],
-    ];
+    const items: [string, () => void][] = [];
+    if (compactQuery.matches) {
+      items.push(['Teilen', share]);
+      items.push(['Neues Dokument', () => { if (navigator.onLine) location.href = '/'; else toast('Offline: Neue Dokumente gehen nur mit Verbindung.'); }]);
+    }
+    items.push(['Herunterladen (.md)', () => { if (exists) location.href = `/${encodeURIComponent(id)}.md?download=1`; else toast('Noch leer.'); }]);
     if (canEdit()) items.push(['Adresse ändern', renameDialog]);
     if (mode !== 'view') items.push([spellcheck ? 'Rechtschreibprüfung aus' : 'Rechtschreibprüfung an', () => {
       spellcheck = !spellcheck;
@@ -382,7 +407,7 @@ function startDoc(boot: Boot) {
       toast('Freigeschaltet. Du kannst dieses Dokument jetzt bearbeiten.');
     })]);
     if (adminToken()) {
-      items.push(['Übersicht aller Dokumente', () => (location.href = '/admin')]);
+      items.push(['Verwaltung (alle Dokumente)', () => (location.href = '/admin')]);
       if (exists) items.push(['Dokument löschen', del]);
     }
     menu('right', items);
@@ -445,11 +470,30 @@ function startDoc(boot: Boot) {
     ed.view.dispatch({ changes: { from: l.from + m[1].length, to: l.from + m[1].length + 1, insert: m[2] === ' ' ? 'x' : ' ' } });
   });
 
+  /** Diese Seite für offline merken (nachdem sie angelegt wurde). */
+  function cachePage() {
+    if (!('caches' in window)) return;
+    caches.open('md-pages').then(c => c.add(new Request(location.pathname, { cache: 'no-store' }))).catch(() => {});
+  }
+
+  /** Offline: die Ansicht aus der lokalen Kopie zeigen, die neuer sein kann als die gespeicherte Seite. */
+  async function showLocalCopy() {
+    const ed = await loadEditor();
+    await ed.whenLocal();
+    const text = ed.text();
+    if (!text || mode !== 'view') return;
+    const { render } = await import('./editor');
+    article.innerHTML = render(text).html;
+    enableTasks();
+    enhance(article, boot.katexCss);
+  }
+
   document.body.dataset.mode = mode;
   renderBar();
   if (exists) {
     enableTasks();
     enhance(article, boot.katexCss);
+    if (editKey && !navigator.onLine) showLocalCopy();
   }
   if (mode !== 'view') {
     mode = 'view';
@@ -499,4 +543,22 @@ function loadTurnstile(siteKey: string) {
     reset() { current = null; ready.then(ts => widget && ts.reset(widget)); },
     remove() { ready.then(ts => { if (widget) ts.remove(widget); box.remove(); }); },
   };
+}
+
+// ── Start (am Ende, damit alle Konstanten oben schon stehen) ─────────────────
+
+if (boot.page === 'admin') {
+  import('./admin').then(m => m.start());
+} else if (boot.page === 'home') {
+  import('./home').then(m => m.start());
+} else {
+  startDoc(boot);
+}
+
+// Offline-Fähigkeit und Installation als App. Jeder Build registriert eine
+// neue Fassung (?v=…), die die Dateien des alten Builds wegräumt.
+if ('serviceWorker' in navigator && boot.build) {
+  addEventListener('load', () => {
+    navigator.serviceWorker.register(`/sw.js?v=${boot.build}`).catch(() => { /* ohne geht es auch */ });
+  });
 }

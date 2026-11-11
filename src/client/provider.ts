@@ -53,6 +53,10 @@ export class Provider {
       awarenessProtocol.removeAwarenessStates(awareness, [doc.clientID], 'local');
       this.flush();
     });
+    // Netz wieder da: sofort verbinden statt auf den nächsten Versuch zu warten.
+    window.addEventListener('online', () => {
+      if (!this.stopped && this.status !== 'online' && this.status !== 'gone') this.connect();
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && this.status === 'offline' && !this.stopped) this.connect();
     });

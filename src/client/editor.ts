@@ -12,6 +12,7 @@ import { autocompletion, completionKeymap, startCompletion, type CompletionConte
 import { tags as t } from '@lezer/highlight';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
+import { IndexeddbPersistence } from 'y-indexeddb';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { Provider, type Status } from './provider';
 import { uploadImage } from './images';
@@ -49,6 +50,8 @@ export interface EditorHandle {
   setName(name: string): void;
   setSpellcheck(on: boolean): void;
   connect(): void;
+  /** Wartet, bis die lokale Kopie (IndexedDB) geladen ist. */
+  whenLocal(): Promise<void>;
   /** Wartet, bis der Stand vom Server da ist (verbindet bei Bedarf). */
   whenSynced(): Promise<void>;
   focus(): void;
@@ -628,11 +631,20 @@ export function mountEditor(o: EditorOptions): EditorHandle {
   let peers: Peer[] = [];
   let pending = false;
 
+  // Lokale Kopie im Browser (IndexedDB): Das Dokument öffnet auch offline,
+  // und was ohne Netz geschrieben wird, geht beim nächsten Verbinden raus.
+  const local = new IndexeddbPersistence(`md:${o.id}`, ydoc);
+  const dropLocal = () => { local.clearData().catch(() => {}); };
+
   let syncWaiters: (() => void)[] = [];
   const provider = new Provider(ydoc, awareness, o.wsUrl, {
-    status: () => report(),
+    status: s => { if (s === 'gone') dropLocal(); report(); },
     synced: () => { report(); view.dispatch({}); syncWaiters.forEach(f => f()); syncWaiters = []; },
-    notice: n => o.onNotice(n),
+    notice: n => {
+      // Umgezogen oder kein Bearbeitungsrecht: die lokale Kopie gehört hier nicht mehr hin.
+      if (n.type === 'moved' || (n.type === 'hello' && n.edit === false)) dropLocal();
+      o.onNotice(n);
+    },
     pending: p => { pending = p; report(); },
   });
   const report = () => o.onStatus({ status: provider.status, pending, peers, synced: provider.synced });
@@ -836,6 +848,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
       awareness.setLocalStateField('user', { name: name || 'Gast', color, colorLight: color + '33' });
     },
     connect: () => provider.connect(),
+    whenLocal: () => local.whenSynced.then(() => undefined),
     whenSynced() {
       if (provider.synced) return Promise.resolve();
       provider.connect();
@@ -844,6 +857,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
     focus: () => view.focus(),
     destroy() {
       provider.disconnect();
+      local.destroy().catch(() => {});
       removeMobile();
       view.destroy();
       ydoc.destroy();

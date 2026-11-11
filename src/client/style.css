@@ -395,3 +395,58 @@ table.docs input[type="checkbox"] { accent-color: var(--accent); width: 16px; he
   #bar, .seltools, .mobiletools, #toast { display: none !important; }
   .doc { padding: 0; max-width: none; }
 }
+
+/* ── App und Handy ──────────────────────────────────────────────────────── */
+
+/* Kopfleiste unter Notch/Statusleiste, wenn die App den ganzen Bildschirm hat */
+#bar { padding-top: env(safe-area-inset-top); height: calc(var(--bar) + env(safe-area-inset-top)); }
+a.brand { text-decoration: none; }
+button.t.strong { color: var(--fg); font-weight: 700; }
+
+/* Auf dem Handy bleibt die Leiste beim Schreiben stehen. */
+@media (pointer: coarse), (max-width: 600px) {
+  body.typing #bar { opacity: 1; }
+}
+
+@media (max-width: 600px) {
+  button.t, .switch button { padding: 10px 9px; font-size: 15px; }
+  .brand { font-size: 16px; padding: 10px 8px; }
+
+  /* Menüs und Dialoge als Blatt von unten: mit dem Daumen erreichbar. */
+  dialog.dlg, dialog.dlg-menu, dialog.dlg-left {
+    inset: auto 0 0 0; margin: 0; width: 100%; max-width: 100%;
+    max-height: 85dvh; border-radius: 10px 10px 0 0; border-bottom: 0;
+    padding: 18px 16px calc(16px + env(safe-area-inset-bottom));
+    animation: sheet-in .18s ease-out;
+  }
+  dialog.dlg-menu { padding-top: 8px; }
+  dialog.dlg-menu::backdrop { background: rgba(0, 0, 0, .18); }
+  .menu button, .menu a.recent { padding: 13px 12px; font-size: 16px; }
+  .menu-label { padding: 14px 12px 6px; }
+  .field-line input, .name-row input { font-size: 16px; } /* iOS zoomt sonst beim Antippen */
+  .name-row { flex-direction: column; align-items: stretch; }
+  .name-row input { width: 100%; }
+}
+@keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { dialog.dlg { animation: none !important; } }
+
+/* Startseite der App */
+.home { max-width: 40rem; margin: 0 auto; padding: calc(var(--bar) + env(safe-area-inset-top) + 28px) var(--gutter) 80px; }
+.home-new {
+  display: block; padding: 14px 16px; margin-bottom: 18px;
+  border: 1px solid var(--line); border-radius: 6px; color: var(--fg); text-decoration: none; font-weight: 700;
+}
+.home-new::before { content: '+'; color: var(--caret); margin-right: 10px; font-weight: 400; }
+.home-new:hover, .home-new:active { background: var(--soft); }
+.home input.search {
+  width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg);
+  margin-bottom: 8px; font-size: 16px;
+}
+.notes { list-style: none; margin: 0; padding: 0; }
+.notes li { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+.notes a.note { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 13px 0; text-decoration: none; color: var(--fg); }
+.note-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note-meta { font-size: 13px; color: var(--muted); }
+.note-remove { appearance: none; border: 0; background: none; color: var(--faint); font-size: 20px; padding: 8px 4px 8px 16px; cursor: pointer; }
+.note-remove:hover { color: var(--danger); }
+.notes-empty { color: var(--muted); font-size: 15px; padding: 16px 0; border: 0 !important; }

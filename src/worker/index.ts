@@ -34,7 +34,9 @@ export { Registry } from './registry';
 
 const ADMIN_TTL = 12 * 3600;
 const MAX_IMAGE = 6 * 1024 * 1024;
-const RESERVED = new Set(['api', 'admin', 'i', 'assets', 'fonts', 'new', 'robots.txt', 'favicon.svg', 'favicon.ico']);
+const RESERVED = new Set(['api', 'admin', 'home', 'i', 'assets', 'fonts', 'icons', 'new', 'robots.txt', 'favicon.svg', 'favicon.ico', 'sw.js', 'manifest.webmanifest', 'apple-touch-icon.png']);
+/** Statische Dateien, die direkt aus public/ kommen. */
+const STATIC_FILES = new Set(['/favicon.svg', '/sw.js', '/manifest.webmanifest', '/apple-touch-icon.png']);
 const IMAGE_TYPES: Record<string, string> = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/avif': 'avif' };
 
 // ── Hilfen ──────────────────────────────────────────────────────────────────
@@ -102,7 +104,7 @@ const CSP = [
 ].join('; ');
 
 interface Boot {
-  page: 'doc' | 'admin';
+  page: 'doc' | 'admin' | 'home';
   id?: string;
   exists?: boolean;
   siteKey?: string;
@@ -110,6 +112,7 @@ interface Boot {
 }
 
 function page(title: string, body: string, boot: Boot, status = 200): Response {
+  const exists = boot.page !== 'doc' || boot.exists ? '1' : '0';
   const html = `<!doctype html>
 <html lang="de">
 <head>
@@ -121,12 +124,19 @@ function page(title: string, body: string, boot: Boot, status = 200): Response {
 <meta name="theme-color" content="#1b1b1b" media="(prefers-color-scheme: dark)">
 <title>${escapeHtml(title)}</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="md">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preload" href="/fonts/iAWriterQuattroS-Regular.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="${manifest.css}">
 <script type="module" src="${manifest.js}"></script>
 </head>
 <body>
-<script id="boot" type="application/json">${JSON.stringify({ ...boot, katexCss: manifest.katexCss }).replace(/</g, '\\u003c')}</script>
+<script id="boot" type="application/json">${JSON.stringify({ ...boot, katexCss: manifest.katexCss, build: manifest.js.replace(/^.*-|\.js$/g, '') }).replace(/</g, '\\u003c')}</script>
 ${body}
 </body>
 </html>`;
@@ -139,6 +149,8 @@ ${body}
       'x-robots-tag': 'noindex, nofollow',
       'referrer-policy': 'strict-origin-when-cross-origin',
       'x-content-type-options': 'nosniff',
+      // Für den Service Worker: leere „neues Dokument“-Seiten nicht speichern.
+      'x-md-exists': exists,
     },
   });
 }
@@ -395,7 +407,7 @@ export default {
     const url = new URL(req.url);
     const path = url.pathname;
 
-    if (path.startsWith('/assets/') || path.startsWith('/fonts/') || path === '/favicon.svg') {
+    if (/^\/(assets|fonts|icons)\//.test(path) || STATIC_FILES.has(path)) {
       return env.ASSETS.fetch(req);
     }
     if (path === '/robots.txt') {
@@ -417,6 +429,9 @@ export default {
 
     if (path === '/') {
       return new Response(null, { status: 302, headers: { location: `/${randomId()}`, 'cache-control': 'no-store' } });
+    }
+    if (path === '/home') {
+      return page('md', '<main id="app"></main>', { page: 'home' });
     }
     if (path === '/admin') {
       return page('Übersicht', '<main id="app"></main>', { page: 'admin' });

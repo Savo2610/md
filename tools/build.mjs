@@ -6,7 +6,7 @@
 //   node tools/build.mjs --watch  bei jeder Änderung neu bauen (npm run dev)
 
 import * as esbuild from 'esbuild';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { relative } from 'node:path';
 
 const watch = process.argv.includes('--watch');
@@ -27,10 +27,38 @@ const writeManifest = {
       }
       mkdirSync('src/generated', { recursive: true });
       writeFileSync('src/generated/manifest.json', JSON.stringify(manifest, null, 2) + '\n');
+      writeFileSync(`${outdir}/precache.json`, JSON.stringify(precacheList(result.metafile), null, 1) + '\n');
       console.log(`[build] ${new Date().toLocaleTimeString()} ${manifest.js}`);
     });
   },
 };
+
+/**
+ * Was der Service Worker vorab speichert, damit die App offline startet und
+ * bearbeiten kann: Einstieg, Stil, Editor und Übersicht samt allem, was sie
+ * statisch importieren, dazu Schriften und Icons. Mermaid, KaTeX und
+ * Highlighting kommen erst beim ersten Gebrauch in den Speicher.
+ */
+function precacheList(metafile) {
+  const outputs = metafile.outputs;
+  const wanted = new Set();
+  const visit = file => {
+    if (wanted.has(file) || !outputs[file]) return;
+    wanted.add(file);
+    for (const imp of outputs[file].imports) {
+      if (imp.kind === 'import-statement') visit(imp.path);
+      else if (imp.kind === 'dynamic-import' && /\/(editor|admin|home)-/.test(imp.path)) visit(imp.path);
+    }
+  };
+  for (const [file, info] of Object.entries(outputs)) {
+    if (info.entryPoint?.endsWith('main.ts') || info.entryPoint?.endsWith('style.css')) visit(file);
+  }
+  const files = [...wanted].filter(f => !f.endsWith('.map')).map(f => '/' + relative('public', f));
+  for (const dir of ['fonts', 'icons']) {
+    for (const f of readdirSync(`public/${dir}`)) if (/\.(woff2|png|svg)$/.test(f)) files.push(`/${dir}/${f}`);
+  }
+  return files.concat(['/favicon.svg', '/manifest.webmanifest', '/apple-touch-icon.png']);
+}
 
 const options = {
   entryPoints: [

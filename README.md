@@ -17,6 +17,12 @@ Object pro Dokument, Bilder in R2.
 - Klick auf „md“: neues Dokument und die zuletzt geöffneten (nur im Browser
   gespeichert, nichts auf dem Server).
 - Mehrere Leute können gleichzeitig schreiben (Yjs über WebSockets).
+- Als App installierbar (PWA): Start auf `/home` mit den zuletzt geöffneten
+  Dokumenten, kompakte Leiste mit „Bearbeiten/Fertig“, Menüs als Blatt von
+  unten. Offline: Seiten und Editor kommen aus dem Service Worker
+  (`public/sw.js`, Liste vom Build in `/assets/precache.json`), Dokumente mit
+  Bearbeitungsrecht liegen in IndexedDB und werden beim Verbinden nachgereicht.
+  Neue Dokumente gehen nur online (Turnstile).
 - `md.veerka.mp/<id>.md` liefert das reine Markdown (für KI-Agenten, Download).
 - `md.veerka.mp/admin`: alle Dokumente, Löschen, „Behalten“ (2FA-Code).
 
@@ -64,6 +70,8 @@ Live-Test ohne 2FA-Teil:
 | `src/shared/render.ts` | Markdown → HTML (Server und Browser), HackMD-Erweiterungen |
 | `src/client/main.ts` | Kopfleiste, Modi, Teilen, Umbenennen, Zuletzt geöffnet, Freischalten |
 | `src/client/editor.ts` | CodeMirror + Yjs, Slash-Menü, Auswahl-Leiste, Handy-Leiste, Bilder |
+| `src/client/home.ts` | Startseite der App (`/home`) |
+| `public/sw.js` | Service Worker (offline) |
 | `src/client/enhance.ts` | KaTeX, Mermaid, Highlighting – nur geladen, wenn gebraucht |
 | `tools/skill/SKILL.md` | Claude-Code-Skill zum Anlegen/Lesen (nach `~/.claude/skills/md-docs/`) |
 
