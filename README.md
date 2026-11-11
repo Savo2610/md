@@ -45,6 +45,17 @@ Lokale Secrets stehen in `.dev.vars` (nicht im Git): `TOTP_SECRET`,
 `SESSION_SECRET`, `API_KEY`, `TURNSTILE_SECRET`. Lokal ist `TOTP_SECRET` ein
 eigenes Test-Secret.
 
+## Deploy
+
+Jeder Push auf `main` wird von Cloudflare Workers Builds gebaut und geht live
+(Build command `npm run build`, Deploy command `npx wrangler deploy`). Die
+Cloudflare-App auf GitHub braucht dafür Zugriff auf dieses Repo
+(github.com/settings/installations → Cloudflare Workers and Pages).
+
+Von Hand: `npm run deploy`. Secrets setzen: `npx wrangler secret put <NAME>`.
+Live-Test ohne 2FA-Teil:
+`MD_API_KEY=$(cat ~/.config/md/api-key) node tools/test-api.mjs https://md.veerka.mp`
+
 ## Aufbau
 
 | Datei | Inhalt |
