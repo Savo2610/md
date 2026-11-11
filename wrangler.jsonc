@@ -52,9 +52,10 @@
     // Turnstile-Widget „md.veerka.mp“ (Modus managed, Domain md.veerka.mp).
     // Lokal überschreibt .dev.vars das mit Cloudflares Testschlüssel.
     "TURNSTILE_SITEKEY": "0x4AAAAAAF8K9TUipL_LWNRT",
-    // Google-Login: OAuth-Client „md.veerka.mp“ (Typ Webanwendung). Leer =
+    // Google-Login: OAuth-Client „md.veerka.mp“ im Google-Cloud-Projekt
+    // „md-veerka“ (Typ Webanwendung). Leer =
     // Anmelden ist ausgeschaltet. Das Secret dazu: GOOGLE_CLIENT_SECRET.
-    "GOOGLE_CLIENT_ID": ""
+    "GOOGLE_CLIENT_ID": "928223239315-f8lg7esljdd12n4plp61muoutfrpofbt.apps.googleusercontent.com"
   },
 
   "observability": { "enabled": true }
