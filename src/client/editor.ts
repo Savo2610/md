@@ -1,11 +1,11 @@
 // Der Editor: CodeMirror 6 + Yjs. Wird erst geladen, wenn jemand bearbeitet,
 // damit die reine Ansicht schnell bleibt.
 
-import { EditorView, keymap, drawSelection, placeholder, ViewPlugin, type ViewUpdate, dropCursor } from '@codemirror/view';
-import { EditorState, EditorSelection, type Extension } from '@codemirror/state';
+import { EditorView, keymap, drawSelection, placeholder, ViewPlugin, Decoration, type DecorationSet, type ViewUpdate, dropCursor } from '@codemirror/view';
+import { EditorState, EditorSelection, Compartment, RangeSetBuilder, type Extension } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import { syntaxHighlighting, HighlightStyle, indentUnit } from '@codemirror/language';
+import { syntaxHighlighting, HighlightStyle, indentUnit, syntaxTree } from '@codemirror/language';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { search, searchKeymap } from '@codemirror/search';
 import { autocompletion, completionKeymap, startCompletion, type CompletionContext, type Completion } from '@codemirror/autocomplete';
@@ -31,6 +31,7 @@ export interface EditorOptions {
   ensureCreated: () => Promise<boolean>;
   exists: boolean;
   name: string;
+  spellcheck: boolean;
   onStatus: (s: EditorStatus) => void;
   onNotice: (n: { type: string; edit?: boolean; to?: string }) => void;
   onTyping: () => void;
@@ -46,6 +47,7 @@ export interface EditorHandle {
   text(): string;
   setPreview(on: boolean): void;
   setName(name: string): void;
+  setSpellcheck(on: boolean): void;
   connect(): void;
   /** Wartet, bis der Stand vom Server da ist (verbindet bei Bedarf). */
   whenSynced(): Promise<void>;
@@ -55,13 +57,72 @@ export interface EditorHandle {
 
 // ── Aussehen ────────────────────────────────────────────────────────────────
 
+// ── Rechtschreibprüfung nur für Text ────────────────────────────────────────
+// Die Prüfung macht der Browser. Damit Adressen, Code und Formeln keine roten
+// Wellen bekommen, tragen diese Stellen spellcheck="false".
+
+const NO_SPELL_NODES = new Set(['URL', 'Autolink', 'InlineCode', 'FencedCode', 'CodeBlock', 'HTMLTag', 'HTMLBlock', 'LinkLabel', 'Comment', 'CommentBlock']);
+const NO_SPELL_PATTERNS = [
+  /(?:https?:\/\/)?\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b(?:\/[^\s)\]]*)?/gi, // md.veerka.mp, https://…
+  /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, // E-Mail
+  /\$\$[\s\S]*?\$\$|\$[^\s$](?:[^$\n]*[^\s$])?\$/g, // Formeln
+  /\{%[^%\n]*%\}/g, // {%youtube … %}
+  /^---\n[\s\S]*?\n---$/gm, // Front Matter
+];
+const noSpell = Decoration.mark({ attributes: { spellcheck: 'false', autocorrect: 'off' } });
+
+const spellExclusions = ViewPlugin.fromClass(class {
+  decorations: DecorationSet;
+  constructor(view: EditorView) { this.decorations = this.build(view); }
+  update(u: ViewUpdate) {
+    if (u.docChanged || u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) this.decorations = this.build(u.view);
+  }
+  build(view: EditorView): DecorationSet {
+    const ranges: [number, number][] = [];
+    for (const { from, to } of view.visibleRanges) {
+      syntaxTree(view.state).iterate({
+        from, to,
+        enter: node => {
+          if (!NO_SPELL_NODES.has(node.name)) return;
+          ranges.push([node.from, node.to]);
+          return false;
+        },
+      });
+      const text = view.state.sliceDoc(from, to);
+      for (const re of NO_SPELL_PATTERNS) {
+        re.lastIndex = 0;
+        for (const m of text.matchAll(re)) ranges.push([from + m.index!, from + m.index! + m[0].length]);
+      }
+    }
+    ranges.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const b = new RangeSetBuilder<Decoration>();
+    let cur: [number, number] | null = null;
+    for (const r of ranges) {
+      if (r[1] <= r[0]) continue;
+      if (cur && r[0] <= cur[1]) { cur[1] = Math.max(cur[1], r[1]); continue; }
+      if (cur) b.add(cur[0], cur[1], noSpell);
+      cur = [r[0], r[1]];
+    }
+    if (cur) b.add(cur[0], cur[1], noSpell);
+    return b.finish();
+  }
+}, { decorations: v => v.decorations });
+
+const spellAttrs = (on: boolean) => EditorView.contentAttributes.of({
+  spellcheck: on ? 'true' : 'false',
+  autocorrect: on ? 'on' : 'off',
+  autocapitalize: 'sentences',
+  'aria-label': 'Dokument',
+});
+
 const highlight = HighlightStyle.define([
   { tag: t.heading, fontWeight: '700' },
   { tag: t.strong, fontWeight: '700' },
   { tag: t.emphasis, fontStyle: 'italic' },
   { tag: t.strikethrough, textDecoration: 'line-through' },
   { tag: [t.processingInstruction, t.meta, t.contentSeparator, t.labelName], color: 'var(--markup)' },
-  { tag: [t.url, t.link], color: 'var(--markup)' },
+  // Nur die Adresse in () ist blass, der Linktext bleibt normaler Text.
+  { tag: t.url, color: 'var(--markup)' },
   { tag: t.monospace, fontFamily: 'var(--mono)', fontSize: '0.92em' },
   { tag: t.quote, color: 'var(--fg-soft)' },
   // Code in Codeblöcken, zurückhaltend
@@ -478,6 +539,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
     enhance(o.preview, o.katexCss);
   };
 
+  const spellComp = new Compartment();
   const view = new EditorView({
     parent: o.parent,
     state: EditorState.create({
@@ -497,7 +559,8 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         search({ top: false }),
         autocompletion({ override: [slashSource(slashItems(pickImage))], icons: false, activateOnTyping: true }),
         placeholder(o.exists ? '' : 'Einfach losschreiben. Mit / am Zeilenanfang fügst du Tabellen, Boxen, Bilder und mehr ein.'),
-        EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'on', autocapitalize: 'sentences', 'aria-label': 'Dokument' }),
+        spellComp.of(spellAttrs(o.spellcheck)),
+        spellExclusions,
         yCollab(ytext, awareness, { undoManager }),
         selectionToolbar(),
         EditorView.domEventHandlers({
@@ -546,6 +609,9 @@ export function mountEditor(o: EditorOptions): EditorHandle {
     view,
     text: () => ytext.toString(),
     setPreview(on) { previewOn = on; if (on) updatePreview(); },
+    setSpellcheck(on) {
+      view.dispatch({ effects: spellComp.reconfigure(spellAttrs(on)) });
+    },
     setName(name) {
       awareness.setLocalStateField('user', { name: name || 'Gast', color, colorLight: color + '33' });
     },

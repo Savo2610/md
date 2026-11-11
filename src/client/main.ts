@@ -80,6 +80,7 @@ function startDoc(boot: Boot) {
   document.body.prepend(bar);
 
   let mode: Mode = exists && !startInEdit ? 'view' : 'edit';
+  let spellcheck = store.get('md:spellcheck') !== '0';
   let editor: EditorHandle | null = null;
   let editorLoading: Promise<EditorHandle> | null = null;
   let lastStatus: EditorStatus | null = null;
@@ -148,6 +149,7 @@ function startDoc(boot: Boot) {
         katexCss: boot.katexCss,
         exists,
         name: store.get('md:name') || '',
+        spellcheck,
         wsUrl: () => {
           const u = new URL(`/api/docs/${encodeURIComponent(id)}/ws`, location.href);
           u.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -365,6 +367,11 @@ function startDoc(boot: Boot) {
       ['Herunterladen (.md)', () => { if (exists) location.href = `/${encodeURIComponent(id)}.md?download=1`; else toast('Noch leer.'); }],
     ];
     if (canEdit()) items.push(['Adresse ändern', renameDialog]);
+    if (mode !== 'view') items.push([spellcheck ? 'Rechtschreibprüfung aus' : 'Rechtschreibprüfung an', () => {
+      spellcheck = !spellcheck;
+      store.set('md:spellcheck', spellcheck ? '1' : '0');
+      editor?.setSpellcheck(spellcheck);
+    }]);
     if (exists && !editKey) items.push(['Mit Code freischalten', () => unlockDialog(id, key => {
       if (!key) return;
       editKey = key;
