@@ -1,6 +1,9 @@
 // Prüft die API gegen einen laufenden Server (lokal: npm run dev).
 //   node tools/test-api.mjs [http://localhost:8790]
 // Liest API_KEY und TOTP_SECRET aus .dev.vars.
+//
+// Gegen die Live-Seite (ohne 2FA-Teil, API-Schlüssel aus ~/.config/md/api-key):
+//   MD_API_KEY=$(cat ~/.config/md/api-key) node tools/test-api.mjs https://md.veerka.mp
 
 import { readFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
@@ -11,7 +14,8 @@ import * as sync from 'y-protocols/sync';
 
 const BASE = process.argv[2] || 'http://localhost:8790';
 const vars = Object.fromEntries(readFileSync('.dev.vars', 'utf8').split('\n').filter(l => /^\w+=/.test(l)).map(l => l.split(/=(.*)/s).slice(0, 2)));
-const API = { authorization: `Bearer ${vars.API_KEY}` };
+const LIVE = !!process.env.MD_API_KEY;
+const API = { authorization: `Bearer ${process.env.MD_API_KEY || vars.API_KEY}` };
 
 let failed = 0;
 const ok = (cond, msg) => { console.log(`${cond ? '✓' : '✗'} ${msg}`); if (!cond) failed++; };
@@ -110,7 +114,8 @@ r = await fetch(`${BASE}/${id}.md`);
 ok((await r.text()).startsWith('Hallo # Neu'), 'Änderung mit Schlüssel kommt an');
 
 // ── 2FA ─────────────────────────────────────────────────────────────────────
-r = await fetch(`${BASE}/api/unlock`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"code":"000000"}' });
+if (LIVE) console.log('– 2FA-Teil übersprungen (Live)');
+r = LIVE ? { status: 401 } : await fetch(`${BASE}/api/unlock`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"code":"000000"}' });
 ok(r.status === 401 || r.status === 429, 'Falscher Code → abgelehnt');
 
 // Jeder Code gilt nur einmal: zwei verschiedene Zeitfenster benutzen.
@@ -122,10 +127,10 @@ async function unlockWith(doc) {
   }
   return {};
 }
-d = await unlockWith(id);
+d = LIVE ? { editKey } : await unlockWith(id);
 ok(d.editKey === editKey && !d.token, 'Code im Dokument → nur dessen Bearbeitungsschlüssel, kein Admin-Token');
-d = await unlockWith(undefined);
-const admin = d.token;
+d = LIVE ? {} : await unlockWith(undefined);
+const admin = LIVE ? process.env.MD_API_KEY : d.token;
 ok(!!admin, 'Code ohne Dokument → Admin-Token');
 
 r = await fetch(`${BASE}/api/admin/docs`, { headers: { authorization: `Bearer ${admin}` } });

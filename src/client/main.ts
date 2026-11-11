@@ -476,6 +476,8 @@ function loadTurnstile(siteKey: string) {
       sitekey: siteKey,
       appearance: 'interaction-only',
       callback: (t: string) => { current = t; resolveToken?.(t); },
+      // Nur wenn Cloudflare unsicher ist, erscheint ein Kasten zum Bestätigen.
+      'before-interactive-callback': () => toast('Kurz unten rechts bestätigen, dann wird das Dokument gespeichert.'),
       'expired-callback': () => { current = null; },
     });
   });
