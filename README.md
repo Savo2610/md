@@ -47,10 +47,11 @@ eigenes Test-Secret.
 
 ## Deploy
 
-Jeder Push auf `main` wird von Cloudflare Workers Builds gebaut und geht live
-(Build command `npm run build`, Deploy command `npx wrangler deploy`). Die
-Cloudflare-App auf GitHub braucht dafür Zugriff auf dieses Repo
-(github.com/settings/installations → Cloudflare Workers and Pages).
+Jeder Push auf `main` geht über GitHub Actions live
+(`.github/workflows/deploy.yml`: Typprüfung, Build, `wrangler deploy`).
+Das Repo-Secret `CLOUDFLARE_API_TOKEN` stammt aus dem Cloudflare-Dashboard
+(Workers → md → Settings → Builds → „API token for external CI/CD“) und darf
+nur diesen Worker deployen.
 
 Von Hand: `npm run deploy`. Secrets setzen: `npx wrangler secret put <NAME>`.
 Live-Test ohne 2FA-Teil:

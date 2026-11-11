@@ -1,0 +1,39 @@
+# Jeder Push auf main geht live.
+#
+# Läuft über GitHub Actions statt Cloudflare Workers Builds, weil sich das
+# Repo im Cloudflare-Dashboard nicht verbinden ließ. Das Token
+# (Repo-Secret CLOUDFLARE_API_TOKEN) stammt aus dem Dashboard:
+# Workers → md → Settings → Builds → „API token for external CI/CD“
+# und darf nur diesen Worker deployen.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: bed47eeeb8954f063767ab99acfc86c6
+          command: deploy
