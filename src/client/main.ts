@@ -406,10 +406,7 @@ function startDoc(boot: Boot) {
       renderBar();
       toast('Freigeschaltet. Du kannst dieses Dokument jetzt bearbeiten.');
     })]);
-    if (isAdmin()) {
-      items.push(['Verwaltung (alle Dokumente)', () => (location.href = '/admin')]);
-      if (exists) items.push(['Dokument löschen', del]);
-    }
+    if (isAdmin() && exists) items.push(['Dokument löschen', del]);
     menu('right', items);
   }
 
