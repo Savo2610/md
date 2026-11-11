@@ -6,7 +6,7 @@
 import { enhance } from './enhance';
 import type { EditorHandle, EditorStatus } from './editor';
 import { titleOf, slugify } from '../shared/title';
-import { $, el, dialog, toast, store, adminToken, unlockDialog, recent, ago, menu, type MenuItem } from './ui';
+import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, recent, ago, menu, type MenuItem } from './ui';
 import { account, accountItems, type User } from './account';
 
 interface Boot {
@@ -19,10 +19,12 @@ interface Boot {
   user?: User | null;
   login?: boolean;
   editKey?: string;
+  admin?: boolean;
 }
 
 const boot: Boot = JSON.parse($('#boot')!.textContent || '{}');
 account.init(boot);
+setAccountAdmin(!!boot.admin);
 
 /** Als App vom Homescreen gestartet (nicht im Browser-Tab). */
 const standalone = matchMedia('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
@@ -365,13 +367,8 @@ function startDoc(boot: Boot) {
   function openRecent() {
     const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')]];
     const list = recent.list().filter(r => r.id !== id);
-    items.push(el('div', { class: 'menu-label' }, 'Zuletzt geöffnet'));
-    if (!list.length) {
-      items.push(el('p', { class: 'menu-empty' }, account.user
-        ? 'Noch nichts. Dokumente, die du öffnest, erscheinen hier – auf allen deinen Geräten.'
-        : 'Noch nichts. Dokumente, die du öffnest, erscheinen hier – nur in diesem Browser.'));
-    }
-    for (const r of list.slice(0, 15)) {
+    if (list.length) items.push(el('div', { class: 'menu-label' }, 'Zuletzt geöffnet'));
+    for (const r of list.slice(0, 5)) {
       items.push(el('a', { href: `/${encodeURIComponent(r.id)}`, class: 'recent' },
         el('span', { class: 'recent-title' }, r.title || r.id),
         el('span', { class: 'recent-meta' }, `${ago(r.at)}${r.own ? ' · bearbeitbar' : ''}${r.tags?.length ? ' · ' + r.tags.join(', ') : ''}`),
@@ -379,6 +376,7 @@ function startDoc(boot: Boot) {
     }
     if (list.length || account.user) items.push(el('a', { href: '/home', class: 'recent all' }, el('span', { class: 'recent-title' }, 'Alle Dokumente …')));
     items.push(...accountItems());
+    items.push(el('a', { href: '/datenschutz', class: 'menu-fine' }, 'Datenschutz'));
     menu('left', items);
   }
 
@@ -408,7 +406,7 @@ function startDoc(boot: Boot) {
       renderBar();
       toast('Freigeschaltet. Du kannst dieses Dokument jetzt bearbeiten.');
     })]);
-    if (adminToken()) {
+    if (isAdmin()) {
       items.push(['Verwaltung (alle Dokumente)', () => (location.href = '/admin')]);
       if (exists) items.push(['Dokument löschen', del]);
     }
@@ -417,7 +415,7 @@ function startDoc(boot: Boot) {
 
   async function del() {
     if (!confirm('Dieses Dokument mit allen Bildern endgültig löschen? Das lässt sich nicht rückgängig machen.')) return;
-    const res = await fetch(`/api/docs/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { authorization: `Bearer ${adminToken()}` } });
+    const res = await fetch(`/api/docs/${encodeURIComponent(id)}`, { method: 'DELETE', headers: adminHeaders() });
     if (res.ok) { store.del(keyName); recent.remove(id); location.href = '/admin'; }
     else toast((await res.json().catch(() => ({}))).error || 'Löschen fehlgeschlagen.');
   }

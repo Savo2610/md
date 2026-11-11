@@ -21,6 +21,8 @@ export interface Env {
   API_KEY?: string;
   TURNSTILE_SECRET?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /** Google-Konto (E-Mail), das ohne 2FA-Code auf /admin darf. */
+  ADMIN_EMAIL?: string;
 }
 
 export const registry = (env: Env) => env.REGISTRY.get(env.REGISTRY.idFromName('main'));

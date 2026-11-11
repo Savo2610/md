@@ -4,7 +4,7 @@
 // Mit Konto: alle Dokumente des Kontos auf jedem Gerät, mit eigenen Tags
 // zum Filtern. So lässt sich md wie ein Notizbuch benutzen.
 
-import { $, el, recent, ago, toast, store, menu, type Recent } from './ui';
+import { $, el, recent, ago, toast, store, menu, isAdmin, type MenuItem, type Recent } from './ui';
 import { account, accountItems, avatar } from './account';
 import { tagChips, tagDialog } from './tags';
 
@@ -36,8 +36,7 @@ export function start() {
   const search = el('input', { type: 'search', class: 'search', placeholder: 'Suchen …', 'aria-label': 'Suchen' }) as HTMLInputElement;
   const tagBar = el('div', { class: 'tag-bar', role: 'toolbar', 'aria-label': 'Nach Tag filtern' });
   const list = el('ul', { class: 'notes' });
-  const foot = el('div', { class: 'home-foot' });
-  main.append(create, search, tagBar, list, foot);
+  main.append(create, search, tagBar, list);
 
   let filter = store.get(TAG_FILTER) || '';
   const setFilter = (t: string) => {
@@ -53,12 +52,15 @@ export function start() {
     const u = account.user;
     if (u) {
       const b = el('button', { type: 'button', class: 't avatar-btn', title: u.email || u.name, 'aria-label': 'Konto' }, avatar(u));
-      b.addEventListener('click', () => menu('right', [
-        ...accountItems(),
-        ['Konto löschen …', () => {
+      b.addEventListener('click', () => {
+        const items: MenuItem[] = [...accountItems()];
+        if (isAdmin()) items.push(['Verwaltung (alle Dokumente)', () => (location.href = '/admin')]);
+        items.push(['Konto löschen …', () => {
           if (confirm('Konto löschen? Deine Dokumentliste und Tags verschwinden. Die Dokumente selbst bleiben unter ihren Adressen erhalten.')) account.deleteAccount();
-        }],
-      ]));
+        }]);
+        items.push(el('a', { href: '/datenschutz', class: 'menu-fine' }, 'Datenschutz'));
+        menu('right', items);
+      });
       right.append(b);
     } else if (account.enabled) {
       const b = el('button', { type: 'button', class: 't', title: 'Mit Google anmelden' }, 'Anmelden');
@@ -95,11 +97,7 @@ export function start() {
 
     list.replaceChildren();
     if (!items.length) {
-      list.append(el('li', { class: 'notes-empty' }, q || filter
-        ? 'Nichts gefunden.'
-        : account.user
-          ? 'Noch keine Dokumente. Was du anlegst oder öffnest, erscheint hier – auf allen Geräten, auf denen du angemeldet bist.'
-          : 'Noch keine Dokumente. Was du hier öffnest oder schreibst, erscheint in dieser Liste – nur auf diesem Gerät.'));
+      list.append(el('li', { class: 'notes-empty' }, q || filter ? 'Nichts gefunden.' : 'Noch keine Dokumente.'));
     }
     for (const r of items) {
       const actions = el('div', { class: 'note-actions' });
@@ -131,13 +129,6 @@ export function start() {
       ));
     }
 
-    foot.replaceChildren();
-    if (!account.user && account.enabled) {
-      const b = el('button', { type: 'button', class: 'link' }, 'Mit Google anmelden');
-      b.addEventListener('click', () => account.login('/home'));
-      foot.append(el('p', { class: 'hint' }, b, ', um deine Dokumente auf allen Geräten zu haben und mit Tags zu ordnen.'));
-    }
-    if (account.enabled) foot.append(el('p', { class: 'hint' }, el('a', { href: '/datenschutz' }, 'Datenschutz')));
   }
 
   search.addEventListener('input', render);

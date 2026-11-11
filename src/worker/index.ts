@@ -70,13 +70,26 @@ export function normalizeId(raw: string): string | null {
   return s;
 }
 
-/** Admin: Bearer-Token aus der 2FA-Freischaltung oder der API-Schlüssel. */
+/** Angemeldetes Google-Konto mit der E-Mail aus ADMIN_EMAIL (Secret). */
+function isAdminUser(user: User | null, env: Env): boolean {
+  return !!user?.email && !!env.ADMIN_EMAIL && user.email.toLowerCase() === env.ADMIN_EMAIL.trim().toLowerCase();
+}
+
+/**
+ * Admin: Bearer-Token aus der 2FA-Freischaltung, der API-Schlüssel oder das
+ * Admin-Google-Konto (Cookie). Beim Cookie zusätzlich: Änderungen nur von
+ * dieser Seite aus (SameSite=Lax hält fremde POSTs ohnehin fern).
+ */
 async function isAdmin(req: Request, env: Env): Promise<boolean> {
   const auth = req.headers.get('authorization') || '';
   const token = auth.replace(/^Bearer\s+/i, '');
-  if (!token) return false;
-  if (env.API_KEY && timingSafeEqual(token, env.API_KEY)) return true;
-  return verifyToken(env.SESSION_SECRET, token);
+  if (token) {
+    if (env.API_KEY && timingSafeEqual(token, env.API_KEY)) return true;
+    return verifyToken(env.SESSION_SECRET, token);
+  }
+  const from = req.headers.get('origin');
+  if (req.method !== 'GET' && from && from !== origin(req)) return false;
+  return isAdminUser(await currentUser(req, env), env);
 }
 
 async function canEdit(req: Request, env: Env, id: string): Promise<boolean> {
@@ -126,6 +139,8 @@ interface Boot {
   login?: boolean;
   /** Bearbeitungsschlüssel aus dem Konto (neues Gerät). */
   editKey?: string;
+  /** Angemeldet mit dem Admin-Konto: /admin ohne 2FA-Code. */
+  admin?: boolean;
 }
 
 const loginEnabled = (env: Env) => !!env.GOOGLE_CLIENT_ID || env.DEV_LOGIN === '1';
@@ -182,7 +197,7 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
   if (wantsMarkdown) return rawMarkdown(info, id, false);
 
   const user = await currentUser(req, env);
-  const common = { page: 'doc' as const, id, user: publicUser(user), login: loginEnabled(env) };
+  const common = { page: 'doc' as const, id, user: publicUser(user), login: loginEnabled(env), admin: isAdminUser(user, env) };
   if (!info.exists) {
     // Angemeldet braucht es keinen Spam-Schutz.
     return page('Neues Dokument', `<main id="app"></main>`, { ...common, exists: false, siteKey: user ? undefined : env.TURNSTILE_SITEKEY }, 200);
@@ -513,10 +528,11 @@ export default {
     }
     if (path === '/home') {
       const user = await currentUser(req, env);
-      return page('md', '<main id="app"></main>', { page: 'home', user: publicUser(user), login: loginEnabled(env) });
+      return page('md', '<main id="app"></main>', { page: 'home', user: publicUser(user), login: loginEnabled(env), admin: isAdminUser(user, env) });
     }
     if (path === '/admin') {
-      return page('Übersicht', '<main id="app"></main>', { page: 'admin' });
+      const user = await currentUser(req, env);
+      return page('Übersicht', '<main id="app"></main>', { page: 'admin', admin: isAdminUser(user, env) });
     }
     if (path === '/datenschutz') return privacyPage();
     if (path.startsWith('/i/')) {
@@ -579,7 +595,7 @@ function privacyPage(): Response {
 <h2>Hosting</h2>
 <p>Die Seite läuft bei Cloudflare (Workers, Speicher in Durable Objects und R2). Cloudflare verarbeitet dabei technisch notwendige Verbindungsdaten.</p>
 <h2>Kontakt</h2>
-<p>Fragen und Löschwünsche: <a href="mailto:savogniner@gmail.com">savogniner@gmail.com</a></p>
+<p>Fragen und Löschwünsche: <a href="mailto:datenschutz@veerka.mp">datenschutz@veerka.mp</a></p>
 <p><a href="/home">Zur Übersicht</a></p>
 </article></main>
 </body>

@@ -207,6 +207,14 @@ if (!LIVE && vars.DEV_LOGIN === '1') {
   ok(r.status === 401, 'Sitzungs-Cookie gilt nicht als Admin-Token');
   r = await fetch(`${BASE}/api/me`, { headers: { cookie: `md_session=${admin}` } });
   ok(r.status === 401, 'Admin-Token gilt nicht als Sitzung');
+  if (vars.ADMIN_EMAIL === 'test@localhost') {
+    r = await fetch(`${BASE}/api/admin/docs`, { headers: C });
+    ok(r.status === 200, 'Admin-Konto (ADMIN_EMAIL) kommt ohne Code in die Übersicht');
+    r = await fetch(`${BASE}/api/docs/${id}/pin`, { method: 'POST', headers: { ...C, 'content-type': 'application/json', origin: 'https://evil.example' }, body: '{"pinned":true}' });
+    ok(r.status === 401, 'Admin per Cookie: fremde Herkunft abgelehnt');
+    r = await fetch(`${BASE}/admin`, { headers: C });
+    ok((await r.text()).includes('"admin":true'), '/admin weiß, dass das Konto Admin ist');
+  }
 
   const own = `konto-test-${Date.now().toString(36)}`;
   r = await fetch(`${BASE}/api/docs/${own}/create`, { method: 'POST', headers: { ...C, 'content-type': 'application/json' }, body: '{}' });

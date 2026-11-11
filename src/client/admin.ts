@@ -1,6 +1,6 @@
 // Übersicht aller Dokumente (/admin). Zugang mit 2FA-Code.
 
-import { $, el, toast, adminToken, setAdminToken, codeForm, unlock } from './ui';
+import { $, el, toast, adminToken, adminHeaders, isAdmin, setAdminToken, codeForm, unlock } from './ui';
 
 interface DocSummary {
   id: string; title: string; snippet: string; created: number; updated: number;
@@ -21,7 +21,7 @@ export function start() {
   const main = el('div', { class: 'admin' });
   app.append(main);
 
-  if (!adminToken()) return login(main);
+  if (!isAdmin()) return login(main);
   list(main);
 }
 
@@ -39,14 +39,18 @@ function login(main: HTMLElement) {
 }
 
 async function list(main: HTMLElement, q = '') {
-  const res = await fetch(`/api/admin/docs?q=${encodeURIComponent(q)}`, { headers: { authorization: `Bearer ${adminToken()}` } });
+  const res = await fetch(`/api/admin/docs?q=${encodeURIComponent(q)}`, { headers: adminHeaders() });
   if (res.status === 401) { setAdminToken(null); return login(main); }
   const data: { docs: DocSummary[]; total: number; bytes: number } = await res.json();
 
+  // Abmelden nur für den 2FA-Zugang; mit dem Google-Konto meldet man sich auf /home ab.
   const right = $('.bar-right')!;
-  const logout = el('button', { type: 'button', class: 't' }, 'Abmelden');
-  logout.addEventListener('click', () => { setAdminToken(null); login(main); right.replaceChildren(); });
-  right.replaceChildren(logout);
+  right.replaceChildren();
+  if (adminToken()) {
+    const logout = el('button', { type: 'button', class: 't' }, 'Abmelden');
+    logout.addEventListener('click', () => { setAdminToken(null); login(main); right.replaceChildren(); });
+    right.append(logout);
+  }
 
   const search = el('input', { type: 'search', placeholder: 'Suchen …', value: q, class: 'search', 'aria-label': 'Suchen' }) as HTMLInputElement;
   let t: ReturnType<typeof setTimeout>;
@@ -60,7 +64,7 @@ async function list(main: HTMLElement, q = '') {
     pin.checked = d.pinned;
     pin.addEventListener('change', async () => {
       const r = await fetch(`/api/docs/${encodeURIComponent(d.id)}/pin`, {
-        method: 'POST', headers: { authorization: `Bearer ${adminToken()}`, 'content-type': 'application/json' },
+        method: 'POST', headers: { ...adminHeaders(), 'content-type': 'application/json' },
         body: JSON.stringify({ pinned: pin.checked }),
       });
       if (!r.ok) { pin.checked = !pin.checked; toast('Ging nicht.'); }
@@ -68,7 +72,7 @@ async function list(main: HTMLElement, q = '') {
     const del = el('button', { type: 'button', class: 't danger' }, 'Löschen');
     del.addEventListener('click', async () => {
       if (!confirm(`„${d.title || d.id}“ mit allen Bildern endgültig löschen?`)) return;
-      const r = await fetch(`/api/docs/${encodeURIComponent(d.id)}`, { method: 'DELETE', headers: { authorization: `Bearer ${adminToken()}` } });
+      const r = await fetch(`/api/docs/${encodeURIComponent(d.id)}`, { method: 'DELETE', headers: adminHeaders() });
       if (r.ok) { row.remove(); toast('Gelöscht.'); } else toast('Löschen fehlgeschlagen.');
     });
     const row = el('tr', {},

@@ -152,7 +152,8 @@ export async function auth(req: Request, env: Env, url: URL): Promise<Response> 
     if (!valid) return errorPage('Anmeldung fehlgeschlagen (Token ungültig).', 502);
     return startSession(req, env, {
       sub: claims.sub as string,
-      email: String(claims.email || ''),
+      // Nur bestätigte Adressen: daran hängt der Admin-Zugang (ADMIN_EMAIL).
+      email: claims.email_verified === true ? String(claims.email || '') : '',
       name: String(claims.name || claims.given_name || claims.email || ''),
       picture: typeof claims.picture === 'string' && claims.picture.startsWith('https://') ? claims.picture : '',
     }, pending.next);

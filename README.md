@@ -31,7 +31,8 @@ Durable Object pro Dokument, Bilder in R2.
   entfällt der Turnstile-Check beim Anlegen. Ohne `GOOGLE_CLIENT_ID` ist
   Anmelden ausgeblendet.
 - `md.veerka.mp/<id>.md` liefert das reine Markdown (für KI-Agenten, Download).
-- `md.veerka.mp/admin`: alle Dokumente, Löschen, „Behalten“ (2FA-Code).
+- `md.veerka.mp/admin`: alle Dokumente, Löschen, „Behalten“ (2FA-Code oder
+  angemeldet mit dem Google-Konto aus dem Secret `ADMIN_EMAIL`).
 
 ## Aufräumen und Spam
 
@@ -55,7 +56,7 @@ npm run typecheck
 ```
 
 Lokale Secrets stehen in `.dev.vars` (nicht im Git): `TOTP_SECRET`,
-`SESSION_SECRET`, `API_KEY`, `TURNSTILE_SECRET`. Lokal ist `TOTP_SECRET` ein
+`SESSION_SECRET`, `API_KEY`, `TURNSTILE_SECRET`, `ADMIN_EMAIL`. Lokal ist `TOTP_SECRET` ein
 eigenes Test-Secret. `DEV_LOGIN=1` meldet lokal ohne Google als „Testkonto“
 an (nie in Produktion setzen); die Konto-Tests in `npm test` brauchen das.
 

@@ -94,6 +94,16 @@ export function adminToken(): string | null {
   return null;
 }
 
+/** Mit dem Admin-Google-Konto angemeldet (Server sagt es in der Seite). */
+let accountAdmin = false;
+export function setAccountAdmin(v: boolean) { accountAdmin = v; }
+export const isAdmin = () => !!adminToken() || accountAdmin;
+/** Header für Admin-Anfragen: Token, falls vorhanden; sonst reicht das Cookie. */
+export function adminHeaders(): Record<string, string> {
+  const t = adminToken();
+  return t ? { authorization: `Bearer ${t}` } : {};
+}
+
 export function setAdminToken(token: string | null, ttlSeconds = 0) {
   if (!token) store.del('md:admin');
   else store.set('md:admin', JSON.stringify({ token, exp: Date.now() + ttlSeconds * 1000 - 60_000 }));
@@ -190,9 +200,7 @@ export async function unlock(code: string, doc?: string): Promise<{ ok: true; ed
 }
 
 export function unlockDialog(docId: string, done: (editKey: string | null) => void) {
-  const body = el('div', {},
-    el('p', { class: 'hint' }, 'Code aus der Authenticator-App eingeben. Danach kannst du dieses Dokument in diesem Browser bearbeiten.'),
-  );
+  const body = el('div', {});
   const d = dialog('Mit Code freischalten', body);
   body.append(codeForm(async code => {
     const r = await unlock(code, docId);
