@@ -191,7 +191,7 @@ ok(r.status === 301 && r.headers.get('location') === `/${encodeURIComponent('gro
 r = await fetch(`${BASE}/`, { redirect: 'manual' });
 ok(r.status === 302 && /^\/[a-z0-9]{10}$/.test(r.headers.get('location')), 'Startseite leitet auf zufällige ID um');
 r = await fetch(`${BASE}/robots.txt`);
-ok((await r.text()).includes('Disallow: /'), 'robots.txt sperrt alles');
+ok(!/^Disallow: \/\s*$/m.test((await r.text()).split('END Cloudflare Managed Content').pop()), 'robots.txt sperrt KI-Assistenten nicht');
 
 console.log(failed ? `\n${failed} fehlgeschlagen` : '\nAlles grün');
 process.exit(failed ? 1 : 0);

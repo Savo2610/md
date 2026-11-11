@@ -30,7 +30,9 @@ export function randomId(length = 10): string {
       if (b < 252 && out.length < length) out.push(alphabet[b % 36]);
     }
   }
-  return out.join('');
+  const id = out.join('');
+  // Immer Buchstaben und Ziffern gemischt, damit isRandomId() sie sicher erkennt.
+  return /\d/.test(id) && /[a-z]/.test(id) ? id : randomId(length);
 }
 
 /** Sieht aus wie eine von randomId() erzeugte Adresse (10 Zeichen, Buchstaben und Ziffern gemischt). */

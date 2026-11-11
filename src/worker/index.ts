@@ -399,7 +399,11 @@ export default {
       return env.ASSETS.fetch(req);
     }
     if (path === '/robots.txt') {
-      return new Response('User-agent: *\nDisallow: /\n', { headers: { 'content-type': 'text/plain' } });
+      // Keine Sperre: KI-Assistenten, die ein Nutzer einen Link lesen lässt
+      // (Claude-User, ChatGPT-User …), halten sich an robots.txt. Aus
+      // Suchmaschinen hält die Seiten der Header X-Robots-Tag: noindex fern.
+      // Trainings-Crawler sperrt Cloudflare (verwaltete robots.txt davor).
+      return new Response('# Dokumente sind per noindex von Suchmaschinen ausgenommen.\n', { headers: { 'content-type': 'text/plain' } });
     }
     if (path.startsWith('/api/')) {
       try {
