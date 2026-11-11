@@ -1,0 +1,52 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+
+  // Der Name muss exakt dem Worker-Namen im Cloudflare-Dashboard entsprechen,
+  // sonst legt ein Build einen zweiten Worker an.
+  "name": "md",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-08-04",
+
+  // run_worker_first, weil die Startseite und jede Dokument-URL vom Worker
+  // kommen. Nur /assets/* und /fonts/* reicht er an die statischen Dateien
+  // weiter (env.ASSETS).
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+
+  // Custom Domain legt den DNS-Eintrag selbst an und hält ihn.
+  "routes": [{ "pattern": "md.veerka.mp", "custom_domain": true }],
+
+  // Doc: ein Objekt pro Dokument (Text als Yjs-Updates in SQLite, WebSockets
+  //      fürs gemeinsame Bearbeiten).
+  // Registry: genau eine Instanz. Übersicht aller Dokumente für die
+  //      Admin-Seite, dazu Fehlversuche und verbrauchte 2FA-Codes.
+  "durable_objects": {
+    "bindings": [
+      { "name": "DOC", "class_name": "Doc" },
+      { "name": "REGISTRY", "class_name": "Registry" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Doc", "Registry"] }],
+
+  // Bilder. Nicht öffentlich, ausgeliefert wird über /i/<dokument>/<datei>.
+  "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "md-veerka-mp" }],
+
+  // Burst-Bremsen pro IP (period darf nur 10 oder 60 sein, Zähler pro Standort).
+  "ratelimits": [
+    { "name": "CREATE_LIMIT", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
+    { "name": "UPLOAD_LIMIT", "namespace_id": "2002", "simple": { "limit": 30, "period": 60 } }
+  ],
+
+  // Secrets (wrangler secret put): TOTP_SECRET, SESSION_SECRET, API_KEY,
+  // TURNSTILE_SECRET. Lokal stehen sie in .dev.vars.
+  "vars": {
+    // Turnstile-Widget „md.veerka.mp“ (Modus managed, Domain md.veerka.mp).
+    // Lokal überschreibt .dev.vars das mit Cloudflares Testschlüssel.
+    "TURNSTILE_SITEKEY": "0x4AAAAAAF8K9TUipL_LWNRT"
+  },
+
+  "observability": { "enabled": true }
+}
