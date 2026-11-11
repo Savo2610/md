@@ -17,7 +17,7 @@
 //   POST   /api/docs/<id>/images     Bild hochladen (X-Edit-Key)
 //   POST   /api/docs/<id>/pin        behalten ja/nein (Admin)
 //   POST   /api/docs/<id>/rename     neue Adresse (X-Edit-Key); die alte leitet weiter
-//   GET    /api/docs/<id>/title?url= Seitentitel für eingefügte Links (X-Edit-Key)
+//   GET    /api/docs/<id>/title?url= Titel bzw. Bild für eingefügte Links (X-Edit-Key)
 //   GET    /api/docs/<id>/ws         WebSocket fürs gemeinsame Bearbeiten
 //   POST   /api/unlock               2FA-Code → Bearbeitungsschlüssel für ein Dokument,
 //                                    oder (ohne Dokument) Admin-Token für /admin
@@ -275,7 +275,7 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
     if (!(await canEdit(req, env, id))) return fail(401, 'Keine Berechtigung.');
     const { success } = await env.UPLOAD_LIMIT.limit({ key: ip(req) });
     if (!success) return fail(429, 'Zu viele Anfragen.');
-    return json({ title: await pageTitle(url.searchParams.get('url') || '') });
+    return json(await linkPreview(url.searchParams.get('url') || ''));
   }
 
   if (action === 'pin' && method === 'POST') {
@@ -289,21 +289,29 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
 }
 
 /**
- * Holt den Titel einer Seite für eingefügte Links: og:title, sonst <title>.
+ * Vorschau für eingefügte Links: Seitentitel (og:title, sonst <title>).
+ * Ist die Adresse selbst ein Bild, oder ein geteiltes Google-Fotos-Bild,
+ * kommt zusätzlich `image` zurück – der Editor macht dann ![](bild) daraus.
  * Nur http(s), keine IP-Adressen, höchstens 4 Sekunden und 256 KB.
  */
-async function pageTitle(raw: string): Promise<string> {
+async function linkPreview(raw: string): Promise<{ title: string; image?: string }> {
+  const none = { title: '' };
   let target: URL;
-  try { target = new URL(raw); } catch { return ''; }
-  if (!/^https?:$/.test(target.protocol)) return '';
-  if (/^[\d.]+$|^\[|^localhost$/i.test(target.hostname) || !target.hostname.includes('.')) return '';
+  try { target = new URL(raw); } catch { return none; }
+  if (!/^https?:$/.test(target.protocol)) return none;
+  if (/^[\d.]+$|^\[|^localhost$/i.test(target.hostname) || !target.hostname.includes('.')) return none;
   try {
     const res = await fetch(target.toString(), {
-      headers: { 'user-agent': 'Mozilla/5.0 (compatible; md-link-preview)', accept: 'text/html', 'accept-language': 'de,en;q=0.8' },
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; md-link-preview)', accept: 'text/html,image/*;q=0.9', 'accept-language': 'de,en;q=0.8' },
       redirect: 'follow',
       signal: AbortSignal.timeout(4000),
     });
-    if (!res.ok || !(res.headers.get('content-type') || '').includes('html') || !res.body) return '';
+    const type = res.headers.get('content-type') || '';
+    if (res.ok && type.startsWith('image/')) {
+      res.body?.cancel().catch(() => {});
+      return { title: '', image: target.toString() };
+    }
+    if (!res.ok || !type.includes('html') || !res.body) return none;
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let html = '';
@@ -311,15 +319,28 @@ async function pageTitle(raw: string): Promise<string> {
       const { done, value } = await reader.read();
       if (done) break;
       html += dec.decode(value, { stream: true });
-      if (/<\/title>|<body/i.test(html)) break;
+      if (/<body/i.test(html)) break;
     }
     reader.cancel().catch(() => {});
-    const og = /<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']*)["']/i.exec(html)
-      || /<meta[^>]+content=["']([^"']*)["'][^>]*property=["']og:title["']/i.exec(html);
-    const t = og?.[1] || /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] || '';
-    return decodeEntities(t).replace(/\s+/g, ' ').trim().slice(0, 140);
+    const meta = (prop: string) =>
+      (new RegExp(`<meta[^>]+property=["']${prop}["'][^>]*content=["']([^"']*)["']`, 'i').exec(html)
+        || new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*property=["']${prop}["']`, 'i').exec(html))?.[1] || '';
+    const t = meta('og:title') || /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] || '';
+    const title = decodeEntities(t).replace(/\s+/g, ' ').trim().slice(0, 140);
+
+    // Google Fotos: geteilte Links (photos.app.goo.gl → photos.google.com/share/…)
+    // zeigen das Bild als og:image auf lh3.googleusercontent.com. Die Größe
+    // steht am Ende (=w600-h315-…); für scharfe Bilder auf 2400 px stellen.
+    const finalHost = new URL(res.url || target.toString()).hostname;
+    if (/(^|\.)photos\.(app\.goo\.gl|google\.com)$/.test(finalHost) || /(^|\.)photos\.app\.goo\.gl$/.test(target.hostname)) {
+      const img = decodeEntities(meta('og:image'));
+      if (/^https:\/\/lh\d\.googleusercontent\.com\//.test(img)) {
+        return { title: title.replace(/ ?[-–·] ?Google (Fotos|Photos)$/i, ''), image: img.replace(/=[^/=]*$/, '') + '=w2400' };
+      }
+    }
+    return { title };
   } catch {
-    return '';
+    return none;
   }
 }
 

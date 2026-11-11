@@ -257,42 +257,106 @@ function setHeading(view: EditorView, level: number): boolean {
 
 // ── Slash-Menü ──────────────────────────────────────────────────────────────
 
-interface Slash { name: string; key: string; hint: string; snippet?: string; inline?: boolean; run?: (view: EditorView) => void }
+interface Slash {
+  name: string;
+  /** Suchbegriffe, deutsch und englisch, durch Leerzeichen getrennt. */
+  key: string;
+  hint: string;
+  snippet?: string;
+  inline?: boolean;
+  /** Nur bei passender Suche zeigen (Programmiersprachen, Diagrammtypen). */
+  hidden?: boolean;
+  run?: (view: EditorView) => void;
+}
+
+const fence = (lang: string, body = '‸') => '```' + lang + '\n' + body + '\n```';
+
+/** Codeblöcke für einzelne Sprachen: /python, /js, /bash … */
+const LANGUAGES: [string, string, string][] = [
+  ['Python', 'python', 'python py'],
+  ['JavaScript', 'javascript', 'javascript js node'],
+  ['TypeScript', 'typescript', 'typescript ts'],
+  ['HTML', 'html', 'html web'],
+  ['CSS', 'css', 'css style'],
+  ['SCSS', 'scss', 'scss sass'],
+  ['JSON', 'json', 'json'],
+  ['YAML', 'yaml', 'yaml yml'],
+  ['XML', 'xml', 'xml'],
+  ['Bash / Terminal', 'bash', 'bash shell sh zsh terminal konsole kommandozeile'],
+  ['PowerShell', 'powershell', 'powershell ps1 windows'],
+  ['SQL', 'sql', 'sql datenbank database'],
+  ['Java', 'java', 'java'],
+  ['Kotlin', 'kotlin', 'kotlin kt'],
+  ['C', 'c', 'c'],
+  ['C++', 'cpp', 'c++ cpp'],
+  ['C#', 'csharp', 'c# csharp cs dotnet'],
+  ['Go', 'go', 'go golang'],
+  ['Rust', 'rust', 'rust rs'],
+  ['PHP', 'php', 'php'],
+  ['Ruby', 'ruby', 'ruby rb'],
+  ['Swift', 'swift', 'swift ios'],
+  ['Lua', 'lua', 'lua'],
+  ['R', 'r', 'r statistik statistics'],
+  ['Markdown', 'markdown', 'markdown md'],
+  ['Diff', 'diff', 'diff patch'],
+  ['Dockerfile', 'dockerfile', 'dockerfile docker'],
+  ['Makefile', 'makefile', 'makefile make'],
+  ['Ini / TOML', 'ini', 'ini toml config konfiguration'],
+  ['Text (ohne Farben)', 'text', 'text plain plaintext'],
+];
+
+/** Mermaid-Vorlagen: /sequenz, /gantt, /pie … */
+const DIAGRAMS: [string, string, string][] = [
+  ['Flussdiagramm', 'flussdiagramm ablauf flowchart flow graph', 'flowchart TD\n  A[Start] --> B{Frage?}\n  B -- Ja --> C[Weiter]\n  B -- Nein --> D[Ende]‸'],
+  ['Sequenzdiagramm', 'sequenzdiagramm ablauf sequence', 'sequenceDiagram\n  Alice->>Bob: Hallo Bob!\n  Bob-->>Alice: Hallo Alice!‸'],
+  ['Gantt / Zeitplan', 'gantt zeitplan projektplan timeline schedule', 'gantt\n  title Projekt\n  dateFormat YYYY-MM-DD\n  section Planung\n  Idee     :a1, 2026-01-01, 7d\n  Umsetzen :after a1, 14d‸'],
+  ['Kreisdiagramm', 'kreisdiagramm torte pie chart', 'pie title Aufteilung\n  "A" : 40\n  "B" : 35\n  "C" : 25‸'],
+  ['Mindmap', 'mindmap gedanken brainstorming', 'mindmap\n  root((Thema))\n    Idee 1\n    Idee 2\n      Detail‸'],
+  ['Klassendiagramm', 'klassendiagramm uml class', 'classDiagram\n  class Tier {\n    +name\n    +essen()\n  }\n  Tier <|-- Hund‸'],
+  ['Zustandsdiagramm', 'zustandsdiagramm state', 'stateDiagram-v2\n  [*] --> Aus\n  Aus --> An: einschalten\n  An --> Aus: ausschalten‸'],
+  ['Zeitstrahl', 'zeitstrahl chronik timeline geschichte history', 'timeline\n  title Verlauf\n  2024 : Start\n  2025 : Ausbau\n  2026 : Fertig‸'],
+  ['ER-Diagramm', 'er entity datenbank database', 'erDiagram\n  KUNDE ||--o{ BESTELLUNG : gibt\n  BESTELLUNG ||--|{ POSTEN : enthält‸'],
+];
 
 function slashItems(pickImage: () => void): Slash[] {
   return [
-    { name: 'Überschrift 1', key: 'h1 überschrift titel', hint: '#', snippet: '# ‸' },
-    { name: 'Überschrift 2', key: 'h2 überschrift', hint: '##', snippet: '## ‸' },
-    { name: 'Überschrift 3', key: 'h3 überschrift', hint: '###', snippet: '### ‸' },
-    { name: 'Liste', key: 'liste aufzählung', hint: '-', snippet: '- ‸' },
-    { name: 'Nummerierte Liste', key: 'nummeriert liste', hint: '1.', snippet: '1. ‸' },
-    { name: 'Aufgabe', key: 'aufgabe todo checkbox', hint: '- [ ]', snippet: '- [ ] ‸' },
-    { name: 'Zitat', key: 'zitat quote', hint: '>', snippet: '> ‸' },
+    { name: 'Überschrift 1', key: 'h1 überschrift titel heading title header', hint: '#', snippet: '# ‸' },
+    { name: 'Überschrift 2', key: 'h2 überschrift heading header', hint: '##', snippet: '## ‸' },
+    { name: 'Überschrift 3', key: 'h3 überschrift heading header', hint: '###', snippet: '### ‸' },
+    { name: 'Liste', key: 'liste aufzählung list bullet', hint: '-', snippet: '- ‸' },
+    { name: 'Nummerierte Liste', key: 'nummeriert liste numbered ordered list', hint: '1.', snippet: '1. ‸' },
+    { name: 'Aufgabe', key: 'aufgabe todo checkbox task check', hint: '- [ ]', snippet: '- [ ] ‸' },
+    { name: 'Zitat', key: 'zitat quote citation', hint: '>', snippet: '> ‸' },
     { name: 'Link', key: 'link url verweis', hint: '[](…)', snippet: '[‸](https://)', inline: true },
     { name: 'Tabelle', key: 'tabelle table', hint: '| |', snippet: '| Spalte | Spalte |\n| ------ | ------ |\n| ‸ | |' },
-    { name: 'Codeblock', key: 'code', hint: '```', snippet: '```\n‸\n```' },
-    { name: 'Info', key: 'info box hinweis', hint: ':::info', snippet: ':::info\n‸\n:::' },
-    { name: 'Achtung', key: 'achtung warnung box', hint: ':::warning', snippet: ':::warning\n‸\n:::' },
-    { name: 'Erfolg', key: 'erfolg tipp box', hint: ':::success', snippet: ':::success\n‸\n:::' },
-    { name: 'Gefahr', key: 'gefahr danger box', hint: ':::danger', snippet: ':::danger\n‸\n:::' },
-    { name: 'Aufklappbar', key: 'aufklappbar spoiler details', hint: ':::spoiler', snippet: ':::spoiler Mehr anzeigen\n‸\n:::' },
-    { name: 'Bild', key: 'bild foto image', hint: '![]()', run: pickImage },
-    { name: 'Formel', key: 'formel mathe latex block', hint: '$$', snippet: '$$\n‸\n$$' },
-    { name: 'Formel im Text', key: 'formel mathe latex inline text', hint: '$…$', snippet: '$‸$', inline: true },
-    { name: 'Diagramm', key: 'diagramm mermaid', hint: 'mermaid', snippet: '```mermaid\ngraph TD\n  A[Start] --> B[Ziel]‸\n```' },
+    { name: 'Codeblock', key: 'code codeblock snippet programm', hint: '```', snippet: fence('') },
+    { name: 'Info', key: 'info box hinweis note callout', hint: ':::info', snippet: ':::info\n‸\n:::' },
+    { name: 'Achtung', key: 'achtung warnung warning caution', hint: ':::warning', snippet: ':::warning\n‸\n:::' },
+    { name: 'Erfolg', key: 'erfolg tipp success tip', hint: ':::success', snippet: ':::success\n‸\n:::' },
+    { name: 'Gefahr', key: 'gefahr danger error fehler', hint: ':::danger', snippet: ':::danger\n‸\n:::' },
+    { name: 'Aufklappbar', key: 'aufklappbar spoiler details collapse toggle accordion', hint: ':::spoiler', snippet: ':::spoiler Mehr anzeigen\n‸\n:::' },
+    { name: 'Bild hochladen', key: 'bild foto image picture photo upload hochladen', hint: 'Datei', run: pickImage },
+    { name: 'Bild per Link', key: 'bild link url image picture photo extern adresse', hint: '![](…)', snippet: '![](‸)' },
+    { name: 'Formel', key: 'formel mathe latex math equation block', hint: '$$', snippet: '$$\n‸\n$$' },
+    { name: 'Formel im Text', key: 'formel mathe latex math inline text', hint: '$…$', snippet: '$‸$', inline: true },
+    { name: 'Diagramm', key: 'diagramm mermaid chart diagram graph', hint: 'mermaid', snippet: fence('mermaid', DIAGRAMS[0][2]) },
     { name: 'YouTube', key: 'youtube video', hint: '{%youtube %}', snippet: '{%youtube ‸ %}' },
     { name: 'Vimeo', key: 'vimeo video', hint: '{%vimeo %}', snippet: '{%vimeo ‸ %}' },
-    { name: 'Inhaltsverzeichnis', key: 'inhaltsverzeichnis toc', hint: '[toc]', snippet: '[toc]\n‸' },
-    { name: 'Fußnote', key: 'fußnote footnote', hint: '[^1]', inline: true, run: footnote },
-    { name: 'Trennlinie', key: 'trennlinie linie hr', hint: '---', snippet: '---\n‸' },
-    { name: 'Markiert', key: 'markiert hervorheben highlight', hint: '==…==', snippet: '==‸==', inline: true },
-    { name: 'Unterstrichen', key: 'unterstrichen eingefügt', hint: '++…++', snippet: '++‸++', inline: true },
-    { name: 'Hochgestellt', key: 'hochgestellt hoch exponent', hint: '^…^', snippet: '^‸^', inline: true },
-    { name: 'Tiefgestellt', key: 'tiefgestellt tief index', hint: '~…~', snippet: '~‸~', inline: true },
+    { name: 'Inhaltsverzeichnis', key: 'inhaltsverzeichnis toc contents inhalt', hint: '[toc]', snippet: '[toc]\n‸' },
+    { name: 'Fußnote', key: 'fußnote footnote anmerkung', hint: '[^1]', inline: true, run: footnote },
+    { name: 'Trennlinie', key: 'trennlinie linie hr divider separator line', hint: '---', snippet: '---\n‸' },
+    { name: 'Markiert', key: 'markiert hervorheben highlight mark', hint: '==…==', snippet: '==‸==', inline: true },
+    { name: 'Unterstrichen', key: 'unterstrichen underline insert', hint: '++…++', snippet: '++‸++', inline: true },
+    { name: 'Hochgestellt', key: 'hochgestellt hoch superscript sup exponent', hint: '^…^', snippet: '^‸^', inline: true },
+    { name: 'Tiefgestellt', key: 'tiefgestellt tief subscript sub index', hint: '~…~', snippet: '~‸~', inline: true },
+    ...LANGUAGES.map(([name, lang, key]): Slash => ({ name: `Code: ${name}`, key: `${key} code`, hint: '```' + lang, snippet: fence(lang), hidden: true })),
+    ...DIAGRAMS.map(([name, key, body]): Slash => ({ name: `Diagramm: ${name}`, key: `${key} diagramm mermaid diagram`, hint: 'mermaid', snippet: fence('mermaid', body), hidden: true })),
   ];
 }
 
-/** Fügt eine Vorlage ein; ‸ markiert, wo der Cursor danach steht. */
+/** Klein, ohne Akzente: „Überschrift“ findet man auch mit /uberschrift. */
+const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
 /** Nummer an der Cursorstelle, Fußnotentext am Ende des Dokuments. */
 function footnote(view: EditorView) {
   const doc = view.state.doc.toString();
@@ -323,24 +387,36 @@ function slashSource(items: Slash[]) {
     const line = ctx.state.doc.lineAt(ctx.pos);
     const before = line.text.slice(0, ctx.pos - line.from);
     // Am Zeilenanfang (auch nach "- " oder "> ") oder nach einem Leerzeichen.
-    const m = /(^|\s)\/([\p{L}\d]*)$/u.exec(before);
+    const m = /(^|\s)\/([\p{L}\d+#-]*)$/u.exec(before);
     if (!m) return null;
     const from = line.from + m.index + m[1].length;
     const midLine = before.slice(0, from - line.from).replace(/^\s*(?:[-*+] |> )?/, '').trim() !== '';
+    const q = fold(m[2]);
+    // Rang: 3 = Suchbegriff genau, 2 = Name/Begriff fängt so an, 1 = kommt vor.
+    const score = (it: Slash) => {
+      if (!q) return it.hidden ? -1 : 1;
+      const words = fold(it.key).split(' ').concat(fold(it.name).split(/[^\p{L}\d+#]+/u));
+      if (words.includes(q)) return 3;
+      if (words.some(w => w.startsWith(q))) return 2;
+      if (!it.hidden && (fold(it.key).includes(q) || fold(it.name).includes(q))) return 1;
+      return -1;
+    };
+    const ranked = items
+      .map((it, i) => ({ it, i, s: score(it) }))
+      .filter(x => x.s >= 0 && (!x.it.hidden || q.length >= 1))
+      .sort((a, b) => b.s - a.s || a.i - b.i);
     return {
       from,
       filter: false,
-      options: items
-        .filter(it => !m[2] || it.key.includes(m[2].toLowerCase()) || it.name.toLowerCase().includes(m[2].toLowerCase()))
-        .map((it): Completion => ({
-          label: it.name,
-          detail: it.hint,
-          apply: (view, _c, f, to) => {
-            if (it.run) { view.dispatch({ changes: { from: f, to }, userEvent: 'input' }); it.run(view); }
-            // Blöcke mitten im Satz: in eine eigene Zeile setzen.
-            else insertSnippet(view, f, to, midLine && !it.inline ? '\n\n' + it.snippet! : it.snippet!);
-          },
-        })),
+      options: ranked.map(({ it }): Completion => ({
+        label: it.name,
+        detail: it.hint,
+        apply: (view, _c, f, to) => {
+          if (it.run) { view.dispatch({ changes: { from: f, to }, userEvent: 'input' }); it.run(view); }
+          // Blöcke mitten im Satz: in eine eigene Zeile setzen.
+          else insertSnippet(view, f, to, midLine && !it.inline ? '\n\n' + it.snippet! : it.snippet!);
+        },
+      })),
     };
   };
 }
@@ -410,6 +486,7 @@ const linkFolding = ViewPlugin.fromClass(class {
 // ── Links einfügen ──────────────────────────────────────────────────────────
 
 const URL_ONLY = /^https?:\/\/[^\s<>"]+$/i;
+const IMAGE_URL = /\.(?:jpe?g|png|gif|webp|avif|svg)(?:[?#][^\s]*)?$/i;
 
 /** Linktext darf keine eckigen Klammern enthalten, die das Markdown brechen. */
 const escapeLabel = (t: string) => t.replace(/([\\[\]])/g, '\\$1');
@@ -609,37 +686,52 @@ export function mountEditor(o: EditorOptions): EditorHandle {
   }
 
   /**
-   * Eingefügte Adresse ohne Markierung (mit Markierung übernimmt
-   * pasteURLAsLink von lang-markdown): Erst steht die Domain da; den
-   * Seitentitel holt der Server und ersetzt sie, falls in der Zwischenzeit
-   * niemand den Link geändert hat.
+   * Eingefügte Adresse:
+   *  - über markiertem Text → [Text](url), Cursor dahinter
+   *  - Bilddatei (.jpg, .png …) → ![](url)
+   *  - sonst [Domain](url); der Server holt dann den Seitentitel. Ist die
+   *    Adresse ein Bild oder ein geteiltes Google-Fotos-Bild, wird daraus
+   *    ![](bild-url). Ersetzt wird nur, wenn den Link niemand geändert hat.
    */
   function pasteLink(url: string) {
     const { state } = view;
     const sel = state.selection.main;
+    const selected = state.sliceDoc(sel.from, sel.to);
     if (inCodeOrUrl(state, sel.from) || (sel.empty && /\]\($/.test(state.sliceDoc(sel.from - 2, sel.from)))) {
       view.dispatch(state.replaceSelection(url), { userEvent: 'input.paste' });
       return;
     }
+    const put = (insert: string) =>
+      view.dispatch({ changes: { from: sel.from, to: sel.to, insert }, selection: { anchor: sel.from + insert.length }, userEvent: 'input.paste' });
+    if (!sel.empty && !selected.includes('\n') && !URL_ONLY.test(selected.trim())) {
+      put(`[${escapeLabel(selected)}](${url})`);
+      return;
+    }
+    if (IMAGE_URL.test(url)) {
+      put(`![](${url})`);
+      return;
+    }
     const placeholder = escapeLabel(domainOf(url));
     const insert = `[${placeholder}](${url})`;
-    view.dispatch({ changes: { from: sel.from, to: sel.to, insert }, selection: { anchor: sel.from + insert.length }, userEvent: 'input.paste' });
-    fetchTitle(url).then(title => {
-      if (!title || title === placeholder) return;
-      replaceText(insert, `[${escapeLabel(title)}](${url})`);
+    put(insert);
+    fetchPreview(url).then(({ title, image }) => {
+      if (image) replaceText(insert, `![${escapeLabel(title)}](${image})`);
+      else if (title && title !== placeholder) replaceText(insert, `[${escapeLabel(title)}](${url})`);
     });
   }
 
-  async function fetchTitle(url: string): Promise<string> {
+  async function fetchPreview(url: string): Promise<{ title: string; image: string }> {
+    const none = { title: '', image: '' };
     // Ein neues Dokument wird gerade durch das Einfügen angelegt – abwarten.
     if (!created) await (creating ?? Promise.resolve(false));
-    if (!created) return '';
+    if (!created) return none;
     try {
       const res = await fetch(`/api/docs/${encodeURIComponent(o.id)}/title?url=${encodeURIComponent(url)}`, { headers: o.auth() });
-      if (!res.ok) return '';
-      return String((await res.json()).title || '');
+      if (!res.ok) return none;
+      const data = await res.json();
+      return { title: String(data.title || ''), image: String(data.image || '') };
     } catch {
-      return '';
+      return none;
     }
   }
 
@@ -672,9 +764,9 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         EditorView.lineWrapping,
         indentUnit.of('  '),
         EditorState.tabSize.of(2),
-        // pasteURLAsLink (Standard): Adresse über markiertem Text → [Text](url),
-        // die Markierung bleibt auf dem Linktext. Ohne Markierung greift pasteLink().
-        markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
+        // pasteURLAsLink aus: Einfügen von Adressen regelt pasteLink() (Cursor
+        // landet hinter dem Link, ohne Markierung kommt der Seitentitel).
+        markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true, pasteURLAsLink: false }),
         syntaxHighlighting(highlight),
         theme,
         search({ top: false }),
@@ -694,7 +786,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
               return true;
             }
             const text = (e.clipboardData?.getData('text/plain') || '').trim();
-            if (!URL_ONLY.test(text) || !v.state.selection.main.empty) return false;
+            if (!URL_ONLY.test(text)) return false;
             e.preventDefault();
             pasteLink(text);
             return true;
