@@ -46,6 +46,8 @@ export async function enhance(root: HTMLElement, katexCss?: string) {
         securityLevel: 'strict',
         theme: dark() ? 'dark' : 'neutral',
         fontFamily: 'iA Writer Quattro, system-ui, sans-serif',
+        // Kurze deutsche Datumsangaben, sonst überlappen sich die Achsenbeschriftungen.
+        gantt: { axisFormat: '%d.%m.' },
       });
       return mermaid;
     });
