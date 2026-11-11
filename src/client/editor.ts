@@ -609,21 +609,16 @@ export function mountEditor(o: EditorOptions): EditorHandle {
   }
 
   /**
-   * Eingefügte Adresse: Mit markiertem Text wird der zum Linktext. Ohne
-   * Markierung steht erst die Domain da; den Seitentitel holt der Server
-   * und ersetzt sie, falls in der Zwischenzeit niemand den Link geändert hat.
+   * Eingefügte Adresse ohne Markierung (mit Markierung übernimmt
+   * pasteURLAsLink von lang-markdown): Erst steht die Domain da; den
+   * Seitentitel holt der Server und ersetzt sie, falls in der Zwischenzeit
+   * niemand den Link geändert hat.
    */
   function pasteLink(url: string) {
     const { state } = view;
     const sel = state.selection.main;
-    const selected = state.sliceDoc(sel.from, sel.to);
     if (inCodeOrUrl(state, sel.from) || (sel.empty && /\]\($/.test(state.sliceDoc(sel.from - 2, sel.from)))) {
       view.dispatch(state.replaceSelection(url), { userEvent: 'input.paste' });
-      return;
-    }
-    if (!sel.empty && !selected.includes('\n') && !URL_ONLY.test(selected.trim())) {
-      const insert = `[${escapeLabel(selected)}](${url})`;
-      view.dispatch({ changes: { from: sel.from, to: sel.to, insert }, selection: { anchor: sel.from + insert.length }, userEvent: 'input.paste' });
       return;
     }
     const placeholder = escapeLabel(domainOf(url));
@@ -677,8 +672,9 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         EditorView.lineWrapping,
         indentUnit.of('  '),
         EditorState.tabSize.of(2),
-        // pasteURLAsLink aus: Einfügen von Links regelt pasteLink() (inkl. Seitentitel).
-        markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true, pasteURLAsLink: false }),
+        // pasteURLAsLink (Standard): Adresse über markiertem Text → [Text](url),
+        // die Markierung bleibt auf dem Linktext. Ohne Markierung greift pasteLink().
+        markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
         syntaxHighlighting(highlight),
         theme,
         search({ top: false }),
@@ -698,7 +694,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
               return true;
             }
             const text = (e.clipboardData?.getData('text/plain') || '').trim();
-            if (!URL_ONLY.test(text)) return false;
+            if (!URL_ONLY.test(text) || !v.state.selection.main.empty) return false;
             e.preventDefault();
             pasteLink(text);
             return true;
