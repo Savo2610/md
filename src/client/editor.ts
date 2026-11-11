@@ -494,6 +494,28 @@ const IMAGE_URL = /\.(?:jpe?g|png|gif|webp|avif|svg)(?:[?#][^\s]*)?$/i;
 /** Linktext darf keine eckigen Klammern enthalten, die das Markdown brechen. */
 const escapeLabel = (t: string) => t.replace(/([\\[\]])/g, '\\$1');
 
+/** YouTube- oder Vimeo-Adresse → { kind, id }, sonst null. */
+export function videoOf(raw: string): { kind: 'youtube' | 'vimeo'; id: string } | null {
+  let u: URL;
+  try { u = new URL(raw); } catch { return null; }
+  const host = u.hostname.replace(/^(www|m|music)\./, '');
+  if (host === 'youtu.be') {
+    const id = u.pathname.slice(1).split('/')[0];
+    return /^[\w-]{11}$/.test(id) ? { kind: 'youtube', id } : null;
+  }
+  if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+    const v = u.searchParams.get('v');
+    if (v && /^[\w-]{11}$/.test(v)) return { kind: 'youtube', id: v };
+    const m = /^\/(?:shorts|embed|live|v)\/([\w-]{11})/.exec(u.pathname);
+    return m ? { kind: 'youtube', id: m[1] } : null;
+  }
+  if (host === 'vimeo.com' || host === 'player.vimeo.com') {
+    const m = /^\/(?:video\/)?(\d{5,})/.exec(u.pathname);
+    return m ? { kind: 'vimeo', id: m[1] } : null;
+  }
+  return null;
+}
+
 function domainOf(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
 }
@@ -721,6 +743,22 @@ export function mountEditor(o: EditorOptions): EditorHandle {
     }
     if (IMAGE_URL.test(url)) {
       put(`![](${url})`);
+      return;
+    }
+    // YouTube/Vimeo: einbetten. Steht der Cursor schon in {%youtube … %},
+    // nur die ID einsetzen; sonst die ganze Einbettung in eigener Zeile.
+    const video = videoOf(url);
+    if (video) {
+      const line = state.doc.lineAt(sel.from);
+      const before = state.sliceDoc(line.from, sel.from);
+      const after = state.sliceDoc(sel.to, line.to);
+      if (/\{%\s*(youtube|vimeo)\s+$/.test(before)) {
+        put(video.id + (/^\s*%\}/.test(after) ? '' : ' %}'));
+        return;
+      }
+      const embed = `{%${video.kind} ${video.id} %}`;
+      // Eigene Zeile davor und danach, Cursor landet in der Zeile nach dem Video.
+      put((before.trim() ? '\n\n' : '') + embed + (after.trim() ? '\n\n' : '\n'));
       return;
     }
     const placeholder = escapeLabel(domainOf(url));
