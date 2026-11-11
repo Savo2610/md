@@ -6,7 +6,8 @@
 import { enhance } from './enhance';
 import type { EditorHandle, EditorStatus } from './editor';
 import { titleOf, slugify } from '../shared/title';
-import { $, el, dialog, toast, store, adminToken, unlockDialog, recent, ago } from './ui';
+import { $, el, dialog, toast, store, adminToken, unlockDialog, recent, ago, menu, type MenuItem } from './ui';
+import { account, accountItems, type User } from './account';
 
 interface Boot {
   page: 'doc' | 'admin' | 'home';
@@ -15,9 +16,13 @@ interface Boot {
   exists?: boolean;
   siteKey?: string;
   katexCss?: string;
+  user?: User | null;
+  login?: boolean;
+  editKey?: string;
 }
 
 const boot: Boot = JSON.parse($('#boot')!.textContent || '{}');
+account.init(boot);
 
 /** Als App vom Homescreen gestartet (nicht im Browser-Tab). */
 const standalone = matchMedia('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
@@ -51,6 +56,8 @@ function startDoc(boot: Boot) {
   try {
     if (sessionStorage.getItem(OPEN_EDIT) === id) { startInEdit = true; sessionStorage.removeItem(OPEN_EDIT); }
   } catch { /* egal */ }
+  // Angemeldet: Schlüssel aus dem Konto (z. B. auf einem neuen Gerät).
+  if (boot.editKey && !store.get(keyName)) store.set(keyName, boot.editKey);
 
   let editKey = store.get(keyName);
   const canEdit = () => !exists || !!editKey;
@@ -169,7 +176,7 @@ function startDoc(boot: Boot) {
         preview,
         katexCss: boot.katexCss,
         exists,
-        name: store.get('md:name') || '',
+        name: store.get('md:name') || firstName(),
         spellcheck,
         wsUrl: () => {
           const u = new URL(`/api/docs/${encodeURIComponent(id)}/ws`, location.href);
@@ -342,7 +349,7 @@ function startDoc(boot: Boot) {
     if (!exists) body.append(el('p', { class: 'hint' }, 'Das Dokument wird angelegt, sobald du etwas schreibst.'));
 
     if (canEdit()) {
-      const name = el('input', { type: 'text', value: store.get('md:name') || '', placeholder: 'Gast', maxlength: '30', 'aria-label': 'Dein Name' }) as HTMLInputElement;
+      const name = el('input', { type: 'text', value: store.get('md:name') || firstName(), placeholder: 'Gast', maxlength: '30', 'aria-label': 'Dein Name' }) as HTMLInputElement;
       name.addEventListener('change', () => {
         const v = name.value.trim().slice(0, 30);
         store.set('md:name', v);
@@ -355,32 +362,23 @@ function startDoc(boot: Boot) {
 
   // ── Menüs ─────────────────────────────────────────────────────────────────
 
-  function menu(side: 'left' | 'right', items: (HTMLElement | [string, () => void])[]) {
-    const list = el('div', { class: 'menu' });
-    const d = dialog('', list, { menu: side });
-    for (const item of items) {
-      if (item instanceof HTMLElement) { list.append(item); continue; }
-      const [label, run] = item;
-      const b = el('button', { type: 'button' }, label);
-      b.addEventListener('click', () => { d.close(); run(); });
-      list.append(b);
-    }
-    return d;
-  }
-
   function openRecent() {
-    const items: (HTMLElement | [string, () => void])[] = [['Neues Dokument', () => (location.href = '/')]];
+    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')]];
     const list = recent.list().filter(r => r.id !== id);
     items.push(el('div', { class: 'menu-label' }, 'Zuletzt geöffnet'));
     if (!list.length) {
-      items.push(el('p', { class: 'menu-empty' }, 'Noch nichts. Dokumente, die du öffnest, erscheinen hier – nur in diesem Browser.'));
+      items.push(el('p', { class: 'menu-empty' }, account.user
+        ? 'Noch nichts. Dokumente, die du öffnest, erscheinen hier – auf allen deinen Geräten.'
+        : 'Noch nichts. Dokumente, die du öffnest, erscheinen hier – nur in diesem Browser.'));
     }
     for (const r of list.slice(0, 15)) {
       items.push(el('a', { href: `/${encodeURIComponent(r.id)}`, class: 'recent' },
         el('span', { class: 'recent-title' }, r.title || r.id),
-        el('span', { class: 'recent-meta' }, `${ago(r.at)}${r.own ? ' · bearbeitbar' : ''}`),
+        el('span', { class: 'recent-meta' }, `${ago(r.at)}${r.own ? ' · bearbeitbar' : ''}${r.tags?.length ? ' · ' + r.tags.join(', ') : ''}`),
       ));
     }
+    if (list.length || account.user) items.push(el('a', { href: '/home', class: 'recent all' }, el('span', { class: 'recent-title' }, 'Alle Dokumente …')));
+    items.push(...accountItems());
     menu('left', items);
   }
 
@@ -392,6 +390,10 @@ function startDoc(boot: Boot) {
     }
     items.push(['Herunterladen (.md)', () => { if (exists) location.href = `/${encodeURIComponent(id)}.md?download=1`; else toast('Noch leer.'); }]);
     if (canEdit()) items.push(['Adresse ändern', renameDialog]);
+    if (account.user && exists) items.push(['Tags …', () => {
+      const r = recent.list().find(x => x.id === id);
+      import('./tags').then(m => m.tagDialog(id, document.title, r?.tags || [], tags => toast(tags.length ? `Tags: ${tags.join(', ')}` : 'Keine Tags.')));
+    }]);
     if (mode !== 'view') items.push([spellcheck ? 'Rechtschreibprüfung aus' : 'Rechtschreibprüfung an', () => {
       spellcheck = !spellcheck;
       store.set('md:spellcheck', spellcheck ? '1' : '0');
@@ -490,6 +492,7 @@ function startDoc(boot: Boot) {
 
   document.body.dataset.mode = mode;
   renderBar();
+  account.sync();
   if (exists) {
     enableTasks();
     enhance(article, boot.katexCss);
@@ -499,6 +502,11 @@ function startDoc(boot: Boot) {
     mode = 'view';
     setMode('edit');
   }
+}
+
+/** Vorname aus dem Konto als Vorgabe für den Namen beim gemeinsamen Schreiben. */
+function firstName(): string {
+  return (account.user?.name || '').split(' ')[0].slice(0, 30);
 }
 
 // ── Turnstile (unsichtbar, nur auf neuen Dokumenten) ────────────────────────

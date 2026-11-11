@@ -98,29 +98,41 @@ export async function verifyTotp(secretBase32: string, code: unknown): Promise<{
   return null;
 }
 
-// ── Admin-Token ─────────────────────────────────────────────────────────────
-// Nach dem 2FA-Code bekommt der Browser ein signiertes Token mit Ablaufzeit.
-// Der Server merkt sich nichts; die Signatur belegt, dass es von uns kommt.
+// ── Signierte Token ─────────────────────────────────────────────────────────
+// Admin-Token nach dem 2FA-Code, Sitzungs-Cookie nach dem Google-Login und der
+// kurzlebige Zustand während des Logins. Der Server merkt sich nichts; die
+// Signatur belegt, dass es von uns kommt. `role` trennt die Arten, damit ein
+// Sitzungs-Cookie nie als Admin-Token durchgeht.
 
 async function hmacKey(secret: string) {
   return crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
 }
 
-export async function signToken(secret: string, ttlSeconds: number): Promise<string> {
-  const payload = b64urlEncode(enc.encode(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + ttlSeconds, role: 'admin' })));
+export async function signToken(secret: string, ttlSeconds: number, data: Record<string, unknown> = { role: 'admin' }): Promise<string> {
+  const payload = b64urlEncode(enc.encode(JSON.stringify({ ...data, exp: Math.floor(Date.now() / 1000) + ttlSeconds })));
   const sig = new Uint8Array(await crypto.subtle.sign('HMAC', await hmacKey(secret), enc.encode(payload)));
   return `${payload}.${b64urlEncode(sig)}`;
 }
 
-export async function verifyToken(secret: string | undefined, token: string | null | undefined): Promise<boolean> {
-  if (!secret || !token || !token.includes('.')) return false;
+/** Inhalt eines gültigen, nicht abgelaufenen Tokens der Art `role`, sonst null. */
+export async function readToken<T = Record<string, unknown>>(secret: string | undefined, token: string | null | undefined, role: string): Promise<T | null> {
+  if (!secret || !token || !token.includes('.')) return null;
   const [payload, sig] = token.split('.', 2);
   const expected = new Uint8Array(await crypto.subtle.sign('HMAC', await hmacKey(secret), enc.encode(payload)));
-  if (!timingSafeEqual(b64urlEncode(expected), sig)) return false;
+  if (!timingSafeEqual(b64urlEncode(expected), sig)) return null;
   try {
     const data = JSON.parse(new TextDecoder().decode(b64urlDecode(payload)));
-    return data?.role === 'admin' && typeof data.exp === 'number' && data.exp > Date.now() / 1000;
+    return data?.role === role && typeof data.exp === 'number' && data.exp > Date.now() / 1000 ? data : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function verifyToken(secret: string | undefined, token: string | null | undefined): Promise<boolean> {
+  return !!(await readToken(secret, token, 'admin'));
+}
+
+/** PKCE: code_challenge = base64url(SHA-256(verifier)). */
+export async function sha256b64url(input: string): Promise<string> {
+  return b64urlEncode(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(input))));
 }

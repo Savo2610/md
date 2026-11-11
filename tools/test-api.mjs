@@ -193,5 +193,62 @@ ok(r.status === 302 && /^\/[a-z0-9]{10}$/.test(r.headers.get('location')), 'Star
 r = await fetch(`${BASE}/robots.txt`);
 ok(!/^Disallow: \/\s*$/m.test((await r.text()).split('END Cloudflare Managed Content').pop()), 'robots.txt sperrt KI-Assistenten nicht');
 
+// ── Konto (nur lokal mit DEV_LOGIN=1) ───────────────────────────────────────
+if (!LIVE && vars.DEV_LOGIN === '1') {
+  r = await fetch(`${BASE}/api/me`);
+  ok(r.status === 401, 'GET /api/me ohne Anmeldung → 401');
+  r = await fetch(`${BASE}/auth/login?next=//evil.example`, { redirect: 'manual' });
+  ok(r.status === 302 && r.headers.get('location') === '/home', 'Login leitet nur auf eigene Pfade zurück');
+  const session = (r.headers.get('set-cookie') || '').match(/md_session=([^;]+)/)?.[1];
+  ok(!!session, 'Testlogin setzt Sitzungs-Cookie');
+  const C = { cookie: `md_session=${session}` };
+
+  r = await fetch(`${BASE}/api/admin/docs`, { headers: { authorization: `Bearer ${session}` } });
+  ok(r.status === 401, 'Sitzungs-Cookie gilt nicht als Admin-Token');
+  r = await fetch(`${BASE}/api/me`, { headers: { cookie: `md_session=${admin}` } });
+  ok(r.status === 401, 'Admin-Token gilt nicht als Sitzung');
+
+  const own = `konto-test-${Date.now().toString(36)}`;
+  r = await fetch(`${BASE}/api/docs/${own}/create`, { method: 'POST', headers: { ...C, 'content-type': 'application/json' }, body: '{}' });
+  d = await j(r);
+  ok(r.status === 201 && d.editKey, 'Angemeldet: Anlegen ohne Turnstile');
+  const ownKey = d.editKey;
+  r = await fetch(`${BASE}/api/me`, { headers: C });
+  d = await j(r);
+  ok(d.user?.name === 'Testkonto' && !('sub' in d.user), '/api/me liefert Konto ohne Google-ID');
+  ok(d.docs.some(x => x.id === own && x.editKey === ownKey), 'Neues Dokument steht samt Schlüssel im Konto');
+
+  r = await fetch(`${BASE}/${own}`, { headers: C });
+  ok((await r.text()).includes(`"editKey":"${ownKey}"`), 'Dokumentseite bringt den Schlüssel aus dem Konto mit');
+  r = await fetch(`${BASE}/${own}`);
+  ok(!(await r.text()).includes(ownKey), 'Ohne Anmeldung kein Schlüssel in der Seite');
+
+  r = await fetch(`${BASE}/api/me/docs/${own}/tags`, { method: 'PUT', headers: { ...C, 'content-type': 'application/json' }, body: JSON.stringify({ tags: ['#Rezepte', 'rezepte', ' Reise  2026 ', ''] }) });
+  d = await j(r);
+  ok(JSON.stringify(d.tags) === '["Rezepte","Reise 2026"]', 'Tags werden gesäubert (ohne #, ohne Doppelte)');
+  r = await fetch(`${BASE}/api/me/docs/${own}/tags`, { method: 'PUT', headers: { ...C, 'content-type': 'application/json', origin: 'https://evil.example' }, body: '{"tags":["x"]}' });
+  ok(r.status === 403, 'Konto-API lehnt fremde Herkunft ab');
+
+  r = await fetch(`${BASE}/api/me/docs`, { method: 'POST', headers: { ...C, 'content-type': 'application/json' }, body: JSON.stringify({ items: [{ id: 'Fremdes Doc', title: 'Alt', opened: 1 }, { id: '../x' }] }) });
+  d = await j(r);
+  ok(d.docs.some(x => x.id === 'fremdes-doc' && x.editKey === null) && !d.docs.some(x => x.id.includes('/')), 'Liste übernimmt Einträge, normalisiert IDs');
+
+  r = await fetch(`${BASE}/api/docs/${own}/rename`, { method: 'POST', headers: { ...C, 'content-type': 'application/json', 'x-edit-key': ownKey }, body: JSON.stringify({ to: `${own}-neu` }) });
+  r = await fetch(`${BASE}/api/me`, { headers: C });
+  d = await j(r);
+  const moved = d.docs.find(x => x.id === `${own}-neu`);
+  ok(moved && moved.tags.length === 2 && !d.docs.some(x => x.id === own), 'Umbenennen nimmt Eintrag samt Tags mit');
+
+  r = await fetch(`${BASE}/api/me/docs/fremdes-doc`, { method: 'DELETE', headers: C });
+  r = await fetch(`${BASE}/api/me`, { headers: C });
+  ok(!(await j(r)).docs.some(x => x.id === 'fremdes-doc'), 'Eintrag lässt sich aus der Liste nehmen');
+
+  r = await fetch(`${BASE}/api/me`, { method: 'DELETE', headers: C });
+  ok(r.ok && /md_session=;/.test(r.headers.get('set-cookie') || ''), 'Konto löschen räumt das Cookie weg');
+  r = await fetch(`${BASE}/api/me`, { headers: C });
+  ok(r.ok && (await j(r)).docs.length === 0, 'Gelöschtes Konto ist leer');
+  await fetch(`${BASE}/api/docs/${own}-neu`, { method: 'DELETE', headers: API });
+}
+
 console.log(failed ? `\n${failed} fehlgeschlagen` : '\nAlles grün');
 process.exit(failed ? 1 : 0);

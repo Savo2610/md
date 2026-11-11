@@ -1,7 +1,7 @@
 # md.veerka.mp
 
-Markdown-Dokumente zum Teilen, ohne Login. Ein Cloudflare Worker, ein Durable
-Object pro Dokument, Bilder in R2.
+Markdown-Dokumente zum Teilen, Login optional. Ein Cloudflare Worker, ein
+Durable Object pro Dokument, Bilder in R2.
 
 - `md.veerka.mp` öffnet ein neues Dokument mit zufälliger, schwer erratbarer Adresse.
 - `md.veerka.mp/irgendwas` öffnet das Dokument oder legt es beim ersten Tippen an.
@@ -23,6 +23,13 @@ Object pro Dokument, Bilder in R2.
   (`public/sw.js`, Liste vom Build in `/assets/precache.json`), Dokumente mit
   Bearbeitungsrecht liegen in IndexedDB und werden beim Verbinden nachgereicht.
   Neue Dokumente gehen nur online (Turnstile).
+- Optional mit Google anmelden (`/home` oben rechts oder Menü hinter „md“):
+  Die Dokumentliste samt Bearbeitungsrechten liegt dann im Konto und ist auf
+  jedem Gerät da; beim ersten Login wandert die Liste aus dem Browser hinein.
+  Dazu eigene Tags pro Dokument (nur für einen selbst sichtbar), Filter nach
+  Tag auf `/home`. Abmelden nimmt Liste und Schlüssel vom Gerät. Angemeldet
+  entfällt der Turnstile-Check beim Anlegen. Ohne `GOOGLE_CLIENT_ID` ist
+  Anmelden ausgeblendet.
 - `md.veerka.mp/<id>.md` liefert das reine Markdown (für KI-Agenten, Download).
 - `md.veerka.mp/admin`: alle Dokumente, Löschen, „Behalten“ (2FA-Code).
 
@@ -49,7 +56,18 @@ npm run typecheck
 
 Lokale Secrets stehen in `.dev.vars` (nicht im Git): `TOTP_SECRET`,
 `SESSION_SECRET`, `API_KEY`, `TURNSTILE_SECRET`. Lokal ist `TOTP_SECRET` ein
-eigenes Test-Secret.
+eigenes Test-Secret. `DEV_LOGIN=1` meldet lokal ohne Google als „Testkonto“
+an (nie in Produktion setzen); die Konto-Tests in `npm test` brauchen das.
+
+## Google-Login einrichten
+
+1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials) →
+   Anmeldedaten → OAuth-Client-ID → Webanwendung.
+   Autorisierte Weiterleitungs-URI: `https://md.veerka.mp/auth/callback`.
+2. OAuth-Zustimmungsbildschirm: Status „In Produktion“ (für `openid email
+   profile` ist keine Prüfung nötig; im Testmodus kommen nur Testnutzer rein).
+3. Client-ID in `wrangler.jsonc` unter `vars.GOOGLE_CLIENT_ID`, das Secret per
+   `npx wrangler secret put GOOGLE_CLIENT_SECRET`.
 
 ## Deploy
 
@@ -67,10 +85,14 @@ Live-Test ohne 2FA-Teil:
 | `src/worker/index.ts` | Routing, Seiten (serverseitig gerendert), API, 2FA |
 | `src/worker/doc.ts` | Durable Object pro Dokument: Yjs-Updates in SQLite, WebSockets, Ablauf |
 | `src/worker/registry.ts` | Übersicht aller Dokumente, Fehlversuche, verbrauchte Codes |
+| `src/worker/auth.ts` | Google-Login (OIDC + PKCE), Sitzungs-Cookie |
+| `src/worker/account.ts` | Durable Object pro Konto: Dokumentliste, Schlüssel, Tags |
 | `src/shared/render.ts` | Markdown → HTML (Server und Browser), HackMD-Erweiterungen |
 | `src/client/main.ts` | Kopfleiste, Modi, Teilen, Umbenennen, Zuletzt geöffnet, Freischalten |
 | `src/client/editor.ts` | CodeMirror + Yjs, Slash-Menü, Auswahl-Leiste, Handy-Leiste, Bilder |
-| `src/client/home.ts` | Startseite der App (`/home`) |
+| `src/client/home.ts` | Übersicht (`/home`): Liste, Suche, Tag-Filter, Konto |
+| `src/client/account.ts` | Abgleich der Liste mit dem Konto, Anmelden/Abmelden |
+| `src/client/tags.ts` | Tags bearbeiten |
 | `public/sw.js` | Service Worker (offline) |
 | `src/client/enhance.ts` | KaTeX, Mermaid, Highlighting – nur geladen, wenn gebraucht |
 | `tools/skill/SKILL.md` | Claude-Code-Skill zum Anlegen/Lesen (nach `~/.claude/skills/md-docs/`) |

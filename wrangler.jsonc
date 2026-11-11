@@ -23,13 +23,19 @@
   //      fürs gemeinsame Bearbeiten).
   // Registry: genau eine Instanz. Übersicht aller Dokumente für die
   //      Admin-Seite, dazu Fehlversuche und verbrauchte 2FA-Codes.
+  // Account: eins pro angemeldetem Google-Konto. Dokumentliste mit
+  //      Bearbeitungsschlüsseln und eigenen Tags.
   "durable_objects": {
     "bindings": [
       { "name": "DOC", "class_name": "Doc" },
-      { "name": "REGISTRY", "class_name": "Registry" }
+      { "name": "REGISTRY", "class_name": "Registry" },
+      { "name": "ACCOUNT", "class_name": "Account" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Doc", "Registry"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Doc", "Registry"] },
+    { "tag": "v2", "new_sqlite_classes": ["Account"] }
+  ],
 
   // Bilder. Nicht öffentlich, ausgeliefert wird über /i/<dokument>/<datei>.
   "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "md-veerka-mp" }],
@@ -41,11 +47,14 @@
   ],
 
   // Secrets (wrangler secret put): TOTP_SECRET, SESSION_SECRET, API_KEY,
-  // TURNSTILE_SECRET. Lokal stehen sie in .dev.vars.
+  // TURNSTILE_SECRET, GOOGLE_CLIENT_SECRET. Lokal stehen sie in .dev.vars.
   "vars": {
     // Turnstile-Widget „md.veerka.mp“ (Modus managed, Domain md.veerka.mp).
     // Lokal überschreibt .dev.vars das mit Cloudflares Testschlüssel.
-    "TURNSTILE_SITEKEY": "0x4AAAAAAF8K9TUipL_LWNRT"
+    "TURNSTILE_SITEKEY": "0x4AAAAAAF8K9TUipL_LWNRT",
+    // Google-Login: OAuth-Client „md.veerka.mp“ (Typ Webanwendung). Leer =
+    // Anmelden ist ausgeschaltet. Das Secret dazu: GOOGLE_CLIENT_SECRET.
+    "GOOGLE_CLIENT_ID": ""
   },
 
   "observability": { "enabled": true }

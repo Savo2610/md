@@ -23,26 +23,52 @@ export const store = {
   del(k: string) { try { localStorage.removeItem(k); } catch { /* egal */ } },
 };
 
-// ── Zuletzt geöffnet (nur in diesem Browser) ──────────────────────────────
+// ── Zuletzt geöffnet ────────────────────────────────────────────────────────
+// Liegt immer im Browser. Mit Konto ist das zugleich die Offline-Kopie der
+// Dokumentliste im Konto: `dirty` heißt „noch nicht ans Konto geschickt“,
+// entfernte IDs warten in md:removed (siehe account.ts).
 
-export interface Recent { id: string; title: string; at: number; own: boolean }
+export interface Recent { id: string; title: string; at: number; own: boolean; tags?: string[]; dirty?: boolean }
 const RECENT = 'md:recent';
+const REMOVED = 'md:removed';
+const listeners: (() => void)[] = [];
 
 export const recent = {
   list(): Recent[] {
     try { return JSON.parse(store.get(RECENT) || '[]'); } catch { return []; }
   },
-  save(list: Recent[]) { store.set(RECENT, JSON.stringify(list.slice(0, 40))); },
+  save(list: Recent[]) { store.set(RECENT, JSON.stringify(list.sort((a, b) => b.at - a.at).slice(0, 2000))); },
   /** Vorne einsortieren bzw. aktualisieren. */
   touch(id: string, title: string, own: boolean) {
     const list = recent.list();
     const old = list.find(r => r.id === id);
-    recent.save([{ id, title: title || old?.title || '', at: Date.now(), own: own || !!old?.own }, ...list.filter(r => r.id !== id)]);
+    recent.save([{ ...old, id, title: title || old?.title || '', at: Date.now(), own: own || !!old?.own, dirty: true }, ...list.filter(r => r.id !== id)]);
+    recent.unremove(id);
+    recent.changed();
   },
-  remove(id: string) { recent.save(recent.list().filter(r => r.id !== id)); },
+  remove(id: string) {
+    recent.save(recent.list().filter(r => r.id !== id));
+    recent.removed = [...recent.removed.filter(r => r !== id), id];
+    recent.changed();
+  },
   rename(from: string, to: string) {
-    recent.save(recent.list().map(r => (r.id === from ? { ...r, id: to } : r)));
+    recent.save(recent.list().map(r => (r.id === from ? { ...r, id: to, dirty: true } : r)));
+    recent.changed();
   },
+  /** IDs, die aus der Liste genommen, aber dem Konto noch nicht gemeldet wurden. */
+  get removed(): string[] {
+    try { return JSON.parse(store.get(REMOVED) || '[]'); } catch { return []; }
+  },
+  set removed(ids: string[]) {
+    if (ids.length) store.set(REMOVED, JSON.stringify(ids.slice(-500)));
+    else store.del(REMOVED);
+  },
+  unremove(id: string) {
+    const r = recent.removed;
+    if (r.includes(id)) recent.removed = r.filter(x => x !== id);
+  },
+  onChange(fn: () => void) { listeners.push(fn); },
+  changed() { for (const fn of listeners) fn(); },
 };
 
 export function ago(t: number): string {
@@ -94,6 +120,21 @@ export function dialog(title: string, body: Node, opts: { menu?: 'left' | 'right
   });
   document.body.append(d);
   d.showModal();
+  return d;
+}
+
+/** Kleines Menü an der Kopfleiste (links bzw. rechts), auf dem Handy als Blatt. */
+export type MenuItem = HTMLElement | [string, () => void];
+export function menu(side: 'left' | 'right', items: MenuItem[]): HTMLDialogElement {
+  const list = el('div', { class: 'menu' });
+  const d = dialog('', list, { menu: side });
+  for (const item of items) {
+    if (item instanceof HTMLElement) { list.append(item); continue; }
+    const [label, run] = item;
+    const b = el('button', { type: 'button' }, label);
+    b.addEventListener('click', () => { d.close(); run(); });
+    list.append(b);
+  }
   return d;
 }
 

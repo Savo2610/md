@@ -22,19 +22,30 @@
 //   POST   /api/unlock               2FA-Code → Bearbeitungsschlüssel für ein Dokument,
 //                                    oder (ohne Dokument) Admin-Token für /admin
 //   GET    /api/admin/docs           Übersicht (Admin)
+//
+// Konto (optional, Google-Login, siehe auth.ts; Cookie md_session):
+//   GET    /auth/login, /auth/callback, POST /auth/logout
+//   GET    /api/me                   Konto und Dokumentliste
+//   POST   /api/me/docs              Dokumente eintragen/aktualisieren ({ items })
+//   PUT    /api/me/docs/<id>/tags    Tags setzen ({ tags })
+//   DELETE /api/me/docs/<id>         aus der Liste nehmen (Dokument bleibt)
+//   DELETE /api/me                   Konto samt Liste löschen
 
 import manifest from '../generated/manifest.json';
 import { render, escapeHtml } from '../shared/render';
 import { randomId, randomToken, signToken, verifyTotp, verifyToken, timingSafeEqual } from './crypto';
 import { MAX_CHARS } from './doc';
-import { docStub, registry, type Env } from './env';
+import { accountStub, docStub, registry, type Env } from './env';
+import { auth, clearSessionCookie, currentUser, type User } from './auth';
+import type { AccountDoc } from './account';
 
 export { Doc } from './doc';
 export { Registry } from './registry';
+export { Account } from './account';
 
 const ADMIN_TTL = 12 * 3600;
 const MAX_IMAGE = 6 * 1024 * 1024;
-const RESERVED = new Set(['api', 'admin', 'home', 'i', 'assets', 'fonts', 'icons', 'new', 'robots.txt', 'favicon.svg', 'favicon.ico', 'sw.js', 'manifest.webmanifest', 'apple-touch-icon.png']);
+const RESERVED = new Set(['api', 'auth', 'admin', 'home', 'i', 'assets', 'fonts', 'icons', 'new', 'robots.txt', 'favicon.svg', 'favicon.ico', 'sw.js', 'manifest.webmanifest', 'apple-touch-icon.png']);
 /** Statische Dateien, die direkt aus public/ kommen. */
 const STATIC_FILES = new Set(['/favicon.svg', '/sw.js', '/manifest.webmanifest', '/apple-touch-icon.png']);
 const IMAGE_TYPES: Record<string, string> = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/avif': 'avif' };
@@ -109,7 +120,16 @@ interface Boot {
   exists?: boolean;
   siteKey?: string;
   katexCss?: string;
+  /** Angemeldetes Konto (ohne Google-ID). */
+  user?: { name: string; email: string; picture: string } | null;
+  /** Anmelden ist auf dem Server eingerichtet. */
+  login?: boolean;
+  /** Bearbeitungsschlüssel aus dem Konto (neues Gerät). */
+  editKey?: string;
 }
+
+const loginEnabled = (env: Env) => !!env.GOOGLE_CLIENT_ID || env.DEV_LOGIN === '1';
+const publicUser = (u: User | null) => (u ? { name: u.name, email: u.email, picture: u.picture } : null);
 
 function page(title: string, body: string, boot: Boot, status = 200): Response {
   const exists = boot.page !== 'doc' || boot.exists ? '1' : '0';
@@ -161,12 +181,16 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
   const wantsMarkdown = /text\/markdown/.test(req.headers.get('accept') || '') && !/text\/html/.test(req.headers.get('accept') || '');
   if (wantsMarkdown) return rawMarkdown(info, id, false);
 
+  const user = await currentUser(req, env);
+  const common = { page: 'doc' as const, id, user: publicUser(user), login: loginEnabled(env) };
   if (!info.exists) {
-    return page('Neues Dokument', `<main id="app"></main>`, { page: 'doc', id, exists: false, siteKey: env.TURNSTILE_SITEKEY }, 200);
+    // Angemeldet braucht es keinen Spam-Schutz.
+    return page('Neues Dokument', `<main id="app"></main>`, { ...common, exists: false, siteKey: user ? undefined : env.TURNSTILE_SITEKEY }, 200);
   }
+  const editKey = user ? (await accountStub(env, user.sub).get(id))?.editKey || undefined : undefined;
   const { html } = render(info.markdown);
   const title = info.title || id;
-  return page(title, `<main id="app"><article class="doc" id="view">${html}</article></main>`, { page: 'doc', id, exists: true });
+  return page(title, `<main id="app"><article class="doc" id="view">${html}</article></main>`, { ...common, exists: true, editKey });
 }
 
 function rawMarkdown(info: { exists: boolean; markdown: string }, id: string, download: boolean): Response {
@@ -188,6 +212,7 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
   const method = req.method;
 
   if (parts[0] === 'unlock' && method === 'POST') return unlock(req, env);
+  if (parts[0] === 'me') return me(req, env, parts.slice(1));
 
   if (parts[0] === 'admin' && parts[1] === 'docs' && method === 'GET') {
     if (!(await isAdmin(req, env))) return fail(401, 'Nicht freigeschaltet.');
@@ -235,14 +260,16 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
 
   if (action === 'create' && method === 'POST') {
     const admin = await isAdmin(req, env);
+    const user = await currentUser(req, env);
     if (!admin) {
-      const { success } = await env.CREATE_LIMIT.limit({ key: ip(req) });
+      const { success } = await env.CREATE_LIMIT.limit({ key: user ? `u:${user.sub}` : ip(req) });
       if (!success) return fail(429, 'Zu viele neue Dokumente. Bitte kurz warten.');
       const body = await req.json<{ token?: string }>().catch(() => ({} as { token?: string }));
-      if (!(await turnstileOk(env, body.token, ip(req)))) return fail(403, 'Spam-Schutz nicht bestanden. Bitte Seite neu laden.');
+      if (!user && !(await turnstileOk(env, body.token, ip(req)))) return fail(403, 'Spam-Schutz nicht bestanden. Bitte Seite neu laden.');
     }
     const editKey = await stub.create(id);
     if (!editKey) return fail(409, 'Dieses Dokument wurde gerade von jemand anderem angelegt.');
+    if (user) await accountStub(env, user.sub).upsert([{ id, editKey, opened: Date.now() }]);
     return json({ editKey }, 201);
   }
 
@@ -280,6 +307,8 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
     if (!data) return fail(404, 'Dokument nicht gefunden.');
     if (!(await docStub(env, to).create(to, '', data))) return fail(409, 'Diese Adresse ist schon vergeben.');
     await stub.moveTo(to);
+    const user = await currentUser(req, env);
+    if (user) await accountStub(env, user.sub).rename(id, to);
     return json({ id: to, url: docUrl(req, to) });
   }
 
@@ -376,6 +405,48 @@ async function readMarkdownBody(req: Request): Promise<{ markdown: string; id?: 
   return { markdown: await req.text(), id: new URL(req.url).searchParams.get('id') || undefined };
 }
 
+// ── Konto ───────────────────────────────────────────────────────────────────
+
+async function me(req: Request, env: Env, parts: string[]): Promise<Response> {
+  const user = await currentUser(req, env);
+  if (!user) return fail(401, 'Nicht angemeldet.');
+  // Nur von dieser Seite aus (zusätzlich zu SameSite=Lax beim Cookie).
+  const from = req.headers.get('origin');
+  if (req.method !== 'GET' && from && from !== origin(req)) return fail(403, 'Fremde Herkunft.');
+  const acc = accountStub(env, user.sub);
+  const body = async <T>() => (await req.json<T>().catch(() => ({}))) as Partial<T>;
+
+  if (!parts.length) {
+    if (req.method === 'GET') return json({ user: publicUser(user), docs: await acc.list() });
+    if (req.method === 'DELETE') {
+      await acc.destroy();
+      return json({ ok: true }, 200, { 'set-cookie': clearSessionCookie(req) });
+    }
+  }
+  if (parts[0] !== 'docs') return fail(404, 'Unbekannt.');
+
+  if (parts.length === 1 && req.method === 'POST') {
+    const { items } = await body<{ items: Partial<AccountDoc>[] }>();
+    if (!Array.isArray(items)) return fail(400, 'items fehlt.');
+    const clean = items.map(it => ({ ...it, id: typeof it?.id === 'string' ? normalizeId(it.id) || '' : '' })).filter(it => it.id);
+    return json({ docs: await acc.upsert(clean) });
+  }
+
+  const id = parts[1] ? normalizeId(parts[1]) : null;
+  if (!id) return fail(400, 'Ungültige ID.');
+  if (parts.length === 2 && req.method === 'DELETE') {
+    await acc.remove(id);
+    return json({ ok: true });
+  }
+  if (parts[2] === 'tags' && req.method === 'PUT') {
+    const { tags } = await body<{ tags: string[] }>();
+    const doc = await acc.setTags(id, tags);
+    if (!doc) return fail(404, 'Nicht in deiner Liste.');
+    return json(doc);
+  }
+  return fail(404, 'Unbekannt.');
+}
+
 async function unlock(req: Request, env: Env): Promise<Response> {
   if (!env.TOTP_SECRET || !env.SESSION_SECRET) return fail(503, '2FA ist auf dem Server nicht eingerichtet.');
   const reg = registry(env);
@@ -394,6 +465,8 @@ async function unlock(req: Request, env: Env): Promise<Response> {
   if (id) {
     const editKey = await docStub(env, id).getEditKey();
     if (!editKey) return fail(404, 'Dokument nicht gefunden.');
+    const user = await currentUser(req, env);
+    if (user) await accountStub(env, user.sub).upsert([{ id, editKey, opened: Date.now() }]);
     return json({ editKey });
   }
   const token = await signToken(env.SESSION_SECRET, ADMIN_TTL);
@@ -417,6 +490,14 @@ export default {
       // Trainings-Crawler sperrt Cloudflare (verwaltete robots.txt davor).
       return new Response('# Dokumente sind per noindex von Suchmaschinen ausgenommen.\n', { headers: { 'content-type': 'text/plain' } });
     }
+    if (path.startsWith('/auth/')) {
+      try {
+        return await auth(req, env, url);
+      } catch (err) {
+        console.error(err);
+        return new Response('Anmeldung fehlgeschlagen.', { status: 500 });
+      }
+    }
     if (path.startsWith('/api/')) {
       try {
         return await api(req, env, url, ctx);
@@ -431,7 +512,8 @@ export default {
       return new Response(null, { status: 302, headers: { location: `/${randomId()}`, 'cache-control': 'no-store' } });
     }
     if (path === '/home') {
-      return page('md', '<main id="app"></main>', { page: 'home' });
+      const user = await currentUser(req, env);
+      return page('md', '<main id="app"></main>', { page: 'home', user: publicUser(user), login: loginEnabled(env) });
     }
     if (path === '/admin') {
       return page('Übersicht', '<main id="app"></main>', { page: 'admin' });

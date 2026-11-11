@@ -7,7 +7,7 @@
 //  - Seiten: erst das Netz, damit man den neuesten Stand sieht; ohne Netz
 //    die zuletzt gespeicherte Fassung, notfalls die Übersicht (/home).
 //  - Bilder unter /i/ ändern sich nie: aus dem Speicher.
-//  - /api/ geht immer ans Netz.
+//  - /api/ und /auth/ (Anmelden) gehen immer ans Netz.
 //
 // Registriert wird /sw.js?v=<build>. Jeder Deploy installiert dadurch einen
 // neuen Worker, der die Dateien des alten Builds wegräumt.
@@ -49,7 +49,7 @@ self.addEventListener('fetch', event => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith('/api/') || url.pathname === '/sw.js') return;
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname === '/sw.js') return;
 
   if (/^\/(assets|fonts|icons)\//.test(url.pathname) || ['/favicon.svg', '/manifest.webmanifest', '/apple-touch-icon.png'].includes(url.pathname)) {
     event.respondWith(cacheFirst(req, STATIC));

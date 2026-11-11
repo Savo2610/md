@@ -422,6 +422,7 @@ button.t.strong { color: var(--fg); font-weight: 700; }
   dialog.dlg-menu { padding-top: 8px; }
   dialog.dlg-menu::backdrop { background: rgba(0, 0, 0, .18); }
   .menu button, .menu a.recent { padding: 13px 12px; font-size: 16px; }
+  .tag-form .field-line input { font-size: 16px; }
   .menu-label { padding: 14px 12px 6px; }
   .field-line input, .name-row input { font-size: 16px; } /* iOS zoomt sonst beim Antippen */
   .name-row { flex-direction: column; align-items: stretch; }
@@ -450,3 +451,40 @@ button.t.strong { color: var(--fg); font-weight: 700; }
 .note-remove { appearance: none; border: 0; background: none; color: var(--faint); font-size: 20px; padding: 8px 4px 8px 16px; cursor: pointer; }
 .note-remove:hover { color: var(--danger); }
 .notes-empty { color: var(--muted); font-size: 15px; padding: 16px 0; border: 0 !important; }
+.note-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.note-actions { display: flex; align-items: center; }
+.note-btn { appearance: none; border: 0; background: none; color: var(--faint); font-size: 18px; line-height: 1; padding: 10px 6px; cursor: pointer; }
+.note-btn:hover { color: var(--fg-soft); }
+.note-btn.note-remove { font-size: 20px; padding-left: 10px; }
+.note-btn.note-remove:hover { color: var(--danger); }
+.notes li:not(:hover) .note-btn:not(:focus-visible) { opacity: .7; }
+.home-foot { margin-top: 22px; }
+button.link { appearance: none; border: 0; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: .18em; text-decoration-thickness: 1px; }
+
+/* Tags */
+.tag-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.tag-bar[hidden] { display: none; }
+.tag {
+  appearance: none; display: inline-flex; align-items: center; cursor: pointer;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg-soft);
+  border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 13.5px; line-height: 1.4;
+}
+.tag:hover { border-color: var(--faint); color: var(--fg); }
+.tag.on { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+.tag.small { padding: 0 7px; font-size: 12px; border-radius: 999px; background: var(--soft); border-color: transparent; color: var(--muted); }
+.tag.small:hover { color: var(--fg); }
+.tag-x { margin-left: 6px; opacity: .7; }
+.note-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-form .tag-doc { margin: -6px 0 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tag-form .field-line input { font-family: var(--font); font-size: 15px; background: var(--bg); }
+
+/* Konto */
+.avatar {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; overflow: hidden;
+  width: 26px; height: 26px; border-radius: 50%; background: var(--soft); color: var(--fg-soft);
+  font-size: 13px; font-weight: 700; line-height: 1;
+}
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+button.t.avatar-btn { padding: 4px; border-radius: 50%; }
+.menu a.recent.all .recent-title { color: var(--fg-soft); font-size: 13.5px; }
