@@ -328,7 +328,7 @@ function startDoc(boot: Boot) {
 
     const rows: [string, string, string][] = [['Zum Lesen', base, 'Öffnet die Ansicht. Bearbeiten ist damit nicht möglich.']];
     if (editKey) rows.push(['Zum Bearbeiten', `${base}#edit=${editKey}`, 'Wer diesen Link hat, kann das Dokument ändern.']);
-    rows.push(['Als Markdown', `${base}.md`, 'Reiner Text, z. B. für KI-Assistenten.']);
+    if (exists) rows.push(['Als Markdown', `${base}.md`, 'Reiner Text, z. B. für KI-Assistenten.']);
     for (const [label, url, hint] of rows) {
       const input = el('input', { type: 'text', readonly: '', value: url, 'aria-label': label }) as HTMLInputElement;
       input.addEventListener('focus', () => input.select());
