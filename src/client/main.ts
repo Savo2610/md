@@ -9,6 +9,7 @@ import { titleOf, slugify } from '../shared/title';
 import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, unlock, recent, ago, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, type MenuItem } from './ui';
 import { account, accountItems, type User } from './account';
 import { fineRow, spellcheckOn, startMode, rememberMode, writerName } from './settings';
+import { openAsNew, takePending, dropZone, fileToMarkdown } from './importer';
 
 interface Boot {
   page: 'doc' | 'admin' | 'home';
@@ -388,7 +389,7 @@ function startDoc(boot: Boot) {
   // ── Menüs ─────────────────────────────────────────────────────────────────
 
   function openRecent() {
-    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')], ['Alle Dokumente', () => (location.href = '/home')]];
+    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')], ['Datei öffnen …', () => openAsNew()], ['Alle Dokumente', () => (location.href = '/home')]];
     const list = recent.list().filter(r => r.id !== id && !r.trashed);
     if (list.length) items.push(el('div', { class: 'menu-label' }, 'Zuletzt geöffnet'));
     for (const r of list.slice(0, 5)) {
@@ -403,12 +404,16 @@ function startDoc(boot: Boot) {
   }
 
   function more() {
+    fetchedMd = null; fetchingMd = null; // jedes Mal frisch, andere schreiben vielleicht mit
+    prefetchMarkdown();
     const items: MenuItem[] = [];
     if (compactQuery.matches) {
       items.push(['Teilen', share]);
       items.push(['Neues Dokument', () => { if (navigator.onLine) location.href = '/'; else toast('Offline: Neue Dokumente gehen nur mit Verbindung.'); }]);
     }
+    items.push(['Markdown kopieren', copyMarkdown]);
     items.push(['Herunterladen (.md)', () => { if (exists) location.href = `/${encodeURIComponent(id)}.md?download=1`; else toast('Noch leer.'); }]);
+    items.push(['Drucken / PDF …', printDoc]);
     if (account.user && exists) items.push(['Tags', openTags]);
     const unlocked = (key: string | null) => {
       if (!key) return;
@@ -429,6 +434,83 @@ function startDoc(boot: Boot) {
     if (exists && (ownerKey(id) || isAdmin())) items.push(['Löschen', trashDoc, 'danger']);
     menu('right', items);
   }
+
+  // ── Kopieren und Drucken ──────────────────────────────────────────────────
+
+  // In der Ansicht ohne Editor: Markdown schon beim Öffnen des Menüs holen,
+  // damit der Klick es sofort hat (Safari kopiert nur direkt im Klick).
+  let fetchedMd: string | null = null;
+  let fetchingMd: Promise<string> | null = null;
+  function prefetchMarkdown() {
+    if (editor || !exists || fetchingMd) return;
+    fetchingMd = fetch(`/${encodeURIComponent(id)}.md`, { cache: 'no-store' })
+      .then(r => { if (!r.ok) throw new Error(); return r.text(); })
+      .then(t => (fetchedMd = t), e => { fetchingMd = null; throw e; });
+    fetchingMd.catch(() => {});
+  }
+
+  async function copyMarkdown() {
+    const local = editor?.text() ?? fetchedMd ?? undefined;
+    if (!exists && !local) { toast('Noch leer.'); return; }
+    try {
+      if (local !== undefined) {
+        await navigator.clipboard.writeText(local).catch(() => { if (!copyFallback(local)) throw new Error(); });
+      } else {
+        prefetchMarkdown();
+        const text = fetchingMd!;
+        // Safari erlaubt das Schreiben nach einem fetch nur über ein ClipboardItem mit Promise.
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then(t => new Blob([t], { type: 'text/plain' })) })]);
+        } catch {
+          const t = await text;
+          await navigator.clipboard.writeText(t).catch(() => { if (!copyFallback(t)) throw new Error(); });
+        }
+      }
+      toast('Markdown kopiert.');
+    } catch {
+      toast('Kopieren ging nicht.');
+    }
+  }
+
+  /** Ohne Clipboard-API (oder verweigert): klassisch über ein unsichtbares Textfeld. */
+  function copyFallback(text: string): boolean {
+    const ta = el('textarea', { readonly: '', style: 'position:fixed;opacity:0;top:0;left:0' }) as HTMLTextAreaElement;
+    ta.value = text;
+    document.body.append(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+
+  /** Drucken bzw. „Als PDF sichern“ im Druckdialog. Gedruckt wird immer die Ansicht. */
+  async function printDoc() {
+    if (!exists && !editor?.text()) { toast('Noch leer.'); return; }
+    if (editor && mode !== 'view') {
+      const { render } = await import('./editor');
+      const r = render(editor.text());
+      article.innerHTML = r.html;
+      document.title = r.title || id;
+      enableTasks();
+      await enhance(article, boot.katexCss);
+    }
+    // KaTeX-Stil und Schriften abwarten, sonst fehlen sie im PDF.
+    const css = boot.katexCss && article.querySelector('.math') ? document.querySelector<HTMLLinkElement>(`link[href="${boot.katexCss}"]`) : null;
+    if (css && !css.sheet) await new Promise(r => { css.addEventListener('load', r, { once: true }); setTimeout(r, 2000); });
+    await document.fonts.ready;
+    print();
+  }
+
+  // Auf Papier immer hell (auch bei ⌘P).
+  let themeBeforePrint: string | null = null;
+  addEventListener('beforeprint', () => {
+    themeBeforePrint = document.documentElement.getAttribute('data-theme');
+    document.documentElement.setAttribute('data-theme', 'light');
+  });
+  addEventListener('afterprint', () => {
+    if (themeBeforePrint) document.documentElement.setAttribute('data-theme', themeBeforePrint);
+    else document.documentElement.removeAttribute('data-theme');
+  });
 
   function openTags() {
     if (!exists) { toast('Erst etwas schreiben, dann Tags vergeben.'); return; }
@@ -461,6 +543,10 @@ function startDoc(boot: Boot) {
     if (mod && e.key.toLowerCase() === 'e') {
       e.preventDefault();
       setMode(mode === 'view' ? 'edit' : 'view');
+    } else if (mod && e.key.toLowerCase() === 'p' && mode !== 'view') {
+      // Beim Bearbeiten: den aktuellen Stand als Ansicht drucken, nicht den Editor.
+      e.preventDefault();
+      printDoc();
     } else if (mode === 'view' && !mod && !e.altKey && e.key === 'e' && !(e.target instanceof HTMLInputElement) && !document.querySelector('dialog[open]')) {
       if (canEdit()) { e.preventDefault(); setMode('edit'); }
     }
@@ -535,6 +621,24 @@ function startDoc(boot: Boot) {
     mode = 'view';
     setMode(target, false);
   }
+
+  // „Datei öffnen …“: Inhalt landet im neuen, leeren Dokument (legt es dabei an).
+  const imported = exists ? null : takePending();
+  if (imported) {
+    loadEditor().then(async ed => {
+      await ed.whenLocal();
+      if (ed.text()) return;
+      ed.view.dispatch({ changes: { from: 0, insert: imported }, userEvent: 'input.paste' });
+      toast('Importiert. Die Adresse kannst du unter „Teilen“ ändern.');
+    });
+  }
+
+  // Datei auf die Seite ziehen: in der Ansicht als neues Dokument, beim
+  // Bearbeiten an der Cursorstelle (Ziehen direkt in den Text regelt der Editor).
+  dropZone(file => {
+    if (mode !== 'view' && editor) fileToMarkdown(file).then(md => editor!.insertBlock(md), () => toast('Die Datei ließ sich nicht lesen.'));
+    else openAsNew(file);
+  });
 }
 
 // ── Gelöschtes Dokument (Papierkorb) ────────────────────────────────────────

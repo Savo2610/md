@@ -39,6 +39,7 @@
     "markdown-it-sub": "^2.0.0",
     "markdown-it-sup": "^2.0.0",
     "mermaid": "^12.3.0",
+    "turndown": "^7.2.5",
     "y-codemirror.next": "^0.3.6",
     "y-indexeddb": "^9.0.12",
     "y-protocols": "^1.0.7",
@@ -47,6 +48,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261110.1",
     "@types/markdown-it": "^14.2.0",
+    "@types/turndown": "^5.0.6",
     "concurrently": "^10.0.7",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",

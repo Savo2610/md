@@ -19,6 +19,7 @@ import { uploadImage } from './images';
 import { render } from '../shared/render';
 import { enhance } from './enhance';
 import { tableKeys, tableFromClipboard } from './table';
+import { isTextFile, fileToMarkdown, looksRich } from './importer';
 
 export { render };
 
@@ -52,6 +53,8 @@ export interface EditorHandle {
   setPreview(on: boolean): void;
   setName(name: string): void;
   setSpellcheck(on: boolean): void;
+  /** Markdown als eigenen Absatz an der Cursorstelle einsetzen (importierte Datei). */
+  insertBlock(text: string): void;
   connect(): void;
   /** Wartet, bis die lokale Kopie (IndexedDB) geladen ist. */
   whenLocal(): Promise<void>;
@@ -805,6 +808,40 @@ export function mountEditor(o: EditorOptions): EditorHandle {
     }
   }
 
+  async function pasteHtml(html: string, plain: string) {
+    let md = plain;
+    try {
+      md = (await import('./html2md')).htmlToMarkdown(html) || plain;
+    } catch { /* offline und noch nicht geladen: als Text */ }
+    // Mehrzeiliges bzw. Blöcke (Überschrift, Liste, Zitat …) als eigener Absatz.
+    if (md.includes('\n') || /^(#{1,6} |[-+>] |\d+\. |```|\|)/.test(md)) { insertBlock(md); return; }
+    // Aktuelle Auswahl: CodeMirror hat sie über fremde Änderungen hinweg mitgeführt.
+    const sel = view.state.selection.main;
+    view.dispatch({ changes: { from: sel.from, to: sel.to, insert: md }, selection: { anchor: sel.from + md.length }, scrollIntoView: true, userEvent: 'input.paste' });
+  }
+
+  async function insertFile(file: File, from: number, to: number) {
+    let md: string;
+    try {
+      md = await fileToMarkdown(file);
+    } catch {
+      o.toast('Die Datei ließ sich nicht lesen.');
+      return;
+    }
+    insertBlock(md, from, to);
+  }
+
+  function insertBlock(text: string, from = view.state.selection.main.from, to = view.state.selection.main.to) {
+    const { state } = view;
+    from = Math.min(from, state.doc.length);
+    to = Math.min(Math.max(to, from), state.doc.length);
+    const before = state.sliceDoc(state.doc.lineAt(from).from, from).trim() ? '\n\n' : '';
+    const after = state.sliceDoc(to, state.doc.lineAt(to).to).trim() ? '\n\n' : '';
+    const insert = before + text.trim() + after;
+    view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length - after.length }, scrollIntoView: true, userEvent: 'input.paste' });
+    view.focus();
+  }
+
   function replaceText(find: string, insert: string) {
     const idx = view.state.doc.toString().indexOf(find);
     if (idx === -1) return;
@@ -870,17 +907,40 @@ export function mountEditor(o: EditorOptions): EditorHandle {
               return true;
             }
             const text = raw.trim();
-            if (!URL_ONLY.test(text)) return false;
-            e.preventDefault();
-            pasteLink(text);
-            return true;
+            if (URL_ONLY.test(text)) {
+              e.preventDefault();
+              pasteLink(text);
+              return true;
+            }
+            // Kopierte .md/.txt/.html-Datei (z. B. aus dem Finder).
+            const textFile = files.find(isTextFile);
+            if (textFile) {
+              e.preventDefault();
+              insertFile(textFile, sel.from, sel.to);
+              return true;
+            }
+            // Rich Text aus Webseiten, Google Docs, Mail → Markdown.
+            // ⌘⇧V (ohne Formatierung einfügen) liefert nur Text und bleibt unberührt.
+            const html = e.clipboardData?.getData('text/html') || '';
+            if (html && !inCodeOrUrl(v.state, sel.from) && looksRich(html)) {
+              e.preventDefault();
+              pasteHtml(html, raw);
+              return true;
+            }
+            return false;
           },
           drop(e, v) {
             const files = [...(e.dataTransfer?.files || [])];
-            if (!files.some(f => f.type.startsWith('image/'))) return false;
-            e.preventDefault();
             const pos = v.posAtCoords({ x: e.clientX, y: e.clientY }) ?? v.state.selection.main.head;
-            insertImages(files, pos);
+            if (files.some(f => f.type.startsWith('image/'))) {
+              e.preventDefault();
+              insertImages(files, pos);
+              return true;
+            }
+            const textFile = files.find(isTextFile);
+            if (!textFile) return false;
+            e.preventDefault();
+            insertFile(textFile, pos, pos);
             return true;
           },
         }),
@@ -936,6 +996,9 @@ export function mountEditor(o: EditorOptions): EditorHandle {
 
   if (o.exists) provider.connect();
 
+  // Umwandler für Rich Text schon mal laden, damit Einfügen sofort klappt.
+  setTimeout(() => { import('./html2md').catch(() => {}); }, 3000);
+
   return {
     view,
     text: () => ytext.toString(),
@@ -943,6 +1006,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
     setSpellcheck(on) {
       view.dispatch({ effects: spellComp.reconfigure(spellAttrs(on)) });
     },
+    insertBlock: text => insertBlock(text),
     setName(name) {
       awareness.setLocalStateField('user', { name: name || 'Gast', color, colorLight: color + '33' });
     },

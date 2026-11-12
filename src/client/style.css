@@ -434,8 +434,24 @@ table.docs th .pick { cursor: pointer; }
 }
 
 @media print {
-  #bar, .seltools, .mobiletools, #toast { display: none !important; }
+  @page { margin: 18mm 16mm; }
+  #bar, .seltools, .mobiletools, #toast, .turnstile, dialog, .workspace { display: none !important; }
+  /* Gedruckt wird immer die Ansicht, auch aus dem Bearbeiten-Modus. */
+  body[data-mode] #view { display: block !important; }
   .doc { padding: 0; max-width: none; }
+  .doc .anchor { display: none; }
+  .doc pre, .doc blockquote, .doc table, .doc img, .doc .math-display, .doc pre.mermaid { break-inside: avoid; }
+  .doc h1, .doc h2, .doc h3, .doc h4 { break-after: avoid; }
+}
+
+/* Datei über die Seite ziehen (Ansicht, Übersicht) */
+body.drop-target[data-mode="view"]::after, body.drop-target[data-mode="home"]::after {
+  content: 'Loslassen, um die Datei als neues Dokument zu öffnen';
+  position: fixed; inset: 12px; z-index: 60; pointer-events: none;
+  display: grid; place-items: center;
+  border: 2px dashed var(--caret); border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  color: var(--fg-soft); font-size: 15px;
 }
 
 /* ── App und Handy ──────────────────────────────────────────────────────── */

@@ -8,6 +8,7 @@ import { $, el, recent, ago, toast, store, menu, isAdmin, ask, adminHeaders, own
 import { account, accountItems, avatar } from './account';
 import { tagChips, tagDialog } from './tags';
 import { fineRow } from './settings';
+import { openAsNew, dropZone } from './importer';
 
 const TAG_FILTER = 'md:tag';
 const UNTAGGED = '\u0000ohne';
@@ -20,7 +21,8 @@ export function start() {
   const right = el('nav', { class: 'bar-right' });
   // „md“ oben links: Einstellungen und Datenschutz, klein wie auf den Dokumentseiten.
   const brand = el('button', { type: 'button', class: 'brand', title: 'Menü', 'aria-haspopup': 'dialog' }, 'md');
-  brand.addEventListener('click', () => menu('left', [['Neues Dokument', () => (location.href = '/')], fineRow()]));
+  brand.addEventListener('click', () => menu('left', [['Neues Dokument', () => (location.href = '/')], ['Datei öffnen …', () => openAsNew()], fineRow()]));
+  dropZone(file => openAsNew(file));
   const bar = el('header', { id: 'bar' },
     el('div', { class: 'bar-left' }, brand),
     right,

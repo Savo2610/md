@@ -47,6 +47,15 @@ Durable Object pro Dokument, Bilder in R2.
   wiederherstellen oder endgültig löschen. Danach löscht der Alarm des
   Dokuments es samt Bildern.
 - `md.veerka.mp/<id>.md` liefert das reine Markdown (für KI-Agenten, Download).
+- ⋯-Menü: „Markdown kopieren“, „Herunterladen (.md)“, „Drucken / PDF …“
+  (Druckdialog des Browsers, immer hell, gedruckt wird die Ansicht; ⌘P beim
+  Bearbeiten druckt den aktuellen Stand).
+- Import (`src/client/importer.ts`, `html2md.ts`): „Datei öffnen …“ im
+  „md“-Menü bzw. auf `/home` oder Datei auf die Seite ziehen legt ein neues
+  Dokument an; in den Editor gezogene oder eingefügte Dateien landen an der
+  Cursorstelle. `.md`/`.txt` unverändert, `.html` wird zu Markdown. Ebenso
+  eingefügter Rich Text (Webseiten, Google Docs, Mail, die eigene Ansicht inkl.
+  Formeln); ⌘⇧V fügt ohne Umwandlung ein.
 - `md.veerka.mp/admin`: alle Dokumente, Löschen, „Behalten“ (2FA-Code oder
   angemeldet mit dem Google-Konto aus dem Secret `ADMIN_EMAIL`).
 
