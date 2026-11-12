@@ -1,6 +1,6 @@
 // Übersicht aller Dokumente (/admin). Zugang mit 2FA-Code.
 
-import { $, el, toast, adminToken, adminHeaders, isAdmin, setAdminToken, codeForm, unlock } from './ui';
+import { $, el, toast, ask, adminToken, adminHeaders, isAdmin, setAdminToken, codeForm, unlock } from './ui';
 
 interface DocSummary {
   id: string; title: string; snippet: string; created: number; updated: number;
@@ -56,8 +56,41 @@ async function list(main: HTMLElement, q = '') {
   let t: ReturnType<typeof setTimeout>;
   search.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => list(main, search.value), 250); });
 
+  // Mehrere auswählen und auf einmal löschen.
+  const picked = new Set<string>();
+  const boxes: HTMLInputElement[] = [];
+  const all = el('input', { type: 'checkbox', 'aria-label': 'Alle auswählen' }) as HTMLInputElement;
+  const bulkCount = el('span', {});
+  const bulkDel = el('button', { type: 'button', class: 't boxed danger-boxed' }, 'Löschen');
+  const bulkNone = el('button', { type: 'button', class: 't' }, 'Auswahl aufheben');
+  const bulk = el('div', { class: 'bulk' }, bulkCount, el('span', { class: 'bulk-actions' }, bulkNone, bulkDel));
+  const sync = () => {
+    bulk.hidden = !picked.size;
+    bulkCount.textContent = `${picked.size} ausgewählt`;
+    all.checked = !!boxes.length && picked.size === boxes.length;
+    all.indeterminate = picked.size > 0 && picked.size < boxes.length;
+  };
+  all.addEventListener('change', () => {
+    for (const b of boxes) { b.checked = all.checked; if (all.checked) picked.add(b.value); else picked.delete(b.value); }
+    sync();
+  });
+  bulkNone.addEventListener('click', () => { all.checked = false; all.dispatchEvent(new Event('change')); });
+  bulkDel.addEventListener('click', async () => {
+    const ids = [...picked];
+    if (!(await ask(`${ids.length === 1 ? '1 Dokument' : `${ids.length} Dokumente`} endgültig löschen?`, 'Mit allen Bildern. Das lässt sich nicht rückgängig machen.', 'Löschen'))) return;
+    bulkDel.disabled = true;
+    let ok = 0;
+    for (let i = 0; i < ids.length; i += 6) {
+      const res = await Promise.all(ids.slice(i, i + 6).map(id =>
+        fetch(`/api/docs/${encodeURIComponent(id)}`, { method: 'DELETE', headers: adminHeaders() }).then(r => r.ok).catch(() => false)));
+      ok += res.filter(Boolean).length;
+    }
+    toast(ok === ids.length ? `${ok} gelöscht.` : `${ok} von ${ids.length} gelöscht.`);
+    list(main, q);
+  });
+
   const table = el('table', { class: 'docs' });
-  table.append(el('thead', {}, el('tr', {}, el('th', {}, 'Dokument'), el('th', {}, 'Geändert'), el('th', {}, 'Größe'), el('th', { title: 'Wird nicht automatisch gelöscht' }, 'Behalten'), el('th', {}, ''))));
+  table.append(el('thead', {}, el('tr', {}, el('th', {}, el('label', { class: 'pick' }, all, 'Dokument')), el('th', {}, 'Geändert'), el('th', {}, 'Größe'), el('th', { title: 'Wird nicht automatisch gelöscht' }, 'Behalten'), el('th', {}, ''))));
   const tbody = el('tbody');
   for (const d of data.docs) {
     const pin = el('input', { type: 'checkbox', 'aria-label': 'Behalten' }) as HTMLInputElement;
@@ -69,9 +102,12 @@ async function list(main: HTMLElement, q = '') {
       });
       if (!r.ok) { pin.checked = !pin.checked; toast('Ging nicht.'); }
     });
+    const box = el('input', { type: 'checkbox', value: d.id, 'aria-label': 'Auswählen' }) as HTMLInputElement;
+    box.addEventListener('change', () => { if (box.checked) picked.add(d.id); else picked.delete(d.id); sync(); });
+    boxes.push(box);
     const del = el('button', { type: 'button', class: 't danger' }, 'Löschen');
     del.addEventListener('click', async () => {
-      if (!confirm(`„${d.title || d.id}“ mit allen Bildern endgültig löschen?`)) return;
+      if (!(await ask('Endgültig löschen?', `„${d.title || d.id}“ mit allen Bildern. Das lässt sich nicht rückgängig machen.`, 'Löschen'))) return;
       const r = await fetch(`/api/docs/${encodeURIComponent(d.id)}`, { method: 'DELETE', headers: adminHeaders() });
       if (r.ok) { row.remove(); toast('Gelöscht.'); } else toast('Löschen fehlgeschlagen.');
     });
@@ -86,7 +122,7 @@ async function list(main: HTMLElement, q = '') {
     }
     const row = el('tr', { class: d.trashed ? 'trashed' : '' },
       el('td', {},
-        el('a', { href: `/${encodeURIComponent(d.id)}` }, d.title || d.id),
+        el('span', { class: 'pick' }, box, el('a', { href: `/${encodeURIComponent(d.id)}` }, d.title || d.id)),
         status,
         el('div', { class: 'snippet' }, d.snippet || '(leer)'),
       ),
@@ -102,7 +138,9 @@ async function list(main: HTMLElement, q = '') {
   main.replaceChildren(
     el('div', { class: 'admin-head' }, el('h1', {}, 'Übersicht'), el('span', { class: 'hint' }, `${data.total} Dokumente · ${fmtSize(data.bytes)}`)),
     search,
+    bulk,
     data.docs.length ? table : el('p', { class: 'hint' }, 'Keine Dokumente gefunden.'),
   );
+  sync();
   if (q) { search.focus(); search.setSelectionRange(q.length, q.length); }
 }
