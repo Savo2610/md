@@ -5,7 +5,10 @@
 // Die Dokumente selbst liegen weiter in ihren Doc-Objekten; Tags sind
 // persönlich und tauchen im Dokument nicht auf.
 //
-// Dazu die Memos (/memos): kurze private Notizen, nur für dieses Konto.
+// Dazu die Memos (/memos): kurze private Notizen, nur für dieses Konto, samt
+// Anhängen (Bilder, Dateien, Sprachmemos). Die Anhänge liegen in R2 unter
+// memos/<ID dieses Objekts>/<datei>; hier steht nur, welche es gibt und wie
+// groß sie sind. Im Text eines Memos stehen sie als /m/<datei>.
 
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
@@ -41,6 +44,14 @@ const MAX_TAGS = 20;
 const MAX_TAG_LEN = 30;
 export const MAX_MEMO = 20_000;
 const MAX_MEMOS = 50_000;
+/** Anhänge: höchstens so groß pro Datei bzw. zusammen pro Konto. */
+export const MAX_FILE = 50 * 1024 * 1024;
+const MAX_FILES_TOTAL = 2 * 1024 * 1024 * 1024;
+/** Hochgeladen, aber nie in ein Memo übernommen: nach einem Tag weg. */
+const ORPHAN_AFTER = 24 * 3600_000;
+export const FILE_NAME = /^[\w-]{6,40}\.[a-z0-9]{1,8}$/;
+const FILE_REF = /\/m\/([\w-]{6,40}\.[a-z0-9]{1,8})/g;
+const refsIn = (text: string) => new Set([...text.matchAll(FILE_REF)].map(m => m[1]));
 /** Memo-IDs kommen vom Browser (damit Offline-Senden und Rückgängig nichts doppelt anlegen). */
 export const MEMO_ID = /^[\w-]{8,40}$/;
 
@@ -76,6 +87,9 @@ export class Account extends DurableObject<Env> {
         id TEXT PRIMARY KEY, text TEXT NOT NULL, created INTEGER NOT NULL, updated INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS memos_created ON memos(created);
+      CREATE TABLE IF NOT EXISTS memo_files (
+        name TEXT PRIMARY KEY, size INTEGER NOT NULL, type TEXT NOT NULL, created INTEGER NOT NULL
+      );
     `);
     // Spalten kamen später dazu (Papierkorb).
     for (const col of ['owner_key TEXT', 'trashed INTEGER NOT NULL DEFAULT 0']) {
@@ -157,9 +171,9 @@ export class Account extends DurableObject<Env> {
 
   // ── Memos ───────────────────────────────────────────────────────────────
 
-  /** Alle Memos, älteste zuerst (wie in einem Chat). */
+  /** Alle Memos, neueste zuerst. */
   memos(): Memo[] {
-    return this.sql.exec('SELECT * FROM memos ORDER BY created, id').toArray().map(memoRow);
+    return this.sql.exec('SELECT * FROM memos ORDER BY created DESC, id DESC').toArray().map(memoRow);
   }
 
   /**
@@ -182,13 +196,55 @@ export class Account extends DurableObject<Env> {
     return items.filter(m => this.addMemo(m.id, m.text, m.created)).map(m => m.id);
   }
 
-  editMemo(id: string, text: string): Memo | null {
+  /** Liefert das Memo und Anhänge, die danach nirgends mehr vorkommen (in R2 löschen). */
+  editMemo(id: string, text: string): { memo: Memo | null; orphans: string[] } {
+    const old = this.memo(id);
+    if (!old) return { memo: null, orphans: [] };
     this.sql.exec('UPDATE memos SET text = ?, updated = ? WHERE id = ?', text, Date.now(), id);
-    return this.memo(id);
+    const kept = refsIn(text);
+    return { memo: this.memo(id), orphans: this.dropUnused([...refsIn(old.text)].filter(f => !kept.has(f))) };
   }
 
-  deleteMemo(id: string): boolean {
-    return this.sql.exec('DELETE FROM memos WHERE id = ?', id).rowsWritten > 0;
+  /** Löscht das Memo; liefert die Anhänge, die nur dort vorkamen. */
+  deleteMemo(id: string): string[] {
+    const old = this.memo(id);
+    if (!old) return [];
+    this.sql.exec('DELETE FROM memos WHERE id = ?', id);
+    return this.dropUnused([...refsIn(old.text)]);
+  }
+
+  // ── Anhänge ─────────────────────────────────────────────────────────────
+
+  /** Platz für einen Anhang eintragen. false, wenn das Konto voll ist. */
+  reserveFile(name: string, size: number, type: string): boolean {
+    const used = this.sql.exec('SELECT COALESCE(SUM(size), 0) AS b FROM memo_files').one().b as number;
+    if (used + size > MAX_FILES_TOTAL) return false;
+    this.sql.exec('INSERT INTO memo_files (name, size, type, created) VALUES (?, ?, ?, ?)', name, size, type, Date.now());
+    return true;
+  }
+
+  hasFile(name: string): boolean {
+    return this.sql.exec('SELECT 1 FROM memo_files WHERE name = ?', name).toArray().length > 0;
+  }
+
+  /**
+   * Aufräumen: Anhänge, die vor über einem Tag hochgeladen, aber nie
+   * abgeschickt wurden. Liefert die Namen (in R2 löschen).
+   */
+  sweepFiles(): string[] {
+    const old = this.sql.exec('SELECT name FROM memo_files WHERE created < ?', Date.now() - ORPHAN_AFTER).toArray().map(r => r.name as string);
+    return this.dropUnused(old);
+  }
+
+  private dropUnused(names: string[]): string[] {
+    const gone: string[] = [];
+    for (const name of names) {
+      const used = this.sql.exec("SELECT 1 FROM memos WHERE instr(text, ?) > 0 LIMIT 1", `/m/${name}`).toArray().length > 0;
+      if (used) continue;
+      this.sql.exec('DELETE FROM memo_files WHERE name = ?', name);
+      gone.push(name);
+    }
+    return gone;
   }
 
   private memo(id: string): Memo | null {
@@ -199,6 +255,7 @@ export class Account extends DurableObject<Env> {
   /** Konto löschen: Liste, Memos und Profil weg (die Tabellen bleiben, das Objekt lebt weiter). */
   destroy() {
     this.sql.exec('DELETE FROM memos');
+    this.sql.exec('DELETE FROM memo_files');
     this.sql.exec('DELETE FROM docs');
     this.sql.exec('DELETE FROM profile');
   }

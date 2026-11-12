@@ -320,7 +320,7 @@ if (!LIVE && vars.DEV_LOGIN === '1') {
   r = await fetch(`${BASE}/api/me/memos`, { headers: C });
   d = await j(r);
   const mine = d.memos.filter(m => m.id.startsWith(mid));
-  ok(mine.length === 2 && d.memos[0].id === mid, 'Liste: älteste zuerst');
+  ok(mine.length === 2 && mine[0].id === `${mid}-z`, 'Liste: neueste zuerst');
   r = await fetch(`${BASE}/memos`, { headers: C });
   const memosHtml = await r.text();
   ok(r.ok && memosHtml.includes('"page":"memos"') && memosHtml.includes(mid) && memosHtml.includes('/memos.webmanifest'), '/memos liefert Memos und eigenes App-Manifest');
@@ -329,6 +329,32 @@ if (!LIVE && vars.DEV_LOGIN === '1') {
   r = await fetch(`${BASE}/api/me/memos/${mid}`, { method: 'DELETE', headers: C });
   r = await fetch(`${BASE}/api/me/memos`, { headers: C });
   ok(!(await j(r)).memos.some(m => m.id === mid), 'Memo löschen');
+
+  // Anhänge
+  const audio = new Uint8Array(4000).map((_, i) => i % 251);
+  r = await fetch(`${BASE}/api/me/memos/files?name=Sprachmemo.m4a`, { method: 'POST', headers: { ...C, 'content-type': 'audio/mp4' }, body: audio });
+  d = await j(r);
+  ok(r.status === 201 && /^\/m\/[\w-]+\.m4a$/.test(d.url), 'Anhang hochladen');
+  const fileUrl = d.url;
+  r = await fetch(`${BASE}${fileUrl}`);
+  ok(r.status === 404, 'Anhang ohne Anmeldung → 404');
+  r = await fetch(`${BASE}${fileUrl}`, { headers: { ...C, range: 'bytes=100-199' } });
+  const part = new Uint8Array(await r.arrayBuffer());
+  ok(r.status === 206 && r.headers.get('content-range') === 'bytes 100-199/4000' && part.length === 100 && part[0] === 100 % 251, 'Anhang mit Range (für Audio auf iOS)');
+  r = await fetch(`${BASE}/api/me/memos/files?name=x.html`, { method: 'POST', headers: { ...C, 'content-type': 'text/html' }, body: '<script>alert(1)</script>' });
+  r = await fetch(`${BASE}${(await j(r)).url}`, { headers: C });
+  ok(r.headers.get('content-type') === 'application/octet-stream' && /attachment/.test(r.headers.get('content-disposition') || ''), 'HTML-Anhang wird nur heruntergeladen');
+  const fid = `${mid}-f`;
+  await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: J, body: JSON.stringify({ id: fid, text: `[Sprachmemo 0:02](${fileUrl})` }) });
+  await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: J, body: JSON.stringify({ id: `${fid}2`, text: `Nochmal: [x](${fileUrl})` }) });
+  await fetch(`${BASE}/api/me/memos/${fid}`, { method: 'DELETE', headers: C });
+  r = await fetch(`${BASE}${fileUrl}`, { headers: C });
+  ok(r.ok, 'Anhang bleibt, solange ein anderes Memo ihn nutzt');
+  await fetch(`${BASE}/api/me/memos/${fid}2`, { method: 'PUT', headers: J, body: JSON.stringify({ text: 'ohne Anhang' }) });
+  await new Promise(res => setTimeout(res, 300));
+  r = await fetch(`${BASE}${fileUrl}`, { headers: C });
+  ok(r.status === 404, 'Anhang weg, wenn kein Memo ihn mehr nutzt');
+  await fetch(`${BASE}/api/me/memos/${fid}2`, { method: 'DELETE', headers: C });
   r = await fetch(`${BASE}/api/admin/memos`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"memos":[]}' });
   ok(r.status === 401, 'Memo-Umzug nur für Admin');
   if (vars.ADMIN_EMAIL === 'test@localhost') {

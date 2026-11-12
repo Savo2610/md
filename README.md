@@ -56,18 +56,25 @@ Durable Object pro Dokument, Bilder in R2.
   Cursorstelle. `.md`/`.txt` unverändert, `.html` wird zu Markdown. Ebenso
   eingefügter Rich Text (Webseiten, Google Docs, Mail, die eigene Ansicht inkl.
   Formeln); ⌘⇧V fügt ohne Umwandlung ein.
-- `md.veerka.mp/memos`: Memos, private Kurznotizen im Konto, wie ein Chat mit
-  sich selbst (`src/client/memos.ts`). Neueste unten, Eingabe unten; am Rechner
-  schickt Enter ab, am Handy der Pfeil. Markdown wird gerendert, Aufgaben
-  (`- [ ]`) lassen sich abhaken. Pro Memo (⋯): Bearbeiten, Kopieren, Löschen
-  (mit Rückgängig). Suche oben rechts. Offline Geschriebenes wartet im Browser
-  und wird nachgeschickt. Eigenes App-Manifest (`public/memos.webmanifest`,
-  Icons `memos-*`), lässt sich also als eigene App auf den Homescreen legen.
-  Liegt im Account-Objekt (Tabelle `memos`), braucht also Google-Login.
-  `memos.veerka.mp` leitet hierher um (dort lief früher eine Memos-Instanz).
-  Umzug von Memos: `POST /api/admin/memos` (API-Schlüssel) mit
-  `{ "memos": [{ "text", "created" }] }`, beim nächsten Öffnen von `/memos`
-  mit dem Admin-Konto landen sie dort.
+- `md.veerka.mp/memos`: Memos, private Kurznotizen im Konto, neueste oben
+  (`src/client/memos.ts`). Eingabe oben (`memo-editor.ts`): CodeMirror mit
+  Markdown-Hervorhebung wie iA Writer (gemeinsam mit dem Editor in
+  `cmkit.ts`), Listen laufen mit Enter weiter, ⌘/Strg+Enter sichert. Leiste:
+  Bild/Datei (auch Einfügen/Ziehen), Sprachmemo (MediaRecorder), Standort
+  (Ortsname über OpenStreetMap Nominatim, Link auf Apple Karten), Aufgabe.
+  Anhänge stehen als Markdown-Link `/m/<datei>` im Text und werden in der
+  Ansicht zu Player, Datei- bzw. Ortskarte. `#tags` im Text: farbig, oben als
+  Filter, Vervollständigung nach `#`. Pro Memo (⋯, Menü direkt am Knopf):
+  Bearbeiten (im Memo), Kopieren, Löschen (6 s Rückgängig, erst dann geht es
+  an den Server). Suche oben rechts. Offline Geschriebenes wartet im Browser.
+  Eigenes App-Manifest (`public/memos.webmanifest`, Icons `memos-*`).
+  Daten im Account-Objekt (Tabellen `memos`, `memo_files`), Anhänge in R2
+  unter `memos/<Account-ID>/` (max. 50 MB pro Datei, 2 GB pro Konto),
+  ausgeliefert nur ans eigene Konto, mit Range. Anhänge, die kein Memo mehr
+  nutzt, werden gelöscht; nie abgeschickte nach einem Tag.
+  `memos.veerka.mp` leitet hierher um. Umzug von Memos: `POST /api/admin/memos`
+  (API-Schlüssel) mit `{ "memos": [{ "text", "created" }] }`, beim nächsten
+  Öffnen von `/memos` mit dem Admin-Konto landen sie dort.
 - `md.veerka.mp/admin`: alle Dokumente, Löschen, „Behalten“ (2FA-Code oder
   angemeldet mit dem Google-Konto aus dem Secret `ADMIN_EMAIL`).
 
@@ -131,7 +138,9 @@ Live-Test ohne 2FA-Teil:
 | `src/client/table.ts` | Tabellen: Tab/Enter, Ausrichten, Einfügen aus Tabellenprogrammen |
 | `src/client/settings.ts` | Einstellungen (Darstellung, Öffnen, Name, Rechtschreibung) |
 | `src/client/home.ts` | Übersicht (`/home`): Liste, Suche, Tag-Filter, Konto |
-| `src/client/memos.ts` | Memos (`/memos`): Liste, Eingabe, Bearbeiten/Löschen, Offline-Warteschlange |
+| `src/client/memos.ts` | Memos (`/memos`): Liste, Tags, Anhänge anzeigen, Bearbeiten/Löschen, Offline-Warteschlange |
+| `src/client/memo-editor.ts` | Memo-Eingabe: CodeMirror, Anhänge, Sprachmemo, Standort |
+| `src/client/cmkit.ts` | Gemeinsame CodeMirror-Teile (Hervorhebung, Formatier-Kürzel) |
 | `src/client/account.ts` | Abgleich der Liste mit dem Konto, Anmelden/Abmelden |
 | `src/client/tags.ts` | Tags bearbeiten |
 | `public/sw.js` | Service Worker (offline) |

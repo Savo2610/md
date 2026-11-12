@@ -38,7 +38,10 @@
 //   GET    /api/me/memos             Memos ({ memos })
 //   POST   /api/me/memos             Memo anlegen ({ id, text, created? }, ID vom Browser)
 //   PUT    /api/me/memos/<id>        Text ändern ({ text })
-//   DELETE /api/me/memos/<id>        Memo löschen
+//   DELETE /api/me/memos/<id>        Memo löschen (samt Anhängen, die sonst nirgends vorkommen)
+//   POST   /api/me/memos/files?name= Anhang hochladen (Rohdaten), liefert { url: /m/<datei> }
+//   GET    /api/me/memos/geo?lat&lon Ortsname zu Koordinaten (OpenStreetMap Nominatim)
+//   GET    /m/<datei>                Anhang, nur fürs eigene Konto
 //
 // memos.veerka.mp leitet auf /memos um (früher eine eigene Memos-Instanz).
 
@@ -48,7 +51,7 @@ import { randomId, randomToken, signToken, verifyTotp, verifyToken, timingSafeEq
 import { MAX_CHARS } from './doc';
 import { accountStub, docStub, registry, type Env } from './env';
 import { auth, clearSessionCookie, currentUser, type User } from './auth';
-import { MAX_MEMO, MEMO_ID, type AccountDoc, type Memo } from './account';
+import { FILE_NAME, MAX_FILE, MAX_MEMO, MEMO_ID, type AccountDoc, type Memo } from './account';
 
 export { Doc } from './doc';
 export { Registry } from './registry';
@@ -269,7 +272,7 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
   return page(req, title, `<main id="app"><article class="doc" id="view">${html}</article></main>`, { ...common, exists: true, editKey, ownerKey });
 }
 
-async function memosPage(req: Request, env: Env): Promise<Response> {
+async function memosPage(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const user = await currentUser(req, env);
   const common = { page: 'memos' as const, user: publicUser(user), login: loginEnabled(env), admin: isAdminUser(user, env) };
   if (!user) return page(req, 'Memos', '<main id="app"></main>', common, 200, MEMOS_APP);
@@ -281,6 +284,8 @@ async function memosPage(req: Request, env: Env): Promise<Response> {
     if (pending.length) await reg.doneMemos(await acc.addMemos(pending));
   }
   const memos = (await acc.memos()).map(memoOut);
+  // Nie abgeschickte Anhänge wegräumen.
+  ctx.waitUntil(acc.sweepFiles().then(names => deleteMemoFiles(env, user.sub, names)).catch(() => {}));
   return page(req, 'Memos', '<main id="app"></main>', { ...common, memos }, 200, MEMOS_APP);
 }
 
@@ -304,7 +309,7 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
   const method = req.method;
 
   if (parts[0] === 'unlock' && method === 'POST') return unlock(req, env);
-  if (parts[0] === 'me') return me(req, env, parts.slice(1));
+  if (parts[0] === 'me') return me(req, env, parts.slice(1), url, ctx);
 
   if (parts[0] === 'admin' && parts[1] === 'docs' && method === 'GET') {
     if (!(await isAdmin(req, env))) return fail(401, 'Nicht freigeschaltet.');
@@ -536,7 +541,7 @@ async function readMarkdownBody(req: Request): Promise<{ markdown: string; id?: 
 
 // ── Konto ───────────────────────────────────────────────────────────────────
 
-async function me(req: Request, env: Env, parts: string[]): Promise<Response> {
+async function me(req: Request, env: Env, parts: string[], url: URL, ctx: ExecutionContext): Promise<Response> {
   const user = await currentUser(req, env);
   if (!user) return fail(401, 'Nicht angemeldet.');
   // Nur von dieser Seite aus (zusätzlich zu SameSite=Lax beim Cookie).
@@ -549,10 +554,18 @@ async function me(req: Request, env: Env, parts: string[]): Promise<Response> {
     if (req.method === 'GET') return json({ user: publicUser(user), docs: await acc.list() });
     if (req.method === 'DELETE') {
       await acc.destroy();
+      // Memo-Anhänge des Kontos in R2.
+      const prefix = memoFileKey(env, user.sub, '');
+      let cursor: string | undefined;
+      do {
+        const list = await env.IMAGES.list({ prefix, cursor });
+        if (list.objects.length) await env.IMAGES.delete(list.objects.map(o => o.key));
+        cursor = list.truncated ? list.cursor : undefined;
+      } while (cursor);
       return json({ ok: true }, 200, { 'set-cookie': clearSessionCookie(req) });
     }
   }
-  if (parts[0] === 'memos') return memos(req, acc, parts.slice(1));
+  if (parts[0] === 'memos') return memos(req, env, user, acc, parts.slice(1), url, ctx);
   if (parts[0] !== 'docs') return fail(404, 'Unbekannt.');
 
   if (parts.length === 1 && req.method === 'POST') {
@@ -579,7 +592,27 @@ async function me(req: Request, env: Env, parts: string[]): Promise<Response> {
 
 type Body = { id?: unknown; text?: unknown; created?: unknown };
 
-async function memos(req: Request, acc: ReturnType<typeof accountStub>, parts: string[]): Promise<Response> {
+/** R2-Schlüssel eines Memo-Anhangs: pro Konto ein eigener Ordner. */
+const memoFileKey = (env: Env, sub: string, name: string) => `memos/${env.ACCOUNT.idFromName(`g:${sub}`).toString()}/${name}`;
+
+const deleteMemoFiles = async (env: Env, sub: string, names: string[]) => {
+  if (names.length) await env.IMAGES.delete(names.map(n => memoFileKey(env, sub, n)));
+};
+
+/** Dateiendung aus dem Namen, sonst aus dem Typ. */
+const EXT_OF_TYPE: Record<string, string> = {
+  'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/avif': 'avif', 'image/heic': 'heic',
+  'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/aac': 'aac', 'audio/mpeg': 'mp3', 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/wav': 'wav',
+  'video/mp4': 'mp4', 'video/quicktime': 'mov', 'application/pdf': 'pdf', 'text/plain': 'txt',
+};
+function extOf(name: string, type: string): string {
+  const fromName = /\.([a-z0-9]{1,8})$/i.exec(name)?.[1]?.toLowerCase();
+  return fromName || EXT_OF_TYPE[type] || 'bin';
+}
+/** Im Browser anzeigen statt herunterladen (alles andere als Download, auch SVG und HTML). */
+const INLINE_TYPES = /^(image\/(jpeg|png|webp|gif|avif)|audio\/[\w.+-]+|video\/(mp4|webm|quicktime)|application\/pdf|text\/plain)$/;
+
+async function memos(req: Request, env: Env, user: User, acc: ReturnType<typeof accountStub>, parts: string[], url: URL, ctx: ExecutionContext): Promise<Response> {
   const body = async () => (await req.json<Body>().catch(() => ({}))) as Body;
   // Zeilenenden vereinheitlichen, Leerzeilen vorn und Leerraum hinten weg.
   const cleanText = (t: unknown) => (typeof t === 'string' ? t.replace(/\r\n?/g, '\n').replace(/^(\s*\n)+|\s+$/g, '') : '');
@@ -597,20 +630,100 @@ async function memos(req: Request, acc: ReturnType<typeof accountStub>, parts: s
       return json(memoOut(m), 201);
     }
   }
+
+  // Anhang hochladen: Rohdaten im Body, Originalname in ?name=.
+  if (parts[0] === 'files' && parts.length === 1 && req.method === 'POST') {
+    const { success } = await env.UPLOAD_LIMIT.limit({ key: `u:${user.sub}` });
+    if (!success) return fail(429, 'Zu viele Dateien auf einmal. Bitte kurz warten.');
+    const size = Number(req.headers.get('content-length'));
+    if (!size || !req.body) return fail(411, 'Größe fehlt.');
+    if (size > MAX_FILE) return fail(413, 'Datei zu groß (max. 50 MB).');
+    const rawType = (req.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    const type = /^[\w.+-]+\/[\w.+-]+$/.test(rawType) ? rawType : 'application/octet-stream';
+    const original = (url.searchParams.get('name') || '').slice(0, 200);
+    const name = `${randomToken(12)}.${extOf(original, type)}`;
+    if (!(await acc.reserveFile(name, size, type))) return fail(507, 'Speicher für Anhänge ist voll.');
+    await env.IMAGES.put(memoFileKey(env, user.sub, name), req.body, { httpMetadata: { contentType: type } });
+    return json({ url: `/m/${name}`, name, size, type }, 201);
+  }
+
+  // Ortsname zu Koordinaten (OpenStreetMap). Nur Lage und Sprache gehen raus.
+  if (parts[0] === 'geo' && parts.length === 1 && req.method === 'GET') {
+    const lat = Number(url.searchParams.get('lat')), lon = Number(url.searchParams.get('lon'));
+    if (!(Math.abs(lat) <= 90 && Math.abs(lon) <= 180)) return fail(400, 'Ungültige Koordinaten.');
+    const { success } = await env.UPLOAD_LIMIT.limit({ key: `u:${user.sub}` });
+    if (!success) return json({ name: '' });
+    return json({ name: await placeName(lat, lon) });
+  }
+
   const id = parts[0];
   if (parts.length !== 1 || !MEMO_ID.test(id)) return fail(404, 'Unbekannt.');
   if (req.method === 'PUT') {
     const text = cleanText((await body()).text);
     if (!text) return fail(400, 'Leeres Memo.');
     if (text.length > MAX_MEMO) return fail(413, 'Memo zu lang.');
-    const m = await acc.editMemo(id, text);
-    return m ? json(memoOut(m)) : fail(404, 'Memo nicht gefunden.');
+    const { memo, orphans } = await acc.editMemo(id, text);
+    ctx.waitUntil(deleteMemoFiles(env, user.sub, orphans));
+    return memo ? json(memoOut(memo)) : fail(404, 'Memo nicht gefunden.');
   }
   if (req.method === 'DELETE') {
-    await acc.deleteMemo(id);
+    ctx.waitUntil(deleteMemoFiles(env, user.sub, await acc.deleteMemo(id)));
     return json({ ok: true });
   }
   return fail(405, 'Methode nicht erlaubt.');
+}
+
+async function placeName(lat: number, lon: number): Promise<string> {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=de&lat=${lat}&lon=${lon}`, {
+      headers: { 'user-agent': 'md.veerka.mp-memos/1.0 (https://md.veerka.mp)' },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return '';
+    const d = await res.json<{ name?: string; display_name?: string; address?: Record<string, string> }>();
+    const a = d.address || {};
+    const road = a.road || a.pedestrian || a.footway || a.path || a.square || '';
+    const street = [road, a.house_number].filter(Boolean).join(' ');
+    const place = a.village || a.town || a.city || a.municipality || a.hamlet || a.suburb || '';
+    const poi = d.name && d.name !== road ? d.name : '';
+    const name = [poi, street, place].filter(Boolean).join(', ');
+    return (name || (d.display_name || '').split(',').slice(0, 2).join(',')).slice(0, 120);
+  } catch {
+    return '';
+  }
+}
+
+/** Memo-Anhang ausliefern: nur an das eigene Konto, mit Range für Audio/Video. */
+async function memoFile(req: Request, env: Env, name: string): Promise<Response> {
+  const notFound = () => new Response('Nicht gefunden', { status: 404, headers: { 'cache-control': 'no-store' } });
+  if (!FILE_NAME.test(name)) return notFound();
+  const user = await currentUser(req, env);
+  if (!user) return notFound();
+  const key = memoFileKey(env, user.sub, name);
+  const ranged = req.headers.has('range');
+  const obj = await env.IMAGES.get(key, { range: ranged ? req.headers : undefined, onlyIf: req.headers });
+  if (!obj) return notFound();
+  const headers = new Headers();
+  obj.writeHttpMetadata(headers);
+  headers.set('etag', obj.httpEtag);
+  headers.set('accept-ranges', 'bytes');
+  headers.set('cache-control', 'private, max-age=31536000, immutable');
+  headers.set('x-content-type-options', 'nosniff');
+  const type = headers.get('content-type') || '';
+  if (!INLINE_TYPES.test(type)) {
+    headers.set('content-type', 'application/octet-stream');
+    headers.set('content-disposition', `attachment; filename="${name}"`);
+  }
+  if (!('body' in obj)) return new Response(null, { status: 304, headers });
+  if (ranged && obj.range) {
+    const r = obj.range as { offset?: number; length?: number; suffix?: number };
+    const offset = r.suffix !== undefined ? obj.size - r.suffix : r.offset ?? 0;
+    const length = r.length ?? obj.size - offset;
+    headers.set('content-range', `bytes ${offset}-${offset + length - 1}/${obj.size}`);
+    headers.set('content-length', String(length));
+    return new Response(obj.body, { status: 206, headers });
+  }
+  return new Response(obj.body, { headers });
 }
 
 async function unlock(req: Request, env: Env): Promise<Response> {
@@ -702,7 +815,8 @@ export default {
       const user = await currentUser(req, env);
       return page(req, 'Übersicht', '<main id="app"></main>', { page: 'admin', admin: isAdminUser(user, env) });
     }
-    if (path === '/memos') return memosPage(req, env);
+    if (path === '/memos') return memosPage(req, env, ctx);
+    if (path.startsWith('/m/')) return memoFile(req, env, path.slice(3));
     if (path === '/datenschutz') return privacyPage(req);
     if (path.startsWith('/i/')) {
       const [, , doc, file] = path.split('/');
@@ -761,7 +875,7 @@ ${th.metas}
 <h2>Ohne Anmeldung</h2>
 <p>Die Liste „zuletzt geöffnet“ und die Bearbeitungsrechte liegen nur in deinem Browser. Beim Anlegen eines Dokuments prüft Cloudflare Turnstile, ob ein Mensch schreibt. Die IP-Adresse wird kurzzeitig für eine Begrenzung der Anfragen verwendet und nicht dauerhaft gespeichert.</p>
 <h2>Mit Google anmelden (optional)</h2>
-<p>Meldest du dich an, erhält md von Google deine Google-Konto-ID, deinen Namen, deine E-Mail-Adresse und dein Profilbild. Damit wird ein Konto angelegt, in dem deine Dokumentliste, die Bearbeitungsrechte, deine Tags und deine Memos liegen. Memos sieht nur dein Konto. Name, E-Mail und Bild stehen in einem Sitzungs-Cookie in deinem Browser. Es gibt keine Werbung, kein Tracking und keine Weitergabe an Dritte. Unter „Konto löschen“ (Übersicht, oben rechts) kannst du Konto, Liste, Tags und Memos jederzeit löschen; die Dokumente selbst bleiben unter ihren Adressen bestehen.</p>
+<p>Meldest du dich an, erhält md von Google deine Google-Konto-ID, deinen Namen, deine E-Mail-Adresse und dein Profilbild. Damit wird ein Konto angelegt, in dem deine Dokumentliste, die Bearbeitungsrechte, deine Tags und deine Memos liegen. Memos und ihre Anhänge (Bilder, Dateien, Sprachmemos) sieht nur dein Konto. Fügst du einem Memo deinen Standort hinzu, gehen die Koordinaten einmal an OpenStreetMap (Nominatim), um den Ortsnamen zu finden. Name, E-Mail und Bild stehen in einem Sitzungs-Cookie in deinem Browser. Es gibt keine Werbung, kein Tracking und keine Weitergabe an Dritte. Unter „Konto löschen“ (Übersicht, oben rechts) kannst du Konto, Liste, Tags und Memos jederzeit löschen; die Dokumente selbst bleiben unter ihren Adressen bestehen.</p>
 <h2>Hosting</h2>
 <p>Die Seite läuft bei Cloudflare (Workers, Speicher in Durable Objects und R2). Cloudflare verarbeitet dabei technisch notwendige Verbindungsdaten.</p>
 <h2>Kontakt</h2>
