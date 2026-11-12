@@ -816,7 +816,8 @@ export function mountEditor(o: EditorOptions): EditorHandle {
   let previewOn = false;
   const updatePreview = () => {
     if (!previewOn) return;
-    o.preview.innerHTML = render(ytext.toString()).html;
+    o.preview.innerHTML = render(ytext.toString(), { lines: true }).html;
+    syncScroll();
     enhance(o.preview, o.katexCss);
   };
 
@@ -895,14 +896,41 @@ export function mountEditor(o: EditorOptions): EditorHandle {
     }),
   });
 
-  // Vorschau mitscrollen (ungefähr, nach Anteil).
-  view.scrollDOM.addEventListener('scroll', () => {
+  // Vorschau mitscrollen, nach Zeilen: Jeder Block der Vorschau kennt seine
+  // Quellzeile (data-line). Verankert wird auf Lesehöhe (ein Drittel von
+  // oben): Die Textstelle dort steht in der Vorschau auf derselben Höhe.
+  // Dazwischen wird eingepasst, so stimmen auch Bilder, Diagramme und das
+  // Inhaltsverzeichnis, die in der Vorschau anders hoch sind als im Text.
+  function syncScroll() {
     if (!previewOn) return;
     const s = view.scrollDOM;
-    const ratio = s.scrollTop / Math.max(1, s.scrollHeight - s.clientHeight);
-    const p = o.preview.parentElement!;
-    p.scrollTop = ratio * (p.scrollHeight - p.clientHeight);
-  }, { passive: true });
+    const pane = o.preview.parentElement!;
+    if (s.scrollTop <= 0) { pane.scrollTop = 0; return; }
+    if (s.scrollTop + s.clientHeight >= s.scrollHeight - 2) { pane.scrollTop = pane.scrollHeight; return; }
+    const anchor = s.clientHeight / 3;
+    const paneTop = pane.getBoundingClientRect().top - pane.scrollTop;
+    const marks = [...o.preview.querySelectorAll<HTMLElement>('[data-line]')]
+      .map(el => ({ line: Number(el.dataset.line), y: el.getBoundingClientRect().top - paneTop }))
+      .filter((m, i, a) => !i || m.line > a[i - 1].line);
+    if (!marks.length) return;
+    // Höhe im Dokument am Ankerpunkt des Editors.
+    const h = s.getBoundingClientRect().top + anchor - view.documentTop;
+    let y: number;
+    if (h <= 0) y = marks[0].y + h;
+    else {
+      const block = view.lineBlockAtHeight(h);
+      const line = view.state.doc.lineAt(block.from).number - 1;
+      const pos = line + Math.min(1, Math.max(0, (h - block.top) / Math.max(1, block.height)));
+      let i = marks.length - 1;
+      while (i > 0 && marks[i].line > pos) i--;
+      const a = marks[i];
+      const b = marks[i + 1] ?? { line: view.state.doc.lines, y: pane.scrollHeight };
+      const t = b.line > a.line ? (pos - a.line) / (b.line - a.line) : 0;
+      y = a.y + (b.y - a.y) * Math.min(1, Math.max(0, t));
+    }
+    pane.scrollTop = Math.max(0, y - anchor);
+  }
+  view.scrollDOM.addEventListener('scroll', syncScroll, { passive: true });
 
   const removeMobile = mobileToolbar(view, pickImage);
 

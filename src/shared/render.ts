@@ -201,9 +201,11 @@ function fences(md: MarkdownIt) {
   md.renderer.rules.fence = (tokens, i) => {
     const t = tokens[i];
     const lang = (t.info || '').trim().split(/\s+/)[0].toLowerCase();
-    if (lang === 'mermaid') return `<pre class="mermaid">${escapeHtml(t.content)}</pre>\n`;
+    const line = t.attrGet('data-line');
+    const at = line ? ` data-line="${line}"` : '';
+    if (lang === 'mermaid') return `<pre class="mermaid"${at}>${escapeHtml(t.content)}</pre>\n`;
     const cls = lang ? ` class="language-${escapeHtml(lang)}"` : '';
-    return `<pre><code${cls}>${escapeHtml(t.content)}</code></pre>\n`;
+    return `<pre${at}><code${cls}>${escapeHtml(t.content)}</code></pre>\n`;
   };
   const defaultLink = md.renderer.rules.link_open || ((tokens, i, opts, _env, self) => self.renderToken(tokens, i, opts));
   md.renderer.rules.link_open = (tokens, i, opts, env, self) => {
@@ -238,6 +240,14 @@ function renderer(): MarkdownIt {
     permalink: anchor.permalink.linkInsideHeader({ symbol: '#', placement: 'before', class: 'anchor', ariaHidden: true }),
   });
   md.use(toc);
+  // Nur für die Vorschau im Editor: Zeilennummer der Quelle an jedem Block,
+  // damit die Vorschau beim Scrollen an der richtigen Stelle steht.
+  md.core.ruler.push('source_lines', (state: StateCore) => {
+    if (!state.env?.lines) return;
+    for (const t of state.tokens) {
+      if (t.block && t.map && t.nesting !== -1 && t.type !== 'inline') t.attrSet('data-line', String(t.map[0]));
+    }
+  });
   instance = md;
   return md;
 }
@@ -247,8 +257,8 @@ export interface Rendered {
   title: string;
 }
 
-export function render(src: string): Rendered {
+export function render(src: string, opts: { lines?: boolean } = {}): Rendered {
   currentFrontMatter = '';
-  const html = renderer().render(src);
+  const html = renderer().render(src, { lines: !!opts.lines });
   return { html, title: titleOf(src, currentFrontMatter) };
 }
