@@ -17,7 +17,12 @@ Durable Object pro Dokument, Bilder in R2.
   Versteckt (nur beim Tippen): `/fett`, `/kursiv`, `/durchgestrichen`,
   `/code`, `/h4`, mit Konto `/tags`.
 - Einstellungen (klein unten im „md“-Menü): Hell/Dunkel/Automatisch
-  (Cookie `md_theme`, der Server setzt `data-theme`), Rechtschreibprüfung.
+  (Cookie `md_theme`, der Server setzt `data-theme`), beim Öffnen Ansicht
+  oder Bearbeiten, Name beim gemeinsamen Schreiben, Rechtschreibprüfung.
+- Tabellen (`src/client/table.ts`): Tab/Shift-Tab springen zwischen Zellen,
+  Enter eine Zeile tiefer (leere letzte Zeile: raus aus der Tabelle), dabei
+  werden die Spalten ausgerichtet. Aus Excel, Numbers oder Sheets kopierte
+  Zellen werden beim Einfügen zur Markdown-Tabelle.
 - Klick auf „md“: neues Dokument und die zuletzt geöffneten (nur im Browser
   gespeichert, nichts auf dem Server).
 - Mehrere Leute können gleichzeitig schreiben (Yjs über WebSockets).
@@ -101,6 +106,8 @@ Live-Test ohne 2FA-Teil:
 | `src/shared/render.ts` | Markdown → HTML (Server und Browser), HackMD-Erweiterungen |
 | `src/client/main.ts` | Kopfleiste, Modi, Teilen, Umbenennen, Zuletzt geöffnet, Freischalten |
 | `src/client/editor.ts` | CodeMirror + Yjs, Slash-Menü, Auswahl-Leiste, Handy-Leiste, Bilder |
+| `src/client/table.ts` | Tabellen: Tab/Enter, Ausrichten, Einfügen aus Tabellenprogrammen |
+| `src/client/settings.ts` | Einstellungen (Darstellung, Öffnen, Name, Rechtschreibung) |
 | `src/client/home.ts` | Übersicht (`/home`): Liste, Suche, Tag-Filter, Konto |
 | `src/client/account.ts` | Abgleich der Liste mit dem Konto, Anmelden/Abmelden |
 | `src/client/tags.ts` | Tags bearbeiten |

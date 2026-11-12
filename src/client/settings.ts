@@ -5,6 +5,7 @@
 // md dem System (hell/dunkel).
 
 import { el, dialog, store } from './ui';
+import { account } from './account';
 
 export type Theme = 'auto' | 'light' | 'dark';
 
@@ -31,19 +32,38 @@ export function applyTheme(t: Theme) {
 }
 
 export const spellcheckOn = () => store.get('md:spellcheck') !== '0';
+/** Eigene Dokumente direkt zum Bearbeiten öffnen statt in der Ansicht. */
+export const openInEdit = () => store.get('md:open') === 'edit';
+/** Name beim gemeinsamen Schreiben: selbst gesetzt, sonst Vorname aus dem Konto. */
+export const writerName = () => store.get('md:name') || (account.user?.name || '').split(' ')[0].slice(0, 30);
 
-export function settingsDialog() {
-  const seg = el('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Darstellung' });
-  const options: [Theme, string][] = [['auto', 'Automatisch'], ['light', 'Hell'], ['dark', 'Dunkel']];
+/** Umschalter aus mehreren Knöpfen (role=radiogroup). */
+function segmented<T extends string>(label: string, options: [T, string][], get: () => T, set: (v: T) => void): HTMLElement {
+  const seg = el('div', { class: 'seg', role: 'radiogroup', 'aria-label': label });
   const draw = () => {
     seg.replaceChildren();
-    for (const [value, label] of options) {
-      const b = el('button', { type: 'button', role: 'radio', 'aria-checked': String(currentTheme() === value) }, label);
-      b.addEventListener('click', () => { applyTheme(value); draw(); });
+    for (const [value, text] of options) {
+      const b = el('button', { type: 'button', role: 'radio', 'aria-checked': String(get() === value) }, text);
+      b.addEventListener('click', () => { set(value); draw(); });
       seg.append(b);
     }
   };
   draw();
+  return seg;
+}
+
+export function settingsDialog() {
+  const theme = segmented<Theme>('Darstellung', [['auto', 'Automatisch'], ['light', 'Hell'], ['dark', 'Dunkel']], currentTheme, applyTheme);
+  const open = segmented<'view' | 'edit'>('Beim Öffnen', [['view', 'Ansicht'], ['edit', 'Bearbeiten']],
+    () => (openInEdit() ? 'edit' : 'view'),
+    v => (v === 'edit' ? store.set('md:open', 'edit') : store.del('md:open')));
+
+  const name = el('input', { type: 'text', class: 'set-input', value: store.get('md:name') || '', placeholder: writerName() || 'Gast', maxlength: '30', 'aria-label': 'Dein Name' }) as HTMLInputElement;
+  name.addEventListener('change', () => {
+    const v = name.value.trim().slice(0, 30);
+    if (v) store.set('md:name', v); else store.del('md:name');
+    dispatchEvent(new CustomEvent('md:name'));
+  });
 
   const spell = el('input', { type: 'checkbox', id: 'set-spell' }) as HTMLInputElement;
   spell.checked = spellcheckOn();
@@ -53,7 +73,9 @@ export function settingsDialog() {
   });
 
   dialog('Einstellungen', el('div', { class: 'settings' },
-    el('div', { class: 'set-row' }, el('span', {}, 'Darstellung'), seg),
+    el('div', { class: 'set-row' }, el('span', {}, 'Darstellung'), theme),
+    el('div', { class: 'set-row' }, el('span', {}, 'Beim Öffnen', el('small', {}, 'Für Dokumente, die du bearbeiten darfst')), open),
+    el('div', { class: 'set-row' }, el('span', {}, 'Dein Name', el('small', {}, 'Beim gemeinsamen Schreiben')), name),
     el('label', { class: 'set-row', for: 'set-spell' }, el('span', {}, 'Rechtschreibprüfung beim Schreiben'), spell),
   ));
 }

@@ -8,7 +8,7 @@ import type { EditorHandle, EditorStatus } from './editor';
 import { titleOf, slugify } from '../shared/title';
 import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, recent, ago, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, type MenuItem } from './ui';
 import { account, accountItems, type User } from './account';
-import { fineRow, spellcheckOn } from './settings';
+import { fineRow, spellcheckOn, openInEdit, writerName } from './settings';
 
 interface Boot {
   page: 'doc' | 'admin' | 'home';
@@ -98,10 +98,12 @@ function startDoc(boot: Boot) {
   bar.append(left, right);
   document.body.prepend(bar);
 
-  let mode: Mode = exists && !startInEdit ? 'view' : 'edit';
+  // Einstellung „Beim Öffnen: Bearbeiten“ gilt für Dokumente, die man bearbeiten darf.
+  let mode: Mode = exists && !startInEdit && !(openInEdit() && editKey) ? 'view' : 'edit';
   let spellcheck = spellcheckOn();
   // Umgeschaltet in den Einstellungen.
   addEventListener('md:spellcheck', e => { spellcheck = (e as CustomEvent<boolean>).detail; editor?.setSpellcheck(spellcheck); });
+  addEventListener('md:name', () => editor?.setName(writerName()));
   let editor: EditorHandle | null = null;
   let editorLoading: Promise<EditorHandle> | null = null;
   let lastStatus: EditorStatus | null = null;
@@ -185,7 +187,7 @@ function startDoc(boot: Boot) {
         preview,
         katexCss: boot.katexCss,
         exists,
-        name: store.get('md:name') || firstName(),
+        name: writerName(),
         spellcheck,
         wsUrl: () => {
           const u = new URL(`/api/docs/${encodeURIComponent(id)}/ws`, location.href);
@@ -379,16 +381,6 @@ function startDoc(boot: Boot) {
       body.append(row);
     });
     if (!exists) body.append(el('p', { class: 'hint' }, 'Das Dokument wird angelegt, sobald du etwas schreibst.'));
-
-    if (canEdit()) {
-      const name = el('input', { type: 'text', value: store.get('md:name') || firstName(), placeholder: 'Gast', maxlength: '30', 'aria-label': 'Dein Name' }) as HTMLInputElement;
-      name.addEventListener('change', () => {
-        const v = name.value.trim().slice(0, 30);
-        store.set('md:name', v);
-        editor?.setName(v);
-      });
-      body.append(el('div', { class: 'name-row' }, el('label', {}, 'Dein Name beim gemeinsamen Schreiben'), name));
-    }
     dialog('Teilen', body);
   }
 
@@ -577,11 +569,6 @@ function startTrashed(boot: Boot) {
       enhance(article, boot.katexCss);
     })
     .catch(() => toast('Inhalt konnte nicht geladen werden.'));
-}
-
-/** Vorname aus dem Konto als Vorgabe für den Namen beim gemeinsamen Schreiben. */
-function firstName(): string {
-  return (account.user?.name || '').split(' ')[0].slice(0, 30);
 }
 
 // ── Turnstile (unsichtbar, nur auf neuen Dokumenten) ────────────────────────

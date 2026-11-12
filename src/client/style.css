@@ -553,6 +553,11 @@ button.t.avatar-btn { padding: 4px; border-radius: 50%; }
 .settings { display: flex; flex-direction: column; }
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14.5px; cursor: default; }
 .set-row:first-child { border-top: 0; padding-top: 2px; }
+.set-row > span { flex: 1; min-width: 0; }
+.set-row .seg, .set-row .set-input, .set-row input[type="checkbox"] { flex-shrink: 0; }
+.set-row small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 1px; }
+.set-row .set-input { width: 10em; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); font: inherit; font-size: 14px; }
+@media (max-width: 600px) { .set-row { flex-wrap: wrap; } .set-row .set-input { font-size: 16px; width: 100%; } }
 .set-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
 .seg button { appearance: none; border: 0; background: none; padding: 6px 11px; font: inherit; font-size: 13.5px; color: var(--muted); cursor: pointer; }

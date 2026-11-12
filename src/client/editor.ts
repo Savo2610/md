@@ -18,6 +18,7 @@ import { Provider, type Status } from './provider';
 import { uploadImage } from './images';
 import { render } from '../shared/render';
 import { enhance } from './enhance';
+import { tableKeys, tableFromClipboard } from './table';
 
 export { render };
 
@@ -816,6 +817,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
       doc: ytext.toString(),
       extensions: [
         keymap.of([...completionKeymap]),
+        keymap.of(tableKeys),
         formatKeys,
         keymap.of([...yUndoManagerKeymap, ...searchKeymap, indentWithTab, ...defaultKeymap]),
         drawSelection(),
@@ -844,7 +846,19 @@ export function mountEditor(o: EditorOptions): EditorHandle {
               insertImages(files, v.state.selection.main.head);
               return true;
             }
-            const text = (e.clipboardData?.getData('text/plain') || '').trim();
+            const raw = e.clipboardData?.getData('text/plain') || '';
+            // Zellen aus Excel, Numbers oder Google Sheets → Markdown-Tabelle.
+            const sel = v.state.selection.main;
+            const table = inCodeOrUrl(v.state, sel.from) ? null : tableFromClipboard(raw, e.clipboardData?.getData('text/html') || '');
+            if (table) {
+              e.preventDefault();
+              const line = v.state.doc.lineAt(sel.from);
+              const before = v.state.sliceDoc(line.from, sel.from).trim() ? '\n\n' : '';
+              const insert = before + table + '\n';
+              v.dispatch({ changes: { from: sel.from, to: sel.to, insert }, selection: { anchor: sel.from + insert.length }, scrollIntoView: true, userEvent: 'input.paste' });
+              return true;
+            }
+            const text = raw.trim();
             if (!URL_ONLY.test(text)) return false;
             e.preventDefault();
             pasteLink(text);
