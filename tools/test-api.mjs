@@ -332,16 +332,18 @@ if (!LIVE && vars.DEV_LOGIN === '1') {
 
   // Anhänge
   const audio = new Uint8Array(4000).map((_, i) => i % 251);
-  r = await fetch(`${BASE}/api/me/memos/files?name=Sprachmemo.m4a`, { method: 'POST', headers: { ...C, 'content-type': 'audio/mp4' }, body: audio });
+  r = await fetch(`${BASE}/api/me/memos/files`, { method: 'POST', headers: { ...C, 'content-type': 'audio/mp4', 'x-file-name': 'Sprachmemo.m4a' }, body: audio });
   d = await j(r);
   ok(r.status === 201 && /^\/m\/[\w-]+\.m4a$/.test(d.url), 'Anhang hochladen');
   const fileUrl = d.url;
   r = await fetch(`${BASE}${fileUrl}`);
   ok(r.status === 404, 'Anhang ohne Anmeldung → 404');
+  r = await fetch(`${BASE}/api/admin/memos`, { headers: API });
+  ok(r.status === 404, 'Kein Lesezugriff auf Memos per API-Schlüssel');
   r = await fetch(`${BASE}${fileUrl}`, { headers: { ...C, range: 'bytes=100-199' } });
   const part = new Uint8Array(await r.arrayBuffer());
   ok(r.status === 206 && r.headers.get('content-range') === 'bytes 100-199/4000' && part.length === 100 && part[0] === 100 % 251, 'Anhang mit Range (für Audio auf iOS)');
-  r = await fetch(`${BASE}/api/me/memos/files?name=x.html`, { method: 'POST', headers: { ...C, 'content-type': 'text/html' }, body: '<script>alert(1)</script>' });
+  r = await fetch(`${BASE}/api/me/memos/files`, { method: 'POST', headers: { ...C, 'content-type': 'text/html', 'x-file-name': 'x.html' }, body: '<script>alert(1)</script>' });
   r = await fetch(`${BASE}${(await j(r)).url}`, { headers: C });
   ok(r.headers.get('content-type') === 'application/octet-stream' && /attachment/.test(r.headers.get('content-disposition') || ''), 'HTML-Anhang wird nur heruntergeladen');
   const fid = `${mid}-f`;

@@ -39,8 +39,12 @@
 //   POST   /api/me/memos             Memo anlegen ({ id, text, created? }, ID vom Browser)
 //   PUT    /api/me/memos/<id>        Text ändern ({ text })
 //   DELETE /api/me/memos/<id>        Memo löschen (samt Anhängen, die sonst nirgends vorkommen)
-//   POST   /api/me/memos/files?name= Anhang hochladen (Rohdaten), liefert { url: /m/<datei> }
-//   GET    /api/me/memos/geo?lat&lon Ortsname zu Koordinaten (OpenStreetMap Nominatim)
+//   POST   /api/me/memos/files       Anhang hochladen (Rohdaten, Name in X-File-Name), liefert { url: /m/<datei> }
+//   POST   /api/me/memos/geo         Ortsname zu Koordinaten ({ lat, lon }, OpenStreetMap Nominatim)
+//
+// Memos sind pro Konto privat: Es gibt keinen Zugriff darauf über Admin,
+// API-Schlüssel oder die Übersicht. Inhalte und Koordinaten stehen nie in
+// Adressen (die landen in den Logs).
 //   GET    /m/<datei>                Anhang, nur fürs eigene Konto
 //
 // memos.veerka.mp leitet auf /memos um (früher eine eigene Memos-Instanz).
@@ -631,7 +635,8 @@ async function memos(req: Request, env: Env, user: User, acc: ReturnType<typeof 
     }
   }
 
-  // Anhang hochladen: Rohdaten im Body, Originalname in ?name=.
+  // Anhang hochladen: Rohdaten im Body, Originalname im Header X-File-Name
+  // (nicht in der Adresse, die landet in den Logs).
   if (parts[0] === 'files' && parts.length === 1 && req.method === 'POST') {
     const { success } = await env.UPLOAD_LIMIT.limit({ key: `u:${user.sub}` });
     if (!success) return fail(429, 'Zu viele Dateien auf einmal. Bitte kurz warten.');
@@ -640,16 +645,19 @@ async function memos(req: Request, env: Env, user: User, acc: ReturnType<typeof 
     if (size > MAX_FILE) return fail(413, 'Datei zu groß (max. 50 MB).');
     const rawType = (req.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
     const type = /^[\w.+-]+\/[\w.+-]+$/.test(rawType) ? rawType : 'application/octet-stream';
-    const original = (url.searchParams.get('name') || '').slice(0, 200);
+    let original = '';
+    try { original = decodeURIComponent(req.headers.get('x-file-name') || '').slice(0, 200); } catch { /* egal */ }
     const name = `${randomToken(12)}.${extOf(original, type)}`;
     if (!(await acc.reserveFile(name, size, type))) return fail(507, 'Speicher für Anhänge ist voll.');
     await env.IMAGES.put(memoFileKey(env, user.sub, name), req.body, { httpMetadata: { contentType: type } });
     return json({ url: `/m/${name}`, name, size, type }, 201);
   }
 
-  // Ortsname zu Koordinaten (OpenStreetMap). Nur Lage und Sprache gehen raus.
-  if (parts[0] === 'geo' && parts.length === 1 && req.method === 'GET') {
-    const lat = Number(url.searchParams.get('lat')), lon = Number(url.searchParams.get('lon'));
+  // Ortsname zu Koordinaten (OpenStreetMap). Nur Lage und Sprache gehen raus,
+  // kein Konto. Koordinaten im Body, damit sie nicht in den Logs stehen.
+  if (parts[0] === 'geo' && parts.length === 1 && req.method === 'POST') {
+    const b = await req.json<{ lat?: unknown; lon?: unknown }>().catch(() => ({} as { lat?: unknown; lon?: unknown }));
+    const lat = Number(b.lat), lon = Number(b.lon);
     if (!(Math.abs(lat) <= 90 && Math.abs(lon) <= 180)) return fail(400, 'Ungültige Koordinaten.');
     const { success } = await env.UPLOAD_LIMIT.limit({ key: `u:${user.sub}` });
     if (!success) return json({ name: '' });
@@ -875,7 +883,7 @@ ${th.metas}
 <h2>Ohne Anmeldung</h2>
 <p>Die Liste „zuletzt geöffnet“ und die Bearbeitungsrechte liegen nur in deinem Browser. Beim Anlegen eines Dokuments prüft Cloudflare Turnstile, ob ein Mensch schreibt. Die IP-Adresse wird kurzzeitig für eine Begrenzung der Anfragen verwendet und nicht dauerhaft gespeichert.</p>
 <h2>Mit Google anmelden (optional)</h2>
-<p>Meldest du dich an, erhält md von Google deine Google-Konto-ID, deinen Namen, deine E-Mail-Adresse und dein Profilbild. Damit wird ein Konto angelegt, in dem deine Dokumentliste, die Bearbeitungsrechte, deine Tags und deine Memos liegen. Memos und ihre Anhänge (Bilder, Dateien, Sprachmemos) sieht nur dein Konto. Fügst du einem Memo deinen Standort hinzu, gehen die Koordinaten einmal an OpenStreetMap (Nominatim), um den Ortsnamen zu finden. Name, E-Mail und Bild stehen in einem Sitzungs-Cookie in deinem Browser. Es gibt keine Werbung, kein Tracking und keine Weitergabe an Dritte. Unter „Konto löschen“ (Übersicht, oben rechts) kannst du Konto, Liste, Tags und Memos jederzeit löschen; die Dokumente selbst bleiben unter ihren Adressen bestehen.</p>
+<p>Meldest du dich an, erhält md von Google deine Google-Konto-ID, deinen Namen, deine E-Mail-Adresse und dein Profilbild. Damit wird ein Konto angelegt, in dem deine Dokumentliste, die Bearbeitungsrechte, deine Tags und deine Memos liegen. Memos und ihre Anhänge (Bilder, Dateien, Sprachmemos) sind nur für dein Konto abrufbar; es gibt keine Ansicht, in der andere sie sehen, auch nicht der Betreiber. Gespeichert sind sie bei Cloudflare (dort verschlüsselt abgelegt, aber nicht Ende-zu-Ende verschlüsselt). Fügst du einem Memo deinen Standort hinzu, gehen die Koordinaten einmal an OpenStreetMap (Nominatim), um den Ortsnamen zu finden. Name, E-Mail und Bild stehen in einem Sitzungs-Cookie in deinem Browser. Es gibt keine Werbung, kein Tracking und keine Weitergabe an Dritte. Unter „Konto löschen“ (Übersicht, oben rechts) kannst du Konto, Liste, Tags und Memos jederzeit löschen; die Dokumente selbst bleiben unter ihren Adressen bestehen.</p>
 <h2>Hosting</h2>
 <p>Die Seite läuft bei Cloudflare (Workers, Speicher in Durable Objects und R2). Cloudflare verarbeitet dabei technisch notwendige Verbindungsdaten.</p>
 <h2>Kontakt</h2>

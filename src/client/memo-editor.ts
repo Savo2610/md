@@ -92,9 +92,9 @@ export async function uploadFile(file: Blob, name: string): Promise<string> {
       if (blob.type === 'image/webp') name = name.replace(/\.\w+$/, '') + '.webp';
     } catch { /* Original hochladen */ }
   }
-  const res = await fetch(`/api/me/memos/files?name=${encodeURIComponent(name)}`, {
+  const res = await fetch('/api/me/memos/files', {
     method: 'POST',
-    headers: { 'content-type': blob.type || 'application/octet-stream' },
+    headers: { 'content-type': blob.type || 'application/octet-stream', 'x-file-name': encodeURIComponent(name) },
     body: blob,
   });
   const data = await res.json().catch(() => ({}));
@@ -254,7 +254,7 @@ export function memoEditor(parent: HTMLElement, o: MemoEditorOptions): MemoEdito
       const lat = pos.coords.latitude.toFixed(5), lon = pos.coords.longitude.toFixed(5);
       let name = '';
       try {
-        const res = await fetch(`/api/me/memos/geo?lat=${lat}&lon=${lon}`);
+        const res = await fetch('/api/me/memos/geo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lat, lon }) });
         if (res.ok) name = (await res.json()).name || '';
       } catch { /* offline: nur Koordinaten */ }
       const label = name || `${lat}, ${lon}`;
