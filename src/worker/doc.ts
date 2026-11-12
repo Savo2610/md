@@ -1,8 +1,13 @@
 // Ein Durable Object pro Dokument.
 //
 // Speicher (SQLite im Objekt):
-//   meta     Schlüssel/Wert: id, created, updated, accessed, editKey, pinned,
-//            imageBytes, markdown (letzter Stand als Text), title, flushedSeq
+//   meta     Schlüssel/Wert: id, created, updated, accessed, editKey, ownerKey,
+//            pinned, imageBytes, markdown (letzter Stand als Text), title,
+//            flushedSeq, trashed (Zeitpunkt, wenn im Papierkorb)
+//
+// Papierkorb: Wer das Dokument angelegt hat (ownerKey), kann es löschen. Es
+// ist dann sofort für alle weg, bleibt aber TRASH_DAYS lang erhalten und
+// lässt sich wiederherstellen; danach löscht der Alarm es samt Bildern.
 //   updates  Yjs-Änderungen, eine Zeile pro Nachricht. Werden regelmäßig zu
 //            einer einzigen Zeile zusammengefasst.
 //
@@ -31,6 +36,8 @@ export const MSG_NOTICE = 9;
 const DAY = 24 * 3600_000;
 /** Nicht angepinnte Dokumente verschwinden nach so langer Zeit ohne Aufruf. */
 export const EXPIRE_AFTER = 365 * DAY;
+/** So lange bleibt ein gelöschtes Dokument im Papierkorb. */
+export const TRASH_FOR = 30 * DAY;
 const FLUSH_DELAY = 4000;
 const COMPACT_AFTER = 200;
 export const MAX_CHARS = 1_000_000;
@@ -50,11 +57,14 @@ export interface DocInfo {
   updated: number;
   pinned: boolean;
   movedTo?: string;
+  /** Im Papierkorb seit (ms). Dann sind markdown und title leer. */
+  trashed?: number;
 }
 
 export interface MoveData {
   markdown: string;
   editKey: string;
+  ownerKey: string | null;
   created: number;
   pinned: boolean;
   imageBytes: number;
@@ -118,8 +128,13 @@ export class Doc extends DurableObject<Env> {
     return this.get('markdown') || '';
   }
 
-  /** Existiert und ist nicht umgezogen. */
+  /** Existiert, ist nicht umgezogen und nicht im Papierkorb. */
   live(): boolean {
+    return this.exists() && !this.get('movedTo') && !this.get('trashed');
+  }
+
+  /** Existiert und ist nicht umgezogen (auch im Papierkorb). */
+  private present(): boolean {
     return this.exists() && !this.get('movedTo');
   }
 
@@ -136,6 +151,8 @@ export class Doc extends DurableObject<Env> {
     if (touch) await this.touch();
     const movedTo = this.get('movedTo');
     if (movedTo) return { ...none, movedTo };
+    const trashed = this.num('trashed');
+    if (trashed) return { ...none, exists: true, trashed };
     const markdown = this.markdown();
     return {
       exists: true,
@@ -158,8 +175,9 @@ export class Doc extends DurableObject<Env> {
     `);
     const now = Date.now();
     const editKey = from?.editKey ?? randomToken(18);
+    const ownerKey = from ? from.ownerKey : randomToken(18);
     const meta = {
-      id, created: from?.created ?? now, updated: now, accessed: now, editKey,
+      id, created: from?.created ?? now, updated: now, accessed: now, editKey, ...(ownerKey ? { ownerKey } : {}),
       pinned: from?.pinned ? 1 : 0, imageBytes: from?.imageBytes ?? 0, imgPrefix: from?.imgPrefix ?? id,
       flushedSeq: 0, markdown: '',
     };
@@ -168,6 +186,58 @@ export class Doc extends DurableObject<Env> {
     await this.flush(true);
     await this.scheduleAlarm();
     return editKey;
+  }
+
+  /** Besitzer-Schlüssel (nur direkt nach create() an den Ersteller). */
+  ownerKey(): string | null {
+    return this.present() ? this.get('ownerKey') : null;
+  }
+
+  /** Ist das der Schlüssel des Erstellers? Gilt auch im Papierkorb. */
+  checkOwner(key: string | null): boolean {
+    const own = this.present() ? this.get('ownerKey') : null;
+    return !!key && !!own && timingSafeEqual(key, own);
+  }
+
+  /** Nur nach geprüfter 2FA: Besitzer-Schlüssel, bei alten Dokumenten neu angelegt. */
+  ensureOwnerKey(): string | null {
+    if (!this.live()) return null;
+    let key = this.get('ownerKey');
+    if (!key) { key = randomToken(18); this.set('ownerKey', key); }
+    return key;
+  }
+
+  // ── Papierkorb ────────────────────────────────────────────────────────────
+
+  /** Inhalt auch im Papierkorb (nur nach geprüftem Besitzer bzw. Admin). */
+  peek(): { markdown: string; title: string; trashed: number } | null {
+    if (!this.present()) return null;
+    const markdown = this.markdown();
+    return { markdown, title: titleOf(markdown), trashed: this.num('trashed') };
+  }
+
+  async trash(): Promise<number | null> {
+    if (!this.live()) return null;
+    await this.flush(true);
+    const at = Date.now();
+    this.set('trashed', at);
+    this.ydoc?.destroy();
+    this.ydoc = null;
+    for (const ws of this.ctx.getWebSockets()) {
+      try { ws.close(4410, 'Im Papierkorb'); } catch { /* schon zu */ }
+    }
+    await this.report();
+    await this.scheduleAlarm();
+    return at;
+  }
+
+  async restore(): Promise<boolean> {
+    if (!this.present() || !this.get('trashed')) return false;
+    this.sql.exec("DELETE FROM meta WHERE k = 'trashed'");
+    this.set('accessed', Date.now());
+    await this.report();
+    await this.scheduleAlarm();
+    return true;
   }
 
   checkKey(key: string | null): boolean {
@@ -215,6 +285,7 @@ export class Doc extends DurableObject<Env> {
     return {
       markdown: this.markdown(),
       editKey: this.get('editKey')!,
+      ownerKey: this.get('ownerKey'),
       created: this.num('created'),
       pinned: this.get('pinned') === '1',
       imageBytes: this.num('imageBytes'),
@@ -252,7 +323,7 @@ export class Doc extends DurableObject<Env> {
   }
 
   async destroy(): Promise<void> {
-    const live = this.live();
+    const live = this.present();
     const id = this.exists() ? this.get('id') : null;
     const prefix = live ? this.imagePrefix() : null;
     for (const ws of this.ctx.getWebSockets()) {
@@ -325,6 +396,7 @@ export class Doc extends DurableObject<Env> {
       size: new TextEncoder().encode(markdown).length,
       images: this.num('imageBytes'),
       pinned: this.get('pinned') === '1',
+      trashed: this.num('trashed'),
     });
   }
 
@@ -337,12 +409,20 @@ export class Doc extends DurableObject<Env> {
 
   private async scheduleAlarm() {
     if (this.flushPending) return;
+    const trashed = this.num('trashed');
+    if (trashed) { await this.ctx.storage.setAlarm(trashed + TRASH_FOR); return; }
     if (this.get('pinned') === '1') await this.ctx.storage.deleteAlarm();
     else await this.ctx.storage.setAlarm(this.num('accessed') + EXPIRE_AFTER);
   }
 
   async alarm() {
     if (!this.exists()) return;
+    const trashed = this.num('trashed');
+    if (trashed) {
+      if (Date.now() >= trashed + TRASH_FOR) await this.destroy();
+      else await this.scheduleAlarm();
+      return;
+    }
     if (this.get('pinned') !== '1' && Date.now() - this.num('accessed') >= EXPIRE_AFTER) {
       // Löscht auch Weiterleitungen umbenannter Dokumente (ohne deren Bilder).
       await this.destroy();
@@ -362,9 +442,10 @@ export class Doc extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     const movedTo = this.get('movedTo');
-    if (movedTo) {
+    if (movedTo || this.get('trashed')) {
       server.accept();
-      server.close(4301, movedTo);
+      if (movedTo) server.close(4301, movedTo);
+      else server.close(4410, 'Im Papierkorb');
       return new Response(null, { status: 101, webSocket: client });
     }
 

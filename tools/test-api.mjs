@@ -251,6 +251,44 @@ if (!LIVE && vars.DEV_LOGIN === '1') {
   r = await fetch(`${BASE}/api/me`, { headers: C });
   ok(!(await j(r)).docs.some(x => x.id === 'fremdes-doc'), 'Eintrag lässt sich aus der Liste nehmen');
 
+  // ── Papierkorb ──
+  const bin = `papierkorb-test-${Date.now().toString(36)}`;
+  r = await fetch(`${BASE}/api/docs/${bin}/create`, { method: 'POST', headers: { ...C, 'content-type': 'application/json' }, body: '{}' });
+  d = await j(r);
+  const binEdit = d.editKey, binOwner = d.ownerKey;
+  ok(!!binOwner && binOwner !== binEdit, 'Anlegen liefert eigenen Besitzer-Schlüssel');
+  await fetch(`${BASE}/api/docs/${bin}`, { method: 'PUT', headers: { 'x-edit-key': binEdit, 'content-type': 'text/markdown' }, body: '# Weg damit' });
+  r = await fetch(`${BASE}/api/docs/${bin}/trash`, { method: 'POST', headers: { 'x-edit-key': binEdit } });
+  ok(r.status === 401, 'Bearbeitungsschlüssel reicht nicht zum Löschen');
+  r = await fetch(`${BASE}/api/docs/${bin}`, { method: 'DELETE', headers: { 'x-owner-key': binOwner } });
+  ok(r.status === 409, 'Ersteller kann nicht direkt endgültig löschen');
+  r = await fetch(`${BASE}/api/docs/${bin}/trash`, { method: 'POST', headers: { ...C, 'x-owner-key': binOwner } });
+  d = await j(r);
+  ok(r.ok && d.trashed > 0, 'Ersteller legt Dokument in den Papierkorb');
+  r = await fetch(`${BASE}/${bin}`);
+  ok(r.status === 410 && !(await r.text()).includes('Weg damit'), 'Gelöschtes Dokument: 410 ohne Inhalt');
+  r = await fetch(`${BASE}/${bin}.md`);
+  ok(r.status === 410, 'Gelöschtes Dokument: kein Markdown');
+  r = await fetch(`${BASE}/api/docs/${bin}`);
+  ok(r.status === 410, 'Gelöschtes Dokument: API ohne Schlüssel 410');
+  r = await fetch(`${BASE}/api/docs/${bin}`, { headers: { 'x-owner-key': binOwner } });
+  ok((await j(r)).markdown === '# Weg damit', 'Ersteller sieht den Inhalt im Papierkorb');
+  r = await fetch(`${BASE}/api/docs/${bin}`, { method: 'PUT', headers: { 'x-edit-key': binEdit, 'content-type': 'text/markdown' }, body: 'x' });
+  ok(r.status === 401, 'Im Papierkorb nicht bearbeitbar');
+  r = await fetch(`${BASE}/api/docs/${bin}/create`, { method: 'POST', headers: { ...C, 'content-type': 'application/json' }, body: '{}' });
+  ok(r.status === 409, 'Adresse bleibt im Papierkorb belegt');
+  r = await fetch(`${BASE}/api/me`, { headers: C });
+  ok((await j(r)).docs.find(x => x.id === bin)?.trashed > 0, 'Konto weiß, dass es im Papierkorb liegt');
+  r = await fetch(`${BASE}/api/docs/${bin}/restore`, { method: 'POST', headers: { 'x-owner-key': binOwner } });
+  ok(r.ok, 'Wiederherstellen');
+  r = await fetch(`${BASE}/${bin}.md`);
+  ok(r.ok && (await r.text()) === '# Weg damit', 'Nach dem Wiederherstellen wieder da');
+  await fetch(`${BASE}/api/docs/${bin}/trash`, { method: 'POST', headers: { 'x-owner-key': binOwner } });
+  r = await fetch(`${BASE}/api/docs/${bin}`, { method: 'DELETE', headers: { 'x-owner-key': binOwner } });
+  ok(r.ok, 'Ersteller löscht aus dem Papierkorb endgültig');
+  r = await fetch(`${BASE}/api/docs/${bin}`);
+  ok(r.status === 404, 'Danach ist es weg');
+
   r = await fetch(`${BASE}/api/me`, { method: 'DELETE', headers: C });
   ok(r.ok && /md_session=;/.test(r.headers.get('set-cookie') || ''), 'Konto löschen räumt das Cookie weg');
   r = await fetch(`${BASE}/api/me`, { headers: C });

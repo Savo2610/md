@@ -6,7 +6,7 @@
 import { enhance } from './enhance';
 import type { EditorHandle, EditorStatus } from './editor';
 import { titleOf, slugify } from '../shared/title';
-import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, recent, ago, menu, type MenuItem } from './ui';
+import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, recent, ago, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, type MenuItem } from './ui';
 import { account, accountItems, type User } from './account';
 
 interface Boot {
@@ -20,6 +20,8 @@ interface Boot {
   login?: boolean;
   editKey?: string;
   admin?: boolean;
+  ownerKey?: string;
+  trashed?: number;
 }
 
 const boot: Boot = JSON.parse($('#boot')!.textContent || '{}');
@@ -60,6 +62,7 @@ function startDoc(boot: Boot) {
   } catch { /* egal */ }
   // Angemeldet: Schlüssel aus dem Konto (z. B. auf einem neuen Gerät).
   if (boot.editKey && !store.get(keyName)) store.set(keyName, boot.editKey);
+  if (boot.ownerKey && !ownerKey(id)) store.set(`md:owner:${id}`, boot.ownerKey);
 
   let editKey = store.get(keyName);
   const canEdit = () => !exists || !!editKey;
@@ -200,6 +203,9 @@ function startDoc(boot: Boot) {
             toast('Das Dokument hat die Maximalgröße erreicht.');
           } else if (n.type === 'moved' && n.to) {
             followMove(n.to);
+          } else if (n.type === 'trashed') {
+            // Jemand hat das Dokument gelöscht: neu laden zeigt „gelöscht“ bzw. den Papierkorb.
+            location.reload();
           }
         },
         onTyping: startTyping,
@@ -258,6 +264,7 @@ function startDoc(boot: Boot) {
     }
     editKey = data.editKey;
     store.set(keyName, editKey!);
+    if (data.ownerKey) store.set(`md:owner:${id}`, data.ownerKey);
     exists = true;
     recent.touch(id, '', true);
     turnstile?.remove();
@@ -275,6 +282,8 @@ function startDoc(boot: Boot) {
       store.del(keyName);
       try { sessionStorage.setItem(OPEN_EDIT, to); } catch { /* egal */ }
     }
+    const own = ownerKey(id);
+    if (own) { store.set(`md:owner:${to}`, own); store.del(`md:owner:${id}`); }
     recent.rename(id, to);
     location.replace(`/${encodeURIComponent(to)}`);
   }
@@ -406,15 +415,20 @@ function startDoc(boot: Boot) {
       renderBar();
       toast('Freigeschaltet. Du kannst dieses Dokument jetzt bearbeiten.');
     })]);
-    if (isAdmin() && exists) items.push(['Dokument löschen', del]);
+    if (exists && (ownerKey(id) || isAdmin())) items.push(['Löschen …', trashDoc]);
     menu('right', items);
   }
 
-  async function del() {
-    if (!confirm('Dieses Dokument mit allen Bildern endgültig löschen? Das lässt sich nicht rückgängig machen.')) return;
-    const res = await fetch(`/api/docs/${encodeURIComponent(id)}`, { method: 'DELETE', headers: adminHeaders() });
-    if (res.ok) { store.del(keyName); recent.remove(id); location.href = '/admin'; }
-    else toast((await res.json().catch(() => ({}))).error || 'Löschen fehlgeschlagen.');
+  /** In den Papierkorb (nur Ersteller oder Admin). */
+  let trashedHere = false;
+  async function trashDoc() {
+    if (!(await ask('Dokument löschen?', 'Es ist sofort für alle weg. 30 Tage lang kannst du es auf der Übersicht im Papierkorb wiederherstellen.', 'Löschen'))) return;
+    const res = await fetch(`/api/docs/${encodeURIComponent(id)}/trash`, { method: 'POST', headers: { ...ownerHeaders(id), ...adminHeaders() } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(data.error || 'Löschen fehlgeschlagen.'); return; }
+    trashedHere = true;
+    recent.markTrashed(id, data.trashed, editor ? titleOf(editor.text()) : document.title);
+    location.href = '/home';
   }
 
   // ── Tastatur, Leiste beim Schreiben ausblenden ────────────────────────────
@@ -444,7 +458,7 @@ function startDoc(boot: Boot) {
 
   // Titel in „Zuletzt geöffnet“ aktuell halten.
   addEventListener('pagehide', () => {
-    if (editor && exists) recent.touch(id, titleOf(editor.text()), true);
+    if (editor && exists && !trashedHere) recent.touch(id, titleOf(editor.text()), true);
   });
 
   // Aufgaben in der Ansicht abhaken, wenn man bearbeiten darf.
@@ -497,6 +511,49 @@ function startDoc(boot: Boot) {
     mode = 'view';
     setMode('edit');
   }
+}
+
+// ── Gelöschtes Dokument (Papierkorb) ────────────────────────────────────────
+
+function startTrashed(boot: Boot) {
+  const id = boot.id!;
+  if (boot.ownerKey && !ownerKey(id)) store.set(`md:owner:${id}`, boot.ownerKey);
+  document.body.dataset.mode = 'view';
+  document.body.prepend(el('header', { id: 'bar' },
+    el('div', { class: 'bar-left' }, el('a', { class: 'brand', href: '/home', title: 'Alle Dokumente' }, standalone ? '‹ md' : 'md')),
+    el('nav', { class: 'bar-right' }),
+  ));
+  const app = $('#app')!;
+  if (!ownerKey(id) && !isAdmin()) {
+    app.append(el('div', { class: 'gone' }, el('p', {}, 'Dieses Dokument wurde gelöscht.'), el('a', { href: '/home' }, 'Zur Übersicht')));
+    if (recent.list().some(r => r.id === id)) recent.remove(id);
+    return;
+  }
+  // Liste auf diesem Gerät nachziehen (z. B. auf einem anderen Gerät gelöscht).
+  if (recent.list().find(r => r.id === id)?.trashed !== boot.trashed) recent.markTrashed(id, boot.trashed!);
+  const banner = el('div', { class: 'trash-banner' });
+  const article = el('article', { class: 'doc' });
+  app.append(banner, article);
+  const restore = el('button', { type: 'button', class: 't boxed' }, 'Wiederherstellen');
+  restore.addEventListener('click', async () => {
+    restore.disabled = true;
+    const res = await fetch(`/api/docs/${encodeURIComponent(id)}/restore`, { method: 'POST', headers: { ...ownerHeaders(id), ...adminHeaders() } });
+    if (!res.ok) { restore.disabled = false; toast((await res.json().catch(() => ({}))).error || 'Ging nicht.'); return; }
+    recent.markTrashed(id, 0);
+    location.reload();
+  });
+  const days = trashDaysLeft(boot.trashed!);
+  banner.append(el('span', {}, `Im Papierkorb · wird ${days === 1 ? 'morgen' : `in ${days} Tagen`} endgültig gelöscht`), restore);
+  fetch(`/api/docs/${encodeURIComponent(id)}`, { headers: { ...ownerHeaders(id), ...adminHeaders() } })
+    .then(r => r.json())
+    .then(async (data: { markdown?: string; title?: string }) => {
+      const { render } = await import('./editor');
+      const r = render(data.markdown || '');
+      article.innerHTML = r.html;
+      document.title = r.title || id;
+      enhance(article, boot.katexCss);
+    })
+    .catch(() => toast('Inhalt konnte nicht geladen werden.'));
 }
 
 /** Vorname aus dem Konto als Vorgabe für den Namen beim gemeinsamen Schreiben. */
@@ -554,6 +611,8 @@ if (boot.page === 'admin') {
   import('./admin').then(m => m.start());
 } else if (boot.page === 'home') {
   import('./home').then(m => m.start());
+} else if (boot.trashed) {
+  startTrashed(boot);
 } else {
   startDoc(boot);
 }

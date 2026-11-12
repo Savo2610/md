@@ -12,7 +12,9 @@
 //   POST   /api/docs                 Agent legt Dokument an (Bearer API_KEY)
 //   GET    /api/docs/<id>            Dokument als JSON
 //   PUT    /api/docs/<id>            Inhalt ersetzen (Bearer API_KEY/Admin oder X-Edit-Key)
-//   DELETE /api/docs/<id>            löschen (Bearer API_KEY/Admin)
+//   DELETE /api/docs/<id>            endgültig löschen (Admin; Ersteller nur aus dem Papierkorb)
+//   POST   /api/docs/<id>/trash      in den Papierkorb (X-Owner-Key oder Admin)
+//   POST   /api/docs/<id>/restore    aus dem Papierkorb holen (X-Owner-Key oder Admin)
 //   POST   /api/docs/<id>/create     Browser legt Dokument an (Turnstile)
 //   POST   /api/docs/<id>/images     Bild hochladen (X-Edit-Key)
 //   POST   /api/docs/<id>/pin        behalten ja/nein (Admin)
@@ -92,6 +94,12 @@ async function isAdmin(req: Request, env: Env): Promise<boolean> {
   return isAdminUser(await currentUser(req, env), env);
 }
 
+/** Ersteller (X-Owner-Key) oder Admin. */
+async function isOwner(req: Request, env: Env, id: string): Promise<boolean> {
+  if (await isAdmin(req, env)) return true;
+  return docStub(env, id).checkOwner(req.headers.get('x-owner-key'));
+}
+
 async function canEdit(req: Request, env: Env, id: string): Promise<boolean> {
   if (await isAdmin(req, env)) return true;
   return docStub(env, id).checkKey(req.headers.get('x-edit-key'));
@@ -141,6 +149,10 @@ interface Boot {
   editKey?: string;
   /** Angemeldet mit dem Admin-Konto: /admin ohne 2FA-Code. */
   admin?: boolean;
+  /** Besitzer-Schlüssel aus dem Konto. */
+  ownerKey?: string;
+  /** Im Papierkorb seit (ms). */
+  trashed?: number;
 }
 
 const loginEnabled = (env: Env) => !!env.GOOGLE_CLIENT_ID || env.DEV_LOGIN === '1';
@@ -202,13 +214,20 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
     // Angemeldet braucht es keinen Spam-Schutz.
     return page('Neues Dokument', `<main id="app"></main>`, { ...common, exists: false, siteKey: user ? undefined : env.TURNSTILE_SITEKEY }, 200);
   }
-  const editKey = user ? (await accountStub(env, user.sub).get(id))?.editKey || undefined : undefined;
+  const entry = user ? await accountStub(env, user.sub).get(id) : null;
+  const editKey = entry?.editKey || undefined;
+  const ownerKey = entry?.ownerKey || undefined;
+  if (info.trashed) {
+    // Für alle weg. Der Ersteller holt sich den Inhalt im Browser mit seinem Schlüssel.
+    return page('Gelöscht', '<main id="app"></main>', { ...common, exists: true, trashed: info.trashed, ownerKey }, 410);
+  }
   const { html } = render(info.markdown);
   const title = info.title || id;
-  return page(title, `<main id="app"><article class="doc" id="view">${html}</article></main>`, { ...common, exists: true, editKey });
+  return page(title, `<main id="app"><article class="doc" id="view">${html}</article></main>`, { ...common, exists: true, editKey, ownerKey });
 }
 
-function rawMarkdown(info: { exists: boolean; markdown: string }, id: string, download: boolean): Response {
+function rawMarkdown(info: { exists: boolean; markdown: string; trashed?: number }, id: string, download: boolean): Response {
+  if (info.trashed) return new Response('Dokument wurde gelöscht.\n', { status: 410, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
   if (!info.exists) return new Response('Dokument nicht gefunden.\n', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
   const headers: Record<string, string> = {
     'content-type': 'text/markdown; charset=utf-8',
@@ -257,6 +276,11 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
       const info = await stub.info(true);
       if (info.movedTo) return Response.redirect(`${origin(req)}/api/docs/${encodeURIComponent(info.movedTo)}`, 301);
       if (!info.exists) return fail(404, 'Dokument nicht gefunden.');
+      if (info.trashed) {
+        if (!(await isOwner(req, env, id))) return fail(410, 'Dokument wurde gelöscht.');
+        const p = await stub.peek();
+        return json({ id, title: p?.title || '', markdown: p?.markdown || '', trashed: info.trashed, url: docUrl(req, id) });
+      }
       return json({ id, title: info.title, markdown: info.markdown, updated: info.updated, url: docUrl(req, id) });
     }
     if (method === 'PUT') {
@@ -267,8 +291,14 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
       return json({ id, url: docUrl(req, id) });
     }
     if (method === 'DELETE') {
-      if (!(await isAdmin(req, env))) return fail(401, 'Nicht freigeschaltet.');
+      // Admin jederzeit; der Ersteller nur, was schon im Papierkorb liegt.
+      if (!(await isAdmin(req, env))) {
+        if (!(await stub.checkOwner(req.headers.get('x-owner-key')))) return fail(401, 'Nicht freigeschaltet.');
+        if (!(await stub.info()).trashed) return fail(409, 'Erst in den Papierkorb legen.');
+      }
       await stub.destroy();
+      const user = await currentUser(req, env);
+      if (user) await accountStub(env, user.sub).remove(id);
       return json({ ok: true });
     }
   }
@@ -284,8 +314,23 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
     }
     const editKey = await stub.create(id);
     if (!editKey) return fail(409, 'Dieses Dokument wurde gerade von jemand anderem angelegt.');
-    if (user) await accountStub(env, user.sub).upsert([{ id, editKey, opened: Date.now() }]);
-    return json({ editKey }, 201);
+    const ownerKey = await stub.ownerKey();
+    if (user) await accountStub(env, user.sub).upsert([{ id, editKey, ownerKey, opened: Date.now() }]);
+    return json({ editKey, ownerKey }, 201);
+  }
+
+  if ((action === 'trash' || action === 'restore') && method === 'POST') {
+    if (!(await isOwner(req, env, id))) return fail(401, 'Nur wer das Dokument angelegt hat, kann es löschen.');
+    const user = await currentUser(req, env);
+    if (action === 'trash') {
+      const at = await stub.trash();
+      if (!at) return fail(404, 'Dokument nicht gefunden.');
+      if (user) await accountStub(env, user.sub).setTrashed(id, at);
+      return json({ trashed: at });
+    }
+    if (!(await stub.restore())) return fail(404, 'Nicht im Papierkorb.');
+    if (user) await accountStub(env, user.sub).setTrashed(id, 0);
+    return json({ ok: true });
   }
 
   if (action === 'ws') {
@@ -480,9 +525,11 @@ async function unlock(req: Request, env: Env): Promise<Response> {
   if (id) {
     const editKey = await docStub(env, id).getEditKey();
     if (!editKey) return fail(404, 'Dokument nicht gefunden.');
+    // Wer den Code hat, darf das Dokument auch löschen (gilt so auch für alte Dokumente).
+    const ownerKey = await docStub(env, id).ensureOwnerKey();
     const user = await currentUser(req, env);
-    if (user) await accountStub(env, user.sub).upsert([{ id, editKey, opened: Date.now() }]);
-    return json({ editKey });
+    if (user) await accountStub(env, user.sub).upsert([{ id, editKey, ownerKey, opened: Date.now() }]);
+    return json({ editKey, ownerKey });
   }
   const token = await signToken(env.SESSION_SECRET, ADMIN_TTL);
   return json({ token, expiresIn: ADMIN_TTL });

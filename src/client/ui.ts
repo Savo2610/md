@@ -28,7 +28,7 @@ export const store = {
 // Dokumentliste im Konto: `dirty` heißt „noch nicht ans Konto geschickt“,
 // entfernte IDs warten in md:removed (siehe account.ts).
 
-export interface Recent { id: string; title: string; at: number; own: boolean; tags?: string[]; dirty?: boolean }
+export interface Recent { id: string; title: string; at: number; own: boolean; tags?: string[]; dirty?: boolean; trashed?: number }
 const RECENT = 'md:recent';
 const REMOVED = 'md:removed';
 const listeners: (() => void)[] = [];
@@ -42,7 +42,7 @@ export const recent = {
   touch(id: string, title: string, own: boolean) {
     const list = recent.list();
     const old = list.find(r => r.id === id);
-    recent.save([{ ...old, id, title: title || old?.title || '', at: Date.now(), own: own || !!old?.own, dirty: true }, ...list.filter(r => r.id !== id)]);
+    recent.save([{ ...old, id, title: title || old?.title || '', at: Date.now(), own: own || !!old?.own, trashed: undefined, dirty: true }, ...list.filter(r => r.id !== id)]);
     recent.unremove(id);
     recent.changed();
   },
@@ -53,6 +53,13 @@ export const recent = {
   },
   rename(from: string, to: string) {
     recent.save(recent.list().map(r => (r.id === from ? { ...r, id: to, dirty: true } : r)));
+    recent.changed();
+  },
+  /** Papierkorb-Stand merken (at = 0: wiederhergestellt). */
+  markTrashed(id: string, at: number, title = '') {
+    const list = recent.list();
+    if (!list.some(r => r.id === id)) list.push({ id, title: '', at: Date.now(), own: true });
+    recent.save(list.map(r => (r.id === id ? { ...r, title: title || r.title, trashed: at || undefined, dirty: true } : r)));
     recent.changed();
   },
   /** IDs, die aus der Liste genommen, aber dem Konto noch nicht gemeldet wurden. */
@@ -70,6 +77,31 @@ export const recent = {
   onChange(fn: () => void) { listeners.push(fn); },
   changed() { for (const fn of listeners) fn(); },
 };
+
+// ── Papierkorb ──────────────────────────────────────────────────────────────
+
+export const TRASH_DAYS = 30;
+/** Ganze Tage, bis ein Dokument aus dem Papierkorb endgültig verschwindet. */
+export const trashDaysLeft = (at: number) => Math.max(0, Math.ceil((at + TRASH_DAYS * 86400_000 - Date.now()) / 86400_000));
+/** Besitzer-Schlüssel: wer das Dokument angelegt hat, darf es löschen. */
+export const ownerKey = (id: string) => store.get(`md:owner:${id}`);
+export const ownerHeaders = (id: string): Record<string, string> => {
+  const k = ownerKey(id);
+  return k ? { 'x-owner-key': k } : {};
+};
+
+/** Rückfrage als eigener Dialog (kein confirm(), das hält Erweiterungen und Tests an). */
+export function ask(title: string, text: string, ok: string): Promise<boolean> {
+  return new Promise(resolve => {
+    const yes = el('button', { type: 'button', class: 't boxed danger-boxed' }, ok);
+    const no = el('button', { type: 'button', class: 't' }, 'Abbrechen');
+    const d = dialog('', el('div', { class: 'ask' }, el('h2', {}, title), el('p', { class: 'hint' }, text), el('div', { class: 'ask-row' }, no, yes)));
+    yes.addEventListener('click', () => { resolve(true); d.close(); });
+    no.addEventListener('click', () => { resolve(false); d.close(); });
+    d.addEventListener('close', () => resolve(false));
+    setTimeout(() => yes.focus(), 30);
+  });
+}
 
 export function ago(t: number): string {
   const s = (Date.now() - t) / 1000;
@@ -196,6 +228,7 @@ export async function unlock(code: string, doc?: string): Promise<{ ok: true; ed
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data.error || 'Freischalten fehlgeschlagen.' };
   if (data.token) setAdminToken(data.token, data.expiresIn);
+  if (doc && data.ownerKey) store.set(`md:owner:${doc}`, data.ownerKey);
   return { ok: true, editKey: data.editKey ?? null };
 }
 

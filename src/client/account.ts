@@ -9,7 +9,7 @@ import { el, store, recent, toast, type MenuItem, type Recent } from './ui';
 
 export interface User { name: string; email: string; picture: string }
 
-interface ServerDoc { id: string; title: string; editKey: string | null; opened: number; tags: string[] }
+interface ServerDoc { id: string; title: string; editKey: string | null; opened: number; tags: string[]; ownerKey: string | null; trashed: number }
 
 let user: User | null = null;
 let enabled = false;
@@ -151,7 +151,7 @@ async function push(): Promise<boolean> {
       recent.removed = recent.removed.filter(x => x !== id);
     }
     if (dirty.length) {
-      const items = dirty.map(r => ({ id: r.id, title: r.title, opened: r.at, editKey: store.get(`md:key:${r.id}`) || undefined }));
+      const items = dirty.map(r => ({ id: r.id, title: r.title, opened: r.at, editKey: store.get(`md:key:${r.id}`) || undefined, ownerKey: store.get(`md:owner:${r.id}`) || undefined, trashed: r.trashed || 0 }));
       const res = await fetch('/api/me/docs', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -177,9 +177,10 @@ function adopt(docs: ServerDoc[]) {
   for (const d of docs) {
     if (removed.has(d.id)) continue;
     if (d.editKey && !store.get(`md:key:${d.id}`)) store.set(`md:key:${d.id}`, d.editKey);
+    if (d.ownerKey && !store.get(`md:owner:${d.id}`)) store.set(`md:owner:${d.id}`, d.ownerKey);
     const mine = local.get(d.id);
     if (mine?.dirty) { next.push(mine); local.delete(d.id); continue; }
-    next.push({ id: d.id, title: d.title || mine?.title || '', at: Math.max(d.opened, mine?.at || 0), own: !!d.editKey || !!mine?.own, tags: d.tags });
+    next.push({ id: d.id, title: d.title || mine?.title || '', at: Math.max(d.opened, mine?.at || 0), own: !!d.editKey || !!mine?.own, tags: d.tags, trashed: d.trashed || undefined });
     local.delete(d.id);
   }
   for (const r of local.values()) if (r.dirty) next.push(r);
@@ -190,7 +191,7 @@ function adopt(docs: ServerDoc[]) {
 function forgetLocal() {
   try {
     for (const k of Object.keys(localStorage)) {
-      if (k.startsWith('md:key:') || ['md:recent', 'md:removed', IMPORTED, LAST_SYNC].includes(k)) localStorage.removeItem(k);
+      if (k.startsWith('md:key:') || k.startsWith('md:owner:') || ['md:recent', 'md:removed', IMPORTED, LAST_SYNC].includes(k)) localStorage.removeItem(k);
     }
   } catch { /* egal */ }
 }

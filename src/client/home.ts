@@ -4,12 +4,13 @@
 // Mit Konto: alle Dokumente des Kontos auf jedem Gerät, mit eigenen Tags
 // zum Filtern. So lässt sich md wie ein Notizbuch benutzen.
 
-import { $, el, recent, ago, toast, store, menu, isAdmin, type MenuItem, type Recent } from './ui';
+import { $, el, recent, ago, toast, store, menu, isAdmin, ask, adminHeaders, ownerHeaders, trashDaysLeft, type MenuItem, type Recent } from './ui';
 import { account, accountItems, avatar } from './account';
 import { tagChips, tagDialog } from './tags';
 
 const TAG_FILTER = 'md:tag';
 const UNTAGGED = '\u0000ohne';
+const TRASH = '\u0000papierkorb';
 
 export function start() {
   document.body.dataset.mode = 'home';
@@ -72,12 +73,16 @@ export function start() {
   // ── Liste ─────────────────────────────────────────────────────────────────
 
   function render() {
-    const all = recent.list();
+    // Abgelaufenes aus dem Papierkorb ist auf dem Server schon weg.
+    for (const r of recent.list()) if (r.trashed && !trashDaysLeft(r.trashed)) recent.remove(r.id);
+    const everything = recent.list();
+    const all = everything.filter(r => !r.trashed);
+    const trashed = everything.filter(r => r.trashed);
     const tags = account.user ? account.allTags() : [];
-    if (filter && filter !== UNTAGGED && !tags.includes(filter)) filter = '';
+    if (filter === TRASH ? !trashed.length : filter && filter !== UNTAGGED && !tags.includes(filter)) filter = '';
 
     tagBar.replaceChildren();
-    tagBar.hidden = !tags.length;
+    tagBar.hidden = !tags.length && !trashed.length;
     const chip = (label: string, value: string) => {
       const b = el('button', { type: 'button', class: `tag${filter === value ? ' on' : ''}`, 'aria-pressed': String(filter === value) }, label);
       b.addEventListener('click', () => setFilter(value));
@@ -85,6 +90,8 @@ export function start() {
     };
     for (const t of tags) chip(t, t);
     if (tags.length && all.some(r => !r.tags?.length)) chip('ohne Tag', UNTAGGED);
+    if (trashed.length) chip('Papierkorb', TRASH);
+    const inTrash = filter === TRASH;
 
     const q = search.value.trim().toLowerCase();
     const matches = (r: Recent) => !q
@@ -92,7 +99,7 @@ export function start() {
       || r.id.includes(q)
       || (r.tags || []).some(t => t.toLowerCase().includes(q));
     const inFilter = (r: Recent) => !filter || (filter === UNTAGGED ? !r.tags?.length : (r.tags || []).includes(filter));
-    const items = all.filter(r => matches(r) && inFilter(r));
+    const items = inTrash ? trashed.filter(matches) : all.filter(r => matches(r) && inFilter(r));
     search.hidden = all.length < 6;
 
     list.replaceChildren();
@@ -100,6 +107,7 @@ export function start() {
       list.append(el('li', { class: 'notes-empty' }, q || filter ? 'Nichts gefunden.' : 'Noch keine Dokumente.'));
     }
     for (const r of items) {
+      if (inTrash) { list.append(trashRow(r)); continue; }
       const actions = el('div', { class: 'note-actions' });
       if (account.user) {
         const tag = el('button', { type: 'button', class: 'note-btn', title: 'Tags', 'aria-label': 'Tags bearbeiten' }, '#');
@@ -129,6 +137,38 @@ export function start() {
       ));
     }
 
+  }
+
+  /** Eintrag im Papierkorb: Wiederherstellen oder endgültig löschen. */
+  function trashRow(r: Recent): HTMLElement {
+    const days = trashDaysLeft(r.trashed!);
+    const headers = { ...ownerHeaders(r.id), ...adminHeaders() };
+    const restore = el('button', { type: 'button', class: 'note-btn note-text' }, 'Wiederherstellen');
+    restore.addEventListener('click', async e => {
+      e.preventDefault();
+      const res = await fetch(`/api/docs/${encodeURIComponent(r.id)}/restore`, { method: 'POST', headers });
+      if (!res.ok && res.status !== 404) { toast((await res.json().catch(() => ({}))).error || 'Ging nicht.'); return; }
+      recent.markTrashed(r.id, 0);
+      render();
+    });
+    const purge = el('button', { type: 'button', class: 'note-btn note-remove', title: 'Endgültig löschen', 'aria-label': 'Endgültig löschen' }, '×');
+    purge.addEventListener('click', async e => {
+      e.preventDefault();
+      if (!(await ask('Endgültig löschen?', `„${r.title || r.id}“ und alle Bilder darin verschwinden sofort. Das lässt sich nicht rückgängig machen.`, 'Endgültig löschen'))) return;
+      const res = await fetch(`/api/docs/${encodeURIComponent(r.id)}`, { method: 'DELETE', headers });
+      if (!res.ok && res.status !== 404) { toast((await res.json().catch(() => ({}))).error || 'Löschen fehlgeschlagen.'); return; }
+      recent.remove(r.id);
+      store.del(`md:key:${r.id}`);
+      store.del(`md:owner:${r.id}`);
+      render();
+    });
+    return el('li', { class: 'trashed' },
+      el('a', { href: `/${encodeURIComponent(r.id)}`, class: 'note' },
+        el('span', { class: 'note-title' }, r.title || r.id),
+        el('span', { class: 'note-meta' }, days === 1 ? 'wird morgen endgültig gelöscht' : `noch ${days} Tage`),
+      ),
+      el('div', { class: 'note-actions' }, restore, purge),
+    );
   }
 
   search.addEventListener('input', render);

@@ -4,7 +4,7 @@ import { $, el, toast, adminToken, adminHeaders, isAdmin, setAdminToken, codeFor
 
 interface DocSummary {
   id: string; title: string; snippet: string; created: number; updated: number;
-  size: number; images: number; pinned: boolean;
+  size: number; images: number; pinned: boolean; trashed: number;
 }
 
 const fmtDate = (t: number) => new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -75,10 +75,19 @@ async function list(main: HTMLElement, q = '') {
       const r = await fetch(`/api/docs/${encodeURIComponent(d.id)}`, { method: 'DELETE', headers: adminHeaders() });
       if (r.ok) { row.remove(); toast('Gelöscht.'); } else toast('Löschen fehlgeschlagen.');
     });
-    const row = el('tr', {},
+    const status = el('div', { class: 'meta' }, `/${d.id}`);
+    if (d.trashed) {
+      const back = el('button', { type: 'button', class: 't boxed small' }, 'Wiederherstellen');
+      back.addEventListener('click', async () => {
+        const r = await fetch(`/api/docs/${encodeURIComponent(d.id)}/restore`, { method: 'POST', headers: adminHeaders() });
+        if (r.ok) list(main, q); else toast('Ging nicht.');
+      });
+      status.append(el('span', { class: 'badge' }, 'Papierkorb'), back);
+    }
+    const row = el('tr', { class: d.trashed ? 'trashed' : '' },
       el('td', {},
         el('a', { href: `/${encodeURIComponent(d.id)}` }, d.title || d.id),
-        el('div', { class: 'meta' }, `/${d.id}`),
+        status,
         el('div', { class: 'snippet' }, d.snippet || '(leer)'),
       ),
       el('td', { class: 'nowrap' }, fmtDate(d.updated)),

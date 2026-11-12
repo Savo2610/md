@@ -18,6 +18,8 @@ export interface DocSummary {
   size: number;
   images: number;
   pinned: boolean;
+  /** Im Papierkorb seit (ms), sonst 0. */
+  trashed: number;
 }
 
 const HOUR = 3600_000;
@@ -39,14 +41,16 @@ export class Registry extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS fails (ip TEXT, at INTEGER);
       CREATE TABLE IF NOT EXISTS used_codes (counter INTEGER PRIMARY KEY, expires INTEGER);
     `);
+    // Spalte kam später dazu (Papierkorb).
+    try { this.sql.exec('ALTER TABLE docs ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0'); } catch { /* gibt es schon */ }
   }
 
   upsert(d: DocSummary) {
     this.sql.exec(
-      `INSERT INTO docs (id, title, snippet, created, updated, size, images, pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO docs (id, title, snippet, created, updated, size, images, pinned, trashed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET title = excluded.title, snippet = excluded.snippet, updated = excluded.updated,
-         size = excluded.size, images = excluded.images, pinned = excluded.pinned`,
-      d.id, d.title, d.snippet, d.created, d.updated, d.size, d.images, d.pinned ? 1 : 0,
+         size = excluded.size, images = excluded.images, pinned = excluded.pinned, trashed = excluded.trashed`,
+      d.id, d.title, d.snippet, d.created, d.updated, d.size, d.images, d.pinned ? 1 : 0, d.trashed || 0,
     );
   }
 
@@ -67,6 +71,7 @@ export class Registry extends DurableObject<Env> {
         id: r.id as string, title: r.title as string, snippet: r.snippet as string,
         created: r.created as number, updated: r.updated as number,
         size: r.size as number, images: r.images as number, pinned: !!r.pinned,
+        trashed: (r.trashed as number) || 0,
       })),
       total: agg.n as number,
       bytes: agg.b as number,

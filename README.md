@@ -30,6 +30,12 @@ Durable Object pro Dokument, Bilder in R2.
   Tag auf `/home`. Abmelden nimmt Liste und Schlüssel vom Gerät. Angemeldet
   entfällt der Turnstile-Check beim Anlegen. Ohne `GOOGLE_CLIENT_ID` ist
   Anmelden ausgeblendet.
+- Löschen (⋯ → Löschen …) darf nur, wer das Dokument angelegt hat
+  (Besitzer-Schlüssel im Browser bzw. im Konto; bei alten Dokumenten nach dem
+  2FA-Code) oder der Admin. Es landet 30 Tage im Papierkorb: für alle sofort
+  weg (410), Adresse bleibt belegt, auf `/home` unter „Papierkorb“
+  wiederherstellen oder endgültig löschen. Danach löscht der Alarm des
+  Dokuments es samt Bildern.
 - `md.veerka.mp/<id>.md` liefert das reine Markdown (für KI-Agenten, Download).
 - `md.veerka.mp/admin`: alle Dokumente, Löschen, „Behalten“ (2FA-Code oder
   angemeldet mit dem Google-Konto aus dem Secret `ADMIN_EMAIL`).

@@ -115,6 +115,7 @@ export class Provider {
       const others = [...this.awareness.getStates().keys()].filter(id => id !== this.doc.clientID);
       awarenessProtocol.removeAwarenessStates(this.awareness, others, this);
       if (ev.code === 4404) { this.setStatus('gone'); return; }
+      if (ev.code === 4410) { this.setStatus('gone'); this.on.notice({ type: 'trashed' }); return; }
       if (ev.code === 4301) { this.setStatus('gone'); this.on.notice({ type: 'moved', to: ev.reason }); return; }
       this.setStatus('offline');
       if (this.stopped) return;

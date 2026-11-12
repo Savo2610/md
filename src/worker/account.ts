@@ -14,6 +14,10 @@ export interface AccountDoc {
   editKey: string | null;
   opened: number;
   tags: string[];
+  /** Besitzer-Schlüssel: dieses Konto hat das Dokument angelegt. */
+  ownerKey: string | null;
+  /** Im Papierkorb seit (ms), sonst 0. */
+  trashed: number;
 }
 
 export interface Profile {
@@ -56,6 +60,10 @@ export class Account extends DurableObject<Env> {
         opened INTEGER NOT NULL DEFAULT 0, tags TEXT NOT NULL DEFAULT '[]'
       );
     `);
+    // Spalten kamen später dazu (Papierkorb).
+    for (const col of ['owner_key TEXT', 'trashed INTEGER NOT NULL DEFAULT 0']) {
+      try { this.sql.exec(`ALTER TABLE docs ADD COLUMN ${col}`); } catch { /* gibt es schon */ }
+    }
   }
 
   setProfile(p: Profile) {
@@ -95,6 +103,8 @@ export class Account extends DurableObject<Env> {
         editKey: typeof it.editKey === 'string' && it.editKey ? it.editKey.slice(0, 100) : old?.editKey ?? null,
         opened: Math.max(opened, old?.opened || 0),
         tags: it.tags !== undefined && !old?.tags.length ? cleanTags(it.tags) : old?.tags || [],
+        ownerKey: typeof it.ownerKey === 'string' && it.ownerKey ? it.ownerKey.slice(0, 100) : old?.ownerKey ?? null,
+        trashed: typeof it.trashed === 'number' && newer ? Math.max(0, it.trashed) : old?.trashed || 0,
       };
       this.write(next);
       if (!old) count++;
@@ -110,6 +120,11 @@ export class Account extends DurableObject<Env> {
     return next;
   }
 
+  /** Papierkorb-Stand eines eigenen Dokuments (vom Server beim Löschen/Wiederherstellen). */
+  setTrashed(id: string, at: number) {
+    this.sql.exec('UPDATE docs SET trashed = ? WHERE id = ?', at, id);
+  }
+
   remove(id: string) {
     this.sql.exec('DELETE FROM docs WHERE id = ?', id);
   }
@@ -120,7 +135,7 @@ export class Account extends DurableObject<Env> {
     if (!old) return;
     this.sql.exec('DELETE FROM docs WHERE id = ?', from);
     const existing = this.get(to);
-    this.write({ ...old, id: to, editKey: old.editKey || existing?.editKey || null, tags: old.tags.length ? old.tags : existing?.tags || [] });
+    this.write({ ...old, id: to, editKey: old.editKey || existing?.editKey || null, ownerKey: old.ownerKey || existing?.ownerKey || null, tags: old.tags.length ? old.tags : existing?.tags || [] });
   }
 
   /** Konto löschen: Liste und Profil weg (die Tabellen bleiben, das Objekt lebt weiter). */
@@ -131,9 +146,10 @@ export class Account extends DurableObject<Env> {
 
   private write(d: AccountDoc) {
     this.sql.exec(
-      `INSERT INTO docs (id, title, edit_key, opened, tags) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET title = excluded.title, edit_key = excluded.edit_key, opened = excluded.opened, tags = excluded.tags`,
-      d.id, d.title, d.editKey, d.opened, JSON.stringify(d.tags),
+      `INSERT INTO docs (id, title, edit_key, opened, tags, owner_key, trashed) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET title = excluded.title, edit_key = excluded.edit_key, opened = excluded.opened,
+         tags = excluded.tags, owner_key = excluded.owner_key, trashed = excluded.trashed`,
+      d.id, d.title, d.editKey, d.opened, JSON.stringify(d.tags), d.ownerKey, d.trashed || 0,
     );
   }
 }
@@ -141,5 +157,8 @@ export class Account extends DurableObject<Env> {
 function row(r: Record<string, SqlStorageValue>): AccountDoc {
   let tags: string[] = [];
   try { tags = JSON.parse(r.tags as string); } catch { /* leer */ }
-  return { id: r.id as string, title: r.title as string, editKey: (r.edit_key as string) || null, opened: r.opened as number, tags };
+  return {
+    id: r.id as string, title: r.title as string, editKey: (r.edit_key as string) || null, opened: r.opened as number, tags,
+    ownerKey: (r.owner_key as string) || null, trashed: (r.trashed as number) || 0,
+  };
 }
