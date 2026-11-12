@@ -7,7 +7,7 @@
 // auf „Rückgängig“, bevor es an den Server geht.
 
 import { $, el, store, toast, ask } from './ui';
-import { account, type User } from './account';
+import { account, accountItems, avatar, type User } from './account';
 import { fineRow } from './settings';
 import { enhance } from './enhance';
 import { memoEditor, tagsOf, type MemoEditor } from './memo-editor';
@@ -131,7 +131,7 @@ export function start(boot: Boot) {
   });
   search.addEventListener('input', () => render());
   search.addEventListener('keydown', e => { if (e.key === 'Escape') searchBtn.click(); });
-  right.append(search, searchBtn);
+  right.append(search, searchBtn, accountButton(boot.user));
 
   // ── Anzeige ───────────────────────────────────────────────────────────────
 
@@ -406,6 +406,13 @@ export function start(boot: Boot) {
   flush();
   // Am Rechner gleich losschreiben; am Handy nicht die Tastatur aufreißen.
   if (!matchMedia('(pointer: coarse)').matches) editor.focus();
+}
+
+/** Rundes Profilbild oben rechts: wer angemeldet ist, Abmelden. */
+function accountButton(u: User): HTMLElement {
+  const b = el('button', { type: 'button', class: 't avatar-btn', title: u.email || u.name, 'aria-label': 'Konto', 'aria-haspopup': 'menu' }, avatar(u));
+  b.addEventListener('click', () => popover(b, [...accountItems(), ['Alle Dokumente', () => (location.href = '/home')]]));
+  return b;
 }
 
 // ── Sprachmemo abspielen ─────────────────────────────────────────────────────

@@ -711,7 +711,8 @@ dialog.pop {
   box-shadow: var(--shadow); animation: pop-in .12s ease-out;
 }
 dialog.pop::backdrop { background: transparent; }
-dialog.pop .menu button { padding: 9px 12px; border-radius: 6px; font-size: 15px; }
+dialog.pop .menu > button { padding: 9px 12px; border-radius: 6px; font-size: 15px; }
+dialog.pop .menu-label:first-child { border-top: 0; margin-top: 0; padding-top: 8px; }
 @keyframes pop-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { dialog.pop { animation: none; } }
 
