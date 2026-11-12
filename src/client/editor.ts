@@ -76,6 +76,10 @@ const NO_SPELL_PATTERNS = [
   /^---\n[\s\S]*?\n---$/gm, // Front Matter
 ];
 const noSpell = Decoration.mark({ attributes: { spellcheck: 'false', autocorrect: 'off' } });
+// Codeblöcke zusätzlich zeilenweise: Safari beachtet spellcheck an Spans in
+// mehrzeiligen Blöcken nicht zuverlässig, an der ganzen Zeile schon.
+const noSpellLine = Decoration.line({ attributes: { spellcheck: 'false', autocorrect: 'off' } });
+const CODE_BLOCKS = new Set(['FencedCode', 'CodeBlock']);
 
 const spellExclusions = ViewPlugin.fromClass(class {
   decorations: DecorationSet;
@@ -85,12 +89,18 @@ const spellExclusions = ViewPlugin.fromClass(class {
   }
   build(view: EditorView): DecorationSet {
     const ranges: [number, number][] = [];
+    const lines = new Set<number>();
+    const doc = view.state.doc;
     for (const { from, to } of view.visibleRanges) {
       syntaxTree(view.state).iterate({
         from, to,
         enter: node => {
           if (!NO_SPELL_NODES.has(node.name)) return;
           ranges.push([node.from, node.to]);
+          if (CODE_BLOCKS.has(node.name)) {
+            const last = doc.lineAt(Math.max(node.from, Math.min(node.to, to))).number;
+            for (let n = doc.lineAt(Math.max(node.from, from)).number; n <= last; n++) lines.add(doc.line(n).from);
+          }
           return false;
         },
       });
@@ -101,16 +111,16 @@ const spellExclusions = ViewPlugin.fromClass(class {
       }
     }
     ranges.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    const b = new RangeSetBuilder<Decoration>();
+    const decos = [...lines].map(pos => noSpellLine.range(pos));
     let cur: [number, number] | null = null;
     for (const r of ranges) {
       if (r[1] <= r[0]) continue;
       if (cur && r[0] <= cur[1]) { cur[1] = Math.max(cur[1], r[1]); continue; }
-      if (cur) b.add(cur[0], cur[1], noSpell);
+      if (cur) decos.push(noSpell.range(cur[0], cur[1]));
       cur = [r[0], r[1]];
     }
-    if (cur) b.add(cur[0], cur[1], noSpell);
-    return b.finish();
+    if (cur) decos.push(noSpell.range(cur[0], cur[1]));
+    return Decoration.set(decos, true);
   }
 }, { decorations: v => v.decorations });
 
