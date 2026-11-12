@@ -60,9 +60,9 @@ export function start() {
       b.addEventListener('click', () => {
         const items: MenuItem[] = [...accountItems()];
         if (isAdmin()) items.push(['Verwaltung (alle Dokumente)', () => (location.href = '/admin')]);
-        items.push(['Konto löschen', () => {
-          if (confirm('Konto löschen? Deine Dokumentliste und Tags verschwinden. Die Dokumente selbst bleiben unter ihren Adressen erhalten.')) account.deleteAccount();
-        }]);
+        items.push(['Konto löschen', async () => {
+          if (await ask('Konto löschen?', 'Deine Dokumentliste und Tags verschwinden. Die Dokumente selbst bleiben unter ihren Adressen erhalten.', 'Konto löschen')) account.deleteAccount();
+        }, 'danger']);
         menu('right', items);
       });
       right.append(b);

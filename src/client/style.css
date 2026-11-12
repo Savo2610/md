@@ -351,6 +351,7 @@ dialog.dlg-menu::backdrop { background: transparent; }
   padding: 8px 12px; border-radius: 4px; font-size: 14px; color: var(--fg);
 }
 .menu button:hover, .menu button:focus-visible { background: var(--soft); outline: none; }
+.menu button.danger { color: var(--danger); }
 .hint { color: var(--muted); font-size: 13.5px; margin: .3em 0 0; }
 /* Bewusst keine Klassen mit „share“: Werbeblocker (z. B. AdGuard) blenden die als Social-Buttons aus. */
 .field-row { margin-bottom: 16px; }

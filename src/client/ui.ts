@@ -166,14 +166,15 @@ export function dialog(title: string, body: Node, opts: { menu?: 'left' | 'right
 }
 
 /** Kleines Menü an der Kopfleiste (links bzw. rechts), auf dem Handy als Blatt. */
-export type MenuItem = HTMLElement | [string, () => void];
+/** Eintrag: Element oder [Text, Aktion, Klasse] (z. B. 'danger' für Löschen). */
+export type MenuItem = HTMLElement | [string, () => void, string?];
 export function menu(side: 'left' | 'right', items: MenuItem[]): HTMLDialogElement {
   const list = el('div', { class: 'menu' });
   const d = dialog('', list, { menu: side });
   for (const item of items) {
     if (item instanceof HTMLElement) { list.append(item); continue; }
-    const [label, run] = item;
-    const b = el('button', { type: 'button' }, label);
+    const [label, run, cls] = item;
+    const b = el('button', { type: 'button', class: cls || '' }, label);
     b.addEventListener('click', () => { d.close(); run(); });
     list.append(b);
   }

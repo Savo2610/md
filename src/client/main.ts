@@ -410,7 +410,7 @@ function startDoc(boot: Boot) {
   }
 
   function more() {
-    const items: [string, () => void][] = [];
+    const items: MenuItem[] = [];
     if (compactQuery.matches) {
       items.push(['Teilen', share]);
       items.push(['Neues Dokument', () => { if (navigator.onLine) location.href = '/'; else toast('Offline: Neue Dokumente gehen nur mit Verbindung.'); }]);
@@ -426,7 +426,7 @@ function startDoc(boot: Boot) {
       renderBar();
       toast('Freigeschaltet. Du kannst dieses Dokument jetzt bearbeiten.');
     })]);
-    if (exists && (ownerKey(id) || isAdmin())) items.push(['Löschen', trashDoc]);
+    if (exists && (ownerKey(id) || isAdmin())) items.push(['Löschen', trashDoc, 'danger']);
     menu('right', items);
   }
 
