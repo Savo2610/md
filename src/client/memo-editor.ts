@@ -9,7 +9,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting, indentUnit } from '@codemirror/language';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { autocompletion, completionKeymap, type CompletionContext } from '@codemirror/autocomplete';
-import { highlight, formatKeys, linePrefix } from './cmkit';
+import { highlight, formatKeys, linePrefix, continueListsOnInput } from './cmkit';
 import { prepareImage } from './images';
 import { el, toast } from './ui';
 
@@ -149,6 +149,7 @@ export function memoEditor(parent: HTMLElement, o: MemoEditorOptions): MemoEdito
         indentUnit.of('  '),
         EditorState.tabSize.of(2),
         markdown({ base: markdownLanguage, addKeymap: true, pasteURLAsLink: false }),
+        continueListsOnInput,
         syntaxHighlighting(highlight),
         tagMarks,
         autocompletion({ override: [tagSource], icons: false }),

@@ -16,7 +16,7 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { Provider, type Status } from './provider';
 import { uploadImage } from './images';
-import { highlight, formatKeys, wrap, link, linePrefix, cycleHeading } from './cmkit';
+import { highlight, formatKeys, wrap, link, linePrefix, cycleHeading, continueListsOnInput } from './cmkit';
 import { render } from '../shared/render';
 import { enhance } from './enhance';
 import { tableKeys, tableFromClipboard } from './table';
@@ -766,6 +766,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         // pasteURLAsLink aus: Einfügen von Adressen regelt pasteLink() (Cursor
         // landet hinter dem Link, ohne Markierung kommt der Seitentitel).
         markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true, pasteURLAsLink: false }),
+        continueListsOnInput,
         syntaxHighlighting(highlight),
         theme,
         search({ top: false }),

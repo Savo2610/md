@@ -4,6 +4,7 @@
 
 import { EditorView, keymap } from '@codemirror/view';
 import { EditorSelection } from '@codemirror/state';
+import { insertNewlineContinueMarkup } from '@codemirror/lang-markdown';
 import { HighlightStyle } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 
@@ -86,10 +87,33 @@ export function linePrefix(view: EditorView, prefix: string): boolean {
     const same = prefix === '1. ' ? /^\d+\. $/.test(current) : current === prefix;
     changes.push({ from: line.from + m[1].length, to: line.from + m[1].length + current.length, insert: same ? '' : want });
   }
-  view.dispatch({ changes, userEvent: 'input' });
+  // Cursor hinter ein neu gesetztes Präfix (z. B. „- [ ] “), nicht davor.
+  const set = state.changes(changes);
+  view.dispatch({ changes: set, selection: state.selection.map(set, 1), userEvent: 'input' });
   view.focus();
   return true;
 }
+
+/**
+ * Listen laufen auch weiter, wenn der Zeilenumbruch als Texteingabe kommt
+ * statt als Enter-Taste (iPhone mit Wortvorschlägen, Diktat). Die Taste
+ * selbst erledigt die Markdown-Tastenbelegung.
+ */
+export const continueListsOnInput = EditorView.inputHandler.of((view, from, to, text) => {
+  if (!text.endsWith('\n') || text.slice(0, -1).includes('\n')) return false;
+  const sel = view.state.selection.main;
+  if (!sel.empty && (sel.from !== from || sel.to !== to)) return false;
+  const line = view.state.doc.lineAt(from);
+  if (!/^\s*([-*+]|\d+[.)]|>)(\s|$)/.test(line.text)) return false;
+  const before = text.slice(0, -1);
+  // Wort aus der Vorschlagsleiste zuerst übernehmen, dann wie Enter.
+  view.dispatch({ changes: { from, to, insert: before }, selection: { anchor: from + before.length }, userEvent: 'input.type' });
+  if (!insertNewlineContinueMarkup(view)) {
+    const at = view.state.selection.main.head;
+    view.dispatch({ changes: { from: at, insert: '\n' }, selection: { anchor: at + 1 }, userEvent: 'input.type' });
+  }
+  return true;
+});
 
 export function cycleHeading(view: EditorView): boolean {
   const line = view.state.doc.lineAt(view.state.selection.main.head);
