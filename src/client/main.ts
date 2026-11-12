@@ -368,7 +368,8 @@ function startDoc(boot: Boot) {
           const form = renameForm(() => { form.replaceWith(row); pen.focus(); });
           row.replaceWith(form);
         });
-        line.append(pen);
+        // Stift im grauen Feld, damit alle Linkfelder gleich breit bleiben.
+        line.replaceChildren(el('div', { class: 'field-pen' }, input, pen));
       }
       line.append(copy);
       body.append(row);
