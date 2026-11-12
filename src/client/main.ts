@@ -40,6 +40,7 @@ const ICONS = {
   saved: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg>',
   saving: '<svg viewBox="0 0 16 16" aria-hidden="true" class="spin"><path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5"/></svg>',
   offline: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 12.5h7a3 3 0 0 0 .4-6 4 4 0 0 0-7.6 1A2.5 2.5 0 0 0 4.5 12.5zM2.5 2.5l11 11"/></svg>',
+  pen: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3l2.5 2.5L6 12.5l-3 .5.5-3z"/></svg>',
 };
 
 function startDoc(boot: Boot) {
@@ -309,33 +310,35 @@ function startDoc(boot: Boot) {
     return null;
   }
 
-  function renameDialog() {
+  /** Adresse ändern direkt in der Zeile „Zum Lesen“ im Teilen-Fenster. */
+  function renameForm(cancel: () => void): HTMLElement {
     const isRandom = /^[a-z0-9]{10}$/.test(id) && /\d/.test(id) && /[a-z]/.test(id);
     // Vorschlag: aus dem Titel (erste Überschrift bzw. erste Zeile) des Dokuments.
     const title = editor ? titleOf(editor.text()) : document.title;
     const full = title === id || title === 'Neues Dokument' ? '' : slugify(title);
     const suggestion = full.length <= 60 ? full : full.slice(0, 60).replace(/-[^-]*$/, '');
-    const input = el('input', { type: 'text', value: isRandom ? suggestion : id, placeholder: 'meine-anleitung', spellcheck: 'false', autocapitalize: 'off', 'aria-label': 'Neue Adresse' }) as HTMLInputElement;
+    const input = el('input', { type: 'text', value: isRandom && suggestion ? suggestion : id, placeholder: 'meine-anleitung', spellcheck: 'false', autocapitalize: 'off', 'aria-label': 'Neue Adresse' }) as HTMLInputElement;
     const save = el('button', { type: 'submit', class: 't boxed' }, 'Ändern');
+    const back = button('Abbrechen', 'Abbrechen', cancel, 't');
     const err = el('p', { class: 'error' });
-    const form = el('form', { class: 'sheet' },
-      el('div', { class: 'field-row' },
-        el('div', { class: 'field-line' }, el('div', { class: 'addr' }, el('span', { class: 'prefix' }, `${location.host}/`), input), save),
-        el('p', { class: 'hint' }, `Buchstaben, Ziffern und Bindestriche. ${exists ? (isRandom ? 'Die bisherige Adresse leitet weiter.' : 'Die bisherige Adresse wird wieder frei; alte Links funktionieren dann nicht mehr.') : ''}`),
-        err,
-      ),
+    const form = el('form', { class: 'field-row' },
+      el('label', {}, 'Adresse'),
+      el('div', { class: 'field-line' }, el('div', { class: 'addr' }, el('span', { class: 'prefix' }, `${location.host}/`), input), save, back),
+      el('p', { class: 'hint' }, `Buchstaben, Ziffern und Bindestriche. ${exists ? (isRandom ? 'Die bisherige Adresse leitet weiter.' : 'Die bisherige Adresse wird wieder frei; alte Links funktionieren dann nicht mehr.') : ''}`),
+      err,
     );
+    input.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); } });
     form.addEventListener('submit', async e => {
       e.preventDefault();
       const to = input.value.trim().toLowerCase().replace(/\s+/g, '-');
-      if (!to || to === id) return;
+      if (!to || to === id) { cancel(); return; }
       save.disabled = true;
       const problem = await rename(to);
       save.disabled = false;
       err.textContent = problem || '';
     });
-    dialog('Adresse ändern', form);
     setTimeout(() => { input.focus(); input.select(); }, 30);
+    return form;
   }
 
   // ── Teilen: Links und eigener Name ────────────────────────────────────────
@@ -347,7 +350,7 @@ function startDoc(boot: Boot) {
     const rows: [string, string, string][] = [['Zum Lesen', base, 'Öffnet die Ansicht. Bearbeiten ist damit nicht möglich.']];
     if (editKey) rows.push(['Zum Bearbeiten', `${base}#edit=${editKey}`, 'Wer diesen Link hat, kann das Dokument ändern.']);
     if (exists) rows.push(['Als Markdown', `${base}.md`, 'Reiner Text, z. B. für KI-Assistenten.']);
-    for (const [label, url, hint] of rows) {
+    rows.forEach(([label, url, hint], i) => {
       const input = el('input', { type: 'text', readonly: '', value: url, 'aria-label': label }) as HTMLInputElement;
       input.addEventListener('focus', () => input.select());
       const copy = button('Kopieren', 'In die Zwischenablage', async () => {
@@ -355,8 +358,21 @@ function startDoc(boot: Boot) {
         copy.textContent = 'Kopiert';
         setTimeout(() => (copy.textContent = 'Kopieren'), 1500);
       }, 't boxed');
-      body.append(el('div', { class: 'field-row' }, el('label', {}, label), el('div', { class: 'field-line' }, input, copy), el('p', { class: 'hint' }, hint)));
-    }
+      const line = el('div', { class: 'field-line' }, input);
+      const row = el('div', { class: 'field-row' }, el('label', {}, label), line, el('p', { class: 'hint' }, hint));
+      // Erste Zeile: kleiner Stift zum Ändern der Adresse (nur mit Bearbeitungsrecht).
+      if (i === 0 && canEdit()) {
+        const pen = el('button', { type: 'button', class: 't icon', title: 'Adresse ändern', 'aria-label': 'Adresse ändern' });
+        pen.innerHTML = ICONS.pen;
+        pen.addEventListener('click', () => {
+          const form = renameForm(() => { form.replaceWith(row); pen.focus(); });
+          row.replaceWith(form);
+        });
+        line.append(pen);
+      }
+      line.append(copy);
+      body.append(row);
+    });
     if (!exists) body.append(el('p', { class: 'hint' }, 'Das Dokument wird angelegt, sobald du etwas schreibst.'));
 
     if (canEdit()) {
@@ -383,7 +399,7 @@ function startDoc(boot: Boot) {
         el('span', { class: 'recent-meta' }, `${ago(r.at)}${r.own ? ' · bearbeitbar' : ''}${r.tags?.length ? ' · ' + r.tags.join(', ') : ''}`),
       ));
     }
-    if (list.length || account.user) items.push(el('a', { href: '/home', class: 'recent all' }, el('span', { class: 'recent-title' }, 'Alle Dokumente …')));
+    if (list.length || account.user) items.push(el('a', { href: '/home', class: 'recent all' }, el('span', { class: 'recent-title' }, 'Alle Dokumente')));
     items.push(...accountItems());
     items.push(el('a', { href: '/datenschutz', class: 'menu-fine' }, 'Datenschutz'));
     menu('left', items);
@@ -396,8 +412,7 @@ function startDoc(boot: Boot) {
       items.push(['Neues Dokument', () => { if (navigator.onLine) location.href = '/'; else toast('Offline: Neue Dokumente gehen nur mit Verbindung.'); }]);
     }
     items.push(['Herunterladen (.md)', () => { if (exists) location.href = `/${encodeURIComponent(id)}.md?download=1`; else toast('Noch leer.'); }]);
-    if (canEdit()) items.push(['Adresse ändern', renameDialog]);
-    if (account.user && exists) items.push(['Tags …', () => {
+    if (account.user && exists) items.push(['Tags', () => {
       const r = recent.list().find(x => x.id === id);
       import('./tags').then(m => m.tagDialog(id, document.title, r?.tags || [], tags => toast(tags.length ? `Tags: ${tags.join(', ')}` : 'Keine Tags.')));
     }]);
@@ -415,7 +430,7 @@ function startDoc(boot: Boot) {
       renderBar();
       toast('Freigeschaltet. Du kannst dieses Dokument jetzt bearbeiten.');
     })]);
-    if (exists && (ownerKey(id) || isAdmin())) items.push(['Löschen …', trashDoc]);
+    if (exists && (ownerKey(id) || isAdmin())) items.push(['Löschen', trashDoc]);
     menu('right', items);
   }
 

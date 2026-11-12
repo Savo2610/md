@@ -9,7 +9,7 @@ Durable Object pro Dokument, Bilder in R2.
   für ein einzelnes Dokument und werden im Browser gespeichert: wer es angelegt
   hat, wer den Bearbeiten-Link öffnet (startet direkt im Bearbeiten-Modus), oder
   wer im Dokument den 2FA-Code eingibt (⋯ → Mit Code freischalten).
-- Adresse nachträglich ändern: ⋯ → Adresse ändern. Bilder und Bearbeiten-Links
+- Adresse nachträglich ändern: Teilen → Stift neben dem Leselink. Bilder und Bearbeiten-Links
   bleiben gültig. War die alte Adresse zufällig erzeugt, leitet sie weiter;
   selbst gewählte Namen werden wieder frei (keine Alias-Ketten).
 - Einfügen über `/` am Zeilenanfang oder nach einem Leerzeichen: alle Blöcke
