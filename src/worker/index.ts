@@ -158,17 +158,41 @@ interface Boot {
 const loginEnabled = (env: Env) => !!env.GOOGLE_CLIENT_ID || env.DEV_LOGIN === '1';
 const publicUser = (u: User | null) => (u ? { name: u.name, email: u.email, picture: u.picture } : null);
 
-function page(title: string, body: string, boot: Boot, status = 200): Response {
+/** Fest gewählte Darstellung aus den Einstellungen (Cookie md_theme), sonst ''. */
+function themeOf(req: Request): 'light' | 'dark' | '' {
+  const m = /(?:^|;\s*)md_theme=(light|dark)(?:;|$)/.exec(req.headers.get('cookie') || '');
+  return m ? (m[1] as 'light' | 'dark') : '';
+}
+
+/** <html>-Tag und Farb-Metas passend zur Darstellung. */
+function themeHead(theme: 'light' | 'dark' | ''): { html: string; metas: string } {
+  if (!theme) {
+    return {
+      html: '<html lang="de">',
+      metas: `<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1b1b1b" media="(prefers-color-scheme: dark)">`,
+    };
+  }
+  const color = theme === 'dark' ? '#1b1b1b' : '#ffffff';
+  return {
+    html: `<html lang="de" data-theme="${theme}">`,
+    metas: `<meta name="color-scheme" content="${theme}">
+<meta name="theme-color" content="${color}" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="${color}" media="(prefers-color-scheme: dark)">`,
+  };
+}
+
+function page(req: Request, title: string, body: string, boot: Boot, status = 200): Response {
+  const th = themeHead(themeOf(req));
   const exists = boot.page !== 'doc' || boot.exists ? '1' : '0';
   const html = `<!doctype html>
-<html lang="de">
+${th.html}
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
-<meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#1b1b1b" media="(prefers-color-scheme: dark)">
+${th.metas}
 <title>${escapeHtml(title)}</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32">
@@ -212,18 +236,18 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
   const common = { page: 'doc' as const, id, user: publicUser(user), login: loginEnabled(env), admin: isAdminUser(user, env) };
   if (!info.exists) {
     // Angemeldet braucht es keinen Spam-Schutz.
-    return page('Neues Dokument', `<main id="app"></main>`, { ...common, exists: false, siteKey: user ? undefined : env.TURNSTILE_SITEKEY }, 200);
+    return page(req, 'Neues Dokument', `<main id="app"></main>`, { ...common, exists: false, siteKey: user ? undefined : env.TURNSTILE_SITEKEY }, 200);
   }
   const entry = user ? await accountStub(env, user.sub).get(id) : null;
   const editKey = entry?.editKey || undefined;
   const ownerKey = entry?.ownerKey || undefined;
   if (info.trashed) {
     // Für alle weg. Der Ersteller holt sich den Inhalt im Browser mit seinem Schlüssel.
-    return page('Gelöscht', '<main id="app"></main>', { ...common, exists: true, trashed: info.trashed, ownerKey }, 410);
+    return page(req, 'Gelöscht', '<main id="app"></main>', { ...common, exists: true, trashed: info.trashed, ownerKey }, 410);
   }
   const { html } = render(info.markdown);
   const title = info.title || id;
-  return page(title, `<main id="app"><article class="doc" id="view">${html}</article></main>`, { ...common, exists: true, editKey, ownerKey });
+  return page(req, title, `<main id="app"><article class="doc" id="view">${html}</article></main>`, { ...common, exists: true, editKey, ownerKey });
 }
 
 function rawMarkdown(info: { exists: boolean; markdown: string; trashed?: number }, id: string, download: boolean): Response {
@@ -575,13 +599,13 @@ export default {
     }
     if (path === '/home') {
       const user = await currentUser(req, env);
-      return page('md', '<main id="app"></main>', { page: 'home', user: publicUser(user), login: loginEnabled(env), admin: isAdminUser(user, env) });
+      return page(req, 'md', '<main id="app"></main>', { page: 'home', user: publicUser(user), login: loginEnabled(env), admin: isAdminUser(user, env) });
     }
     if (path === '/admin') {
       const user = await currentUser(req, env);
-      return page('Übersicht', '<main id="app"></main>', { page: 'admin', admin: isAdminUser(user, env) });
+      return page(req, 'Übersicht', '<main id="app"></main>', { page: 'admin', admin: isAdminUser(user, env) });
     }
-    if (path === '/datenschutz') return privacyPage();
+    if (path === '/datenschutz') return privacyPage(req);
     if (path.startsWith('/i/')) {
       const [, , doc, file] = path.split('/');
       const id = doc ? normalizeId(doc) : null;
@@ -618,13 +642,14 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 /** Datenschutzerklärung (verlangt Google für den Login). Ohne Skript, nur Text. */
-function privacyPage(): Response {
+function privacyPage(req: Request): Response {
+  const th = themeHead(themeOf(req));
   const html = `<!doctype html>
-<html lang="de">
+${th.html}
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+${th.metas}
 <title>Datenschutz – md</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="${manifest.css}">
@@ -647,7 +672,7 @@ function privacyPage(): Response {
 </article></main>
 </body>
 </html>`;
-  return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=3600', 'content-security-policy': CSP } });
+  return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-security-policy': CSP } });
 }
 
 function moved(to: string, suffix: string): Response {

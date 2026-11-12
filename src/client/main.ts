@@ -8,6 +8,7 @@ import type { EditorHandle, EditorStatus } from './editor';
 import { titleOf, slugify } from '../shared/title';
 import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, recent, ago, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, type MenuItem } from './ui';
 import { account, accountItems, type User } from './account';
+import { fineRow, spellcheckOn } from './settings';
 
 interface Boot {
   page: 'doc' | 'admin' | 'home';
@@ -98,7 +99,9 @@ function startDoc(boot: Boot) {
   document.body.prepend(bar);
 
   let mode: Mode = exists && !startInEdit ? 'view' : 'edit';
-  let spellcheck = store.get('md:spellcheck') !== '0';
+  let spellcheck = spellcheckOn();
+  // Umgeschaltet in den Einstellungen.
+  addEventListener('md:spellcheck', e => { spellcheck = (e as CustomEvent<boolean>).detail; editor?.setSpellcheck(spellcheck); });
   let editor: EditorHandle | null = null;
   let editorLoading: Promise<EditorHandle> | null = null;
   let lastStatus: EditorStatus | null = null;
@@ -204,13 +207,14 @@ function startDoc(boot: Boot) {
             toast('Das Dokument hat die Maximalgröße erreicht.');
           } else if (n.type === 'moved' && n.to) {
             followMove(n.to);
-          } else if (n.type === 'trashed') {
-            // Jemand hat das Dokument gelöscht: neu laden zeigt „gelöscht“ bzw. den Papierkorb.
+          } else if (n.type === 'trashed' && !trashedHere) {
+            // Jemand anderes hat das Dokument gelöscht: neu laden zeigt „gelöscht“ bzw. den Papierkorb.
             location.reload();
           }
         },
         onTyping: startTyping,
         toast,
+        commands: account.user ? [{ name: 'Tags', key: 'tags tag schlagworte labels', run: openTags }] : [],
       });
       return h;
     });
@@ -391,8 +395,8 @@ function startDoc(boot: Boot) {
   // ── Menüs ─────────────────────────────────────────────────────────────────
 
   function openRecent() {
-    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')]];
-    const list = recent.list().filter(r => r.id !== id);
+    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')], ['Alle Dokumente', () => (location.href = '/home')]];
+    const list = recent.list().filter(r => r.id !== id && !r.trashed);
     if (list.length) items.push(el('div', { class: 'menu-label' }, 'Zuletzt geöffnet'));
     for (const r of list.slice(0, 5)) {
       items.push(el('a', { href: `/${encodeURIComponent(r.id)}`, class: 'recent' },
@@ -400,9 +404,8 @@ function startDoc(boot: Boot) {
         el('span', { class: 'recent-meta' }, `${ago(r.at)}${r.own ? ' · bearbeitbar' : ''}${r.tags?.length ? ' · ' + r.tags.join(', ') : ''}`),
       ));
     }
-    if (list.length || account.user) items.push(el('a', { href: '/home', class: 'recent all' }, el('span', { class: 'recent-title' }, 'Alle Dokumente')));
     items.push(...accountItems());
-    items.push(el('a', { href: '/datenschutz', class: 'menu-fine' }, 'Datenschutz'));
+    items.push(fineRow());
     menu('left', items);
   }
 
@@ -413,15 +416,7 @@ function startDoc(boot: Boot) {
       items.push(['Neues Dokument', () => { if (navigator.onLine) location.href = '/'; else toast('Offline: Neue Dokumente gehen nur mit Verbindung.'); }]);
     }
     items.push(['Herunterladen (.md)', () => { if (exists) location.href = `/${encodeURIComponent(id)}.md?download=1`; else toast('Noch leer.'); }]);
-    if (account.user && exists) items.push(['Tags', () => {
-      const r = recent.list().find(x => x.id === id);
-      import('./tags').then(m => m.tagDialog(id, document.title, r?.tags || [], tags => toast(tags.length ? `Tags: ${tags.join(', ')}` : 'Keine Tags.')));
-    }]);
-    if (mode !== 'view') items.push([spellcheck ? 'Rechtschreibprüfung aus' : 'Rechtschreibprüfung an', () => {
-      spellcheck = !spellcheck;
-      store.set('md:spellcheck', spellcheck ? '1' : '0');
-      editor?.setSpellcheck(spellcheck);
-    }]);
+    if (account.user && exists) items.push(['Tags', openTags]);
     if (exists && !editKey) items.push(['Mit Code freischalten', () => unlockDialog(id, key => {
       if (!key) return;
       editKey = key;
@@ -435,17 +430,28 @@ function startDoc(boot: Boot) {
     menu('right', items);
   }
 
+  function openTags() {
+    if (!exists) { toast('Erst etwas schreiben, dann Tags vergeben.'); return; }
+    const r = recent.list().find(x => x.id === id);
+    const title = editor ? titleOf(editor.text()) : document.title;
+    import('./tags').then(m => m.tagDialog(id, title, r?.tags || [], tags => {
+      toast(tags.length ? `Tags: ${tags.join(', ')}` : 'Keine Tags.');
+      editor?.view.focus();
+    }));
+  }
+
   /** In den Papierkorb (nur Ersteller oder Admin). */
   let trashedHere = false;
   async function trashDoc() {
     if (!(await ask('Dokument löschen?', 'Es ist sofort für alle weg. 30 Tage lang kannst du es auf der Übersicht im Papierkorb wiederherstellen.', 'Löschen'))) return;
+    // Vorher setzen: Der Server schließt gleich die Verbindung, das soll hier kein Neuladen auslösen.
+    trashedHere = true;
     const res = await fetch(`/api/docs/${encodeURIComponent(id)}/trash`, { method: 'POST', headers: { ...ownerHeaders(id), ...adminHeaders() } });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) { toast(data.error || 'Löschen fehlgeschlagen.'); return; }
-    trashedHere = true;
+    if (!res.ok) { trashedHere = false; toast(data.error || 'Löschen fehlgeschlagen.'); return; }
     recent.markTrashed(id, data.trashed, editor ? titleOf(editor.text()) : document.title);
-    // Gleich weiterschreiben: neues, leeres Dokument.
-    location.href = '/';
+    // Gleich weiterschreiben: neues, leeres Dokument (ohne Zurück zum gelöschten).
+    location.replace('/');
   }
 
   // ── Tastatur, Leiste beim Schreiben ausblenden ────────────────────────────

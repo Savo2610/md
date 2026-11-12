@@ -7,6 +7,7 @@
 import { $, el, recent, ago, toast, store, menu, isAdmin, ask, adminHeaders, ownerHeaders, trashDaysLeft, type MenuItem, type Recent } from './ui';
 import { account, accountItems, avatar } from './account';
 import { tagChips, tagDialog } from './tags';
+import { fineRow } from './settings';
 
 const TAG_FILTER = 'md:tag';
 const UNTAGGED = '\u0000ohne';
@@ -17,8 +18,11 @@ export function start() {
   const app = $('#app')!;
 
   const right = el('nav', { class: 'bar-right' });
+  // „md“ oben links: Einstellungen und Datenschutz, klein wie auf den Dokumentseiten.
+  const brand = el('button', { type: 'button', class: 'brand', title: 'Menü', 'aria-haspopup': 'dialog' }, 'md');
+  brand.addEventListener('click', () => menu('left', [['Neues Dokument', () => (location.href = '/')], fineRow()]));
   const bar = el('header', { id: 'bar' },
-    el('div', { class: 'bar-left' }, el('span', { class: 'brand' }, 'md')),
+    el('div', { class: 'bar-left' }, brand),
     right,
   );
   document.body.prepend(bar);
@@ -59,7 +63,6 @@ export function start() {
         items.push(['Konto löschen', () => {
           if (confirm('Konto löschen? Deine Dokumentliste und Tags verschwinden. Die Dokumente selbst bleiben unter ihren Adressen erhalten.')) account.deleteAccount();
         }]);
-        items.push(el('a', { href: '/datenschutz', class: 'menu-fine' }, 'Datenschutz'));
         menu('right', items);
       });
       right.append(b);

@@ -38,8 +38,9 @@
   color-scheme: light;
 }
 
+/* Dunkel: wie das System, außer in den Einstellungen fest gewählt (data-theme). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #1b1b1b;
     --fg: #d9d9d6;
     --fg-soft: #b0b0ac;
@@ -62,6 +63,30 @@
     --danger: #f07878;
     color-scheme: dark;
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #1b1b1b;
+  --fg: #d9d9d6;
+  --fg-soft: #b0b0ac;
+  --muted: #7c7c78;
+  --markup: #5c5c59;
+  --faint: #4f4f4c;
+  --line: #2f2f2d;
+  --soft: #252524;
+  --accent: #5aa9f0;
+  --caret: #2fa9ff;
+  --selection: rgba(47, 169, 255, 0.28);
+  --mark: rgba(255, 214, 10, 0.25);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --code-kw: #d48ac2;
+  --code-str: #8fc79e;
+  --code-num: #e3a36b;
+  --info: #5aa9f0;
+  --success: #6cc08a;
+  --warning: #e2a94a;
+  --danger: #f07878;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -304,7 +329,8 @@ dialog.dlg {
   padding: 20px 22px 22px; font-size: 15px; line-height: 1.55;
 }
 dialog.dlg::backdrop { background: rgba(0, 0, 0, .18); }
-@media (prefers-color-scheme: dark) { dialog.dlg::backdrop { background: rgba(0, 0, 0, .5); } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) dialog.dlg::backdrop { background: rgba(0, 0, 0, .5); } }
+:root[data-theme="dark"] dialog.dlg::backdrop { background: rgba(0, 0, 0, .5); }
 .dlg-head { display: flex; align-items: center; justify-content: space-between; margin: -4px -8px 14px 0; }
 .dlg-head h2 { margin: 0; font-size: 16px; }
 dialog.dlg-menu {
@@ -508,6 +534,17 @@ button.t.boxed.small { padding: 3px 8px; font-size: 12px; }
 }
 .avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 button.t.avatar-btn { padding: 4px; border-radius: 50%; }
-.menu a.menu-fine { padding: 8px 12px 4px; font-size: 12px; color: var(--muted); text-decoration: none; border-top: 1px solid var(--line); margin-top: 4px; }
-.menu a.menu-fine:hover { color: var(--fg-soft); }
+.menu .menu-fine { display: flex; gap: 14px; padding: 8px 12px 4px; border-top: 1px solid var(--line); margin-top: 4px; }
+.menu .menu-fine a, .menu .menu-fine button { padding: 0; font-size: 12px; color: var(--muted); text-decoration: none; background: none; border: 0; border-radius: 0; cursor: pointer; }
+.menu .menu-fine a:hover, .menu .menu-fine button:hover { color: var(--fg-soft); background: none; }
+
+/* Einstellungen */
+.settings { display: flex; flex-direction: column; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14.5px; cursor: default; }
+.set-row:first-child { border-top: 0; padding-top: 2px; }
+.set-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.seg button { appearance: none; border: 0; background: none; padding: 6px 11px; font: inherit; font-size: 13.5px; color: var(--muted); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-checked="true"] { background: var(--soft); color: var(--fg); }
 .menu a.recent.all .recent-title { color: var(--fg-soft); font-size: 13.5px; }

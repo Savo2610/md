@@ -4,7 +4,10 @@
 let katexCssLoaded = false;
 let mermaidReady: Promise<typeof import('mermaid').default> | null = null;
 
-const dark = () => matchMedia('(prefers-color-scheme: dark)').matches;
+const dark = () => {
+  const forced = document.documentElement.dataset.theme;
+  return forced ? forced === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+};
 
 export async function enhance(root: HTMLElement, katexCss?: string) {
   const jobs: Promise<unknown>[] = [];

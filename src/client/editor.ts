@@ -37,6 +37,8 @@ export interface EditorOptions {
   onNotice: (n: { type: string; edit?: boolean; to?: string }) => void;
   onTyping: () => void;
   toast: (msg: string) => void;
+  /** Weitere, versteckte Slash-Befehle (z. B. /tags), nur bei passender Suche. */
+  commands?: { name: string; key: string; run: () => void }[];
 }
 
 export interface Peer { name: string; color: string }
@@ -321,7 +323,7 @@ const DIAGRAMS: [string, string, string][] = [
   ['ER-Diagramm', 'er entity datenbank database', 'erDiagram\n  KUNDE ||--o{ BESTELLUNG : gibt\n  BESTELLUNG ||--|{ POSTEN : enthält‸'],
 ];
 
-function slashItems(pickImage: () => void): Slash[] {
+function slashItems(pickImage: () => void, extra: EditorOptions['commands'] = []): Slash[] {
   return [
     { name: 'Überschrift 1', key: 'h1 überschrift titel heading title header', hint: '#', snippet: '# ‸' },
     { name: 'Überschrift 2', key: 'h2 überschrift heading header', hint: '##', snippet: '## ‸' },
@@ -352,6 +354,13 @@ function slashItems(pickImage: () => void): Slash[] {
     { name: 'Unterstrichen', key: 'unterstrichen underline insert', hint: '++…++', snippet: '++‸++', inline: true },
     { name: 'Hochgestellt', key: 'hochgestellt hoch superscript sup exponent', hint: '^…^', snippet: '^‸^', inline: true },
     { name: 'Tiefgestellt', key: 'tiefgestellt tief subscript sub index', hint: '~…~', snippet: '~‸~', inline: true },
+    // Versteckt (nur beim Tippen): Auszeichnungen, die sonst über die Auswahl-Leiste gehen.
+    { name: 'Fett', key: 'fett bold strong', hint: '**…**', snippet: '**‸**', inline: true, hidden: true },
+    { name: 'Kursiv', key: 'kursiv italic schräg em', hint: '*…*', snippet: '*‸*', inline: true, hidden: true },
+    { name: 'Durchgestrichen', key: 'durchgestrichen strike strikethrough streichen', hint: '~~…~~', snippet: '~~‸~~', inline: true, hidden: true },
+    { name: 'Code im Text', key: 'inline code monospace', hint: '`…`', snippet: '`‸`', inline: true, hidden: true },
+    { name: 'Überschrift 4', key: 'h4 überschrift heading', hint: '####', snippet: '#### ‸', hidden: true },
+    ...extra.map((c): Slash => ({ name: c.name, key: c.key, hint: '', inline: true, hidden: true, run: () => c.run() })),
     ...LANGUAGES.map(([name, lang, key]): Slash => ({ name: `Code: ${name}`, key: `${key} code`, hint: '```' + lang, snippet: fence(lang), hidden: true })),
     ...DIAGRAMS.map(([name, key, body]): Slash => ({ name: `Diagramm: ${name}`, key: `${key} diagramm mermaid diagram`, hint: 'mermaid', snippet: fence('mermaid', body), hidden: true })),
   ];
@@ -820,7 +829,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         syntaxHighlighting(highlight),
         theme,
         search({ top: false }),
-        autocompletion({ override: [slashSource(slashItems(pickImage))], icons: false, activateOnTyping: true }),
+        autocompletion({ override: [slashSource(slashItems(pickImage, o.commands))], icons: false, activateOnTyping: true }),
         placeholder(o.exists ? '' : 'Einfach losschreiben. Mit / am Zeilenanfang fügst du Tabellen, Boxen, Bilder und mehr ein.'),
         spellComp.of(spellAttrs(o.spellcheck)),
         spellExclusions,

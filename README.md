@@ -14,6 +14,10 @@ Durable Object pro Dokument, Bilder in R2.
   selbst gewählte Namen werden wieder frei (keine Alias-Ketten).
 - Einfügen über `/` am Zeilenanfang oder nach einem Leerzeichen: alle Blöcke
   und Auszeichnungen, die der Renderer kann.
+  Versteckt (nur beim Tippen): `/fett`, `/kursiv`, `/durchgestrichen`,
+  `/code`, `/h4`, mit Konto `/tags`.
+- Einstellungen (klein unten im „md“-Menü): Hell/Dunkel/Automatisch
+  (Cookie `md_theme`, der Server setzt `data-theme`), Rechtschreibprüfung.
 - Klick auf „md“: neues Dokument und die zuletzt geöffneten (nur im Browser
   gespeichert, nichts auf dem Server).
 - Mehrere Leute können gleichzeitig schreiben (Yjs über WebSockets).
