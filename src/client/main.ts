@@ -6,9 +6,9 @@
 import { enhance } from './enhance';
 import type { EditorHandle, EditorStatus } from './editor';
 import { titleOf, slugify } from '../shared/title';
-import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, recent, ago, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, type MenuItem } from './ui';
+import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, unlock, recent, ago, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, type MenuItem } from './ui';
 import { account, accountItems, type User } from './account';
-import { fineRow, spellcheckOn, openInEdit, writerName } from './settings';
+import { fineRow, spellcheckOn, startMode, rememberMode, writerName } from './settings';
 
 interface Boot {
   page: 'doc' | 'admin' | 'home';
@@ -98,8 +98,8 @@ function startDoc(boot: Boot) {
   bar.append(left, right);
   document.body.prepend(bar);
 
-  // Einstellung „Beim Öffnen: Bearbeiten“ gilt für Dokumente, die man bearbeiten darf.
-  let mode: Mode = exists && !startInEdit && !(openInEdit() && editKey) ? 'view' : 'edit';
+  // Darf man bearbeiten: zuletzt benutzter Modus bzw. wie in den Einstellungen.
+  let mode: Mode = !exists || startInEdit ? 'edit' : editKey ? startMode() : 'view';
   let spellcheck = spellcheckOn();
   // Umgeschaltet in den Einstellungen.
   addEventListener('md:spellcheck', e => { spellcheck = (e as CustomEvent<boolean>).detail; editor?.setSpellcheck(spellcheck); });
@@ -204,7 +204,7 @@ function startDoc(boot: Boot) {
             store.del(keyName);
             editKey = null;
             toast('Keine Berechtigung zum Bearbeiten. Mit dem Bearbeiten-Link oder dem Code freischalten.');
-            setMode('view');
+            setMode('view', false);
           } else if (n.type === 'limit') {
             toast('Das Dokument hat die Maximalgröße erreicht.');
           } else if (n.type === 'moved' && n.to) {
@@ -224,8 +224,9 @@ function startDoc(boot: Boot) {
     return editor;
   }
 
-  async function setMode(next: Mode) {
+  async function setMode(next: Mode, remember = true) {
     if (next !== 'view' && !canEdit()) return;
+    if (remember && exists) rememberMode(next);
     if (next === 'split' && matchMedia('(max-width: 520px)').matches) next = 'edit';
     const prev = mode;
     mode = next;
@@ -409,7 +410,7 @@ function startDoc(boot: Boot) {
     }
     items.push(['Herunterladen (.md)', () => { if (exists) location.href = `/${encodeURIComponent(id)}.md?download=1`; else toast('Noch leer.'); }]);
     if (account.user && exists) items.push(['Tags', openTags]);
-    if (exists && !editKey) items.push(['Mit Code freischalten', () => unlockDialog(id, key => {
+    const unlocked = (key: string | null) => {
       if (!key) return;
       editKey = key;
       store.set(keyName, key);
@@ -417,7 +418,14 @@ function startDoc(boot: Boot) {
       enableTasks();
       renderBar();
       toast('Freigeschaltet. Du kannst dieses Dokument jetzt bearbeiten.');
-    })]);
+    };
+    // Mit dem Admin-Konto angemeldet: ohne Code, nur kurz bestätigen.
+    if (exists && !editKey && boot.admin) items.push(['Freischalten', async () => {
+      if (!(await ask('Dokument freischalten?', 'Du kannst es danach bearbeiten und löschen.', 'Freischalten', false))) return;
+      const r = await unlock('', id);
+      if (r.ok) unlocked(r.editKey); else toast(r.error);
+    }]);
+    else if (exists && !editKey) items.push(['Mit Code freischalten', () => unlockDialog(id, unlocked)]);
     if (exists && (ownerKey(id) || isAdmin())) items.push(['Löschen', trashDoc, 'danger']);
     menu('right', items);
   }
@@ -523,8 +531,9 @@ function startDoc(boot: Boot) {
     if (editKey && !navigator.onLine) showLocalCopy();
   }
   if (mode !== 'view') {
+    const target = mode;
     mode = 'view';
-    setMode('edit');
+    setMode(target, false);
   }
 }
 

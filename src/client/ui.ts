@@ -91,9 +91,9 @@ export const ownerHeaders = (id: string): Record<string, string> => {
 };
 
 /** Rückfrage als eigener Dialog (kein confirm(), das hält Erweiterungen und Tests an). */
-export function ask(title: string, text: string, ok: string): Promise<boolean> {
+export function ask(title: string, text: string, ok: string, danger = true): Promise<boolean> {
   return new Promise(resolve => {
-    const yes = el('button', { type: 'button', class: 't boxed danger-boxed' }, ok);
+    const yes = el('button', { type: 'button', class: danger ? 't boxed danger-boxed' : 't boxed' }, ok);
     const no = el('button', { type: 'button', class: 't' }, 'Abbrechen');
     const d = dialog('', el('div', { class: 'ask' }, el('h2', {}, title), el('p', { class: 'hint' }, text), el('div', { class: 'ask-row' }, no, yes)));
     yes.addEventListener('click', () => { resolve(true); d.close(); });

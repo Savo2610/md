@@ -32,8 +32,22 @@ export function applyTheme(t: Theme) {
 }
 
 export const spellcheckOn = () => store.get('md:spellcheck') !== '0';
-/** Eigene Dokumente direkt zum Bearbeiten öffnen statt in der Ansicht. */
-export const openInEdit = () => store.get('md:open') === 'edit';
+type OpenMode = 'last' | 'view' | 'edit';
+const openPref = (): OpenMode => { const v = store.get('md:open'); return v === 'view' || v === 'edit' ? v : 'last'; };
+
+/** Zuletzt benutzter Modus (Ansicht, Bearbeiten, Geteilt), für „Beim Öffnen: Zuletzt“. */
+export const rememberMode = (m: string) => store.set('md:last-mode', m);
+
+/**
+ * Modus beim Öffnen eines Dokuments, das man bearbeiten darf: wie in den
+ * Einstellungen festgelegt, sonst der zuletzt benutzte.
+ */
+export function startMode(): 'view' | 'edit' | 'split' {
+  const pref = openPref();
+  if (pref !== 'last') return pref;
+  const last = store.get('md:last-mode');
+  return last === 'edit' || last === 'split' ? last : 'view';
+}
 /** Name beim gemeinsamen Schreiben: selbst gesetzt, sonst Vorname aus dem Konto. */
 export const writerName = () => store.get('md:name') || (account.user?.name || '').split(' ')[0].slice(0, 30);
 
@@ -54,9 +68,9 @@ function segmented<T extends string>(label: string, options: [T, string][], get:
 
 export function settingsDialog() {
   const theme = segmented<Theme>('Darstellung', [['auto', 'Automatisch'], ['light', 'Hell'], ['dark', 'Dunkel']], currentTheme, applyTheme);
-  const open = segmented<'view' | 'edit'>('Beim Öffnen', [['view', 'Ansicht'], ['edit', 'Bearbeiten']],
-    () => (openInEdit() ? 'edit' : 'view'),
-    v => (v === 'edit' ? store.set('md:open', 'edit') : store.del('md:open')));
+  const open = segmented<OpenMode>('Beim Öffnen', [['last', 'Zuletzt'], ['view', 'Ansicht'], ['edit', 'Bearbeiten']],
+    openPref,
+    v => (v === 'last' ? store.del('md:open') : store.set('md:open', v)));
 
   const name = el('input', { type: 'text', class: 'set-input', value: store.get('md:name') || '', placeholder: writerName() || 'Gast', maxlength: '30', 'aria-label': 'Dein Name' }) as HTMLInputElement;
   name.addEventListener('change', () => {

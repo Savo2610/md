@@ -214,6 +214,14 @@ if (!LIVE && vars.DEV_LOGIN === '1') {
     ok(r.status === 401, 'Admin per Cookie: fremde Herkunft abgelehnt');
     r = await fetch(`${BASE}/admin`, { headers: C });
     ok((await r.text()).includes('"admin":true'), '/admin weiß, dass das Konto Admin ist');
+    const lockId = `frei-test-${Date.now().toString(36)}`;
+    await fetch(`${BASE}/api/docs`, { method: 'POST', headers: { ...API, 'content-type': 'application/json' }, body: JSON.stringify({ id: lockId, markdown: 'x' }) });
+    r = await fetch(`${BASE}/api/unlock`, { method: 'POST', headers: { ...C, 'content-type': 'application/json' }, body: JSON.stringify({ doc: lockId }) });
+    d = await j(r);
+    ok(r.ok && d.editKey && d.ownerKey, 'Admin-Konto schaltet Dokument ohne Code frei');
+    r = await fetch(`${BASE}/api/unlock`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ doc: lockId }) });
+    ok(r.status === 401 || r.status === 429, 'Ohne Admin-Konto braucht es weiter den Code');
+    await fetch(`${BASE}/api/docs/${lockId}`, { method: 'DELETE', headers: API });
   }
 
   const own = `konto-test-${Date.now().toString(36)}`;

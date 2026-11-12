@@ -532,11 +532,17 @@ async function me(req: Request, env: Env, parts: string[]): Promise<Response> {
 }
 
 async function unlock(req: Request, env: Env): Promise<Response> {
+  const body = await req.json<{ code?: string; doc?: string }>().catch(() => ({} as { code?: string; doc?: string }));
+  // Angemeldet mit dem Admin-Google-Konto: ein Dokument ohne Code freischalten.
+  if (body.doc && !body.code && isAdminUser(await currentUser(req, env), env)) {
+    const from = req.headers.get('origin');
+    if (from && from !== origin(req)) return fail(403, 'Fremde Herkunft.');
+    return unlockDoc(req, env, body.doc);
+  }
   if (!env.TOTP_SECRET || !env.SESSION_SECRET) return fail(503, '2FA ist auf dem Server nicht eingerichtet.');
   const reg = registry(env);
   const who = ip(req);
   if (!(await reg.unlockAllowed(who))) return fail(429, 'Zu viele Fehlversuche. Bitte in einer Stunde erneut probieren.');
-  const body = await req.json<{ code?: string; doc?: string }>().catch(() => ({} as { code?: string; doc?: string }));
   const match = await verifyTotp(env.TOTP_SECRET, body.code);
   if (!match) {
     await reg.recordFail(who);
@@ -545,18 +551,22 @@ async function unlock(req: Request, env: Env): Promise<Response> {
   if (!(await reg.useCode(match.counter))) return fail(401, 'Dieser Code wurde schon benutzt. Bitte den nächsten abwarten.');
 
   // Mit Dokument: nur dieses eine Dokument freischalten, kein Admin-Zugang.
-  const id = body.doc ? normalizeId(body.doc) : null;
-  if (id) {
-    const editKey = await docStub(env, id).getEditKey();
-    if (!editKey) return fail(404, 'Dokument nicht gefunden.');
-    // Wer den Code hat, darf das Dokument auch löschen (gilt so auch für alte Dokumente).
-    const ownerKey = await docStub(env, id).ensureOwnerKey();
-    const user = await currentUser(req, env);
-    if (user) await accountStub(env, user.sub).upsert([{ id, editKey, ownerKey, opened: Date.now() }]);
-    return json({ editKey, ownerKey });
-  }
+  if (body.doc) return unlockDoc(req, env, body.doc);
   const token = await signToken(env.SESSION_SECRET, ADMIN_TTL);
   return json({ token, expiresIn: ADMIN_TTL });
+}
+
+/** Bearbeitungs- und Besitzer-Schlüssel eines Dokuments (nach geprüftem Code bzw. Admin). */
+async function unlockDoc(req: Request, env: Env, raw: string): Promise<Response> {
+  const id = normalizeId(raw);
+  if (!id) return fail(400, 'Ungültige ID.');
+  const editKey = await docStub(env, id).getEditKey();
+  if (!editKey) return fail(404, 'Dokument nicht gefunden.');
+  // Wer freischalten darf, darf das Dokument auch löschen (gilt so auch für alte Dokumente).
+  const ownerKey = await docStub(env, id).ensureOwnerKey();
+  const user = await currentUser(req, env);
+  if (user) await accountStub(env, user.sub).upsert([{ id, editKey, ownerKey, opened: Date.now() }]);
+  return json({ editKey, ownerKey });
 }
 
 // ── Einstieg ────────────────────────────────────────────────────────────────

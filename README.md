@@ -18,7 +18,8 @@ Durable Object pro Dokument, Bilder in R2.
   `/code`, `/h4`, mit Konto `/tags`.
 - Einstellungen (klein unten im „md“-Menü): Hell/Dunkel/Automatisch
   (Cookie `md_theme`, der Server setzt `data-theme`), beim Öffnen Ansicht
-  oder Bearbeiten, Name beim gemeinsamen Schreiben, Rechtschreibprüfung.
+  oder Bearbeiten (Standard: zuletzt benutzter Modus), Name beim
+  gemeinsamen Schreiben, Rechtschreibprüfung.
 - Tabellen (`src/client/table.ts`): Tab/Shift-Tab springen zwischen Zellen,
   Enter eine Zeile tiefer (leere letzte Zeile: raus aus der Tabelle), dabei
   werden die Spalten ausgerichtet. Aus Excel, Numbers oder Sheets kopierte
