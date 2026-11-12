@@ -21,7 +21,7 @@ export function start() {
   const right = el('nav', { class: 'bar-right' });
   // „md“ oben links: Einstellungen und Datenschutz, klein wie auf den Dokumentseiten.
   const brand = el('button', { type: 'button', class: 'brand', title: 'Menü', 'aria-haspopup': 'dialog' }, 'md');
-  brand.addEventListener('click', () => menu('left', [['Neues Dokument', () => (location.href = '/')], ['Datei öffnen …', () => openAsNew()], fineRow()]));
+  brand.addEventListener('click', () => menu('left', [['Neues Dokument', () => (location.href = '/')], ['Datei öffnen …', () => openAsNew()], ['Memos', () => (location.href = '/memos')], fineRow()]));
   dropZone(file => openAsNew(file));
   const bar = el('header', { id: 'bar' },
     el('div', { class: 'bar-left' }, brand),
@@ -63,7 +63,7 @@ export function start() {
         const items: MenuItem[] = [...accountItems()];
         if (isAdmin()) items.push(['Verwaltung (alle Dokumente)', () => (location.href = '/admin')]);
         items.push(['Konto löschen', async () => {
-          if (await ask('Konto löschen?', 'Deine Dokumentliste und Tags verschwinden. Die Dokumente selbst bleiben unter ihren Adressen erhalten.', 'Konto löschen')) account.deleteAccount();
+          if (await ask('Konto löschen?', 'Deine Dokumentliste, Tags und Memos verschwinden. Die Dokumente selbst bleiben unter ihren Adressen erhalten.', 'Konto löschen')) account.deleteAccount();
         }, 'danger']);
         menu('right', items);
       });

@@ -1,0 +1,17 @@
+{
+  "name": "Memos",
+  "short_name": "Memos",
+  "description": "Private Kurznotizen, wie ein Chat mit dir selbst",
+  "lang": "de",
+  "id": "/memos",
+  "start_url": "/memos",
+  "scope": "/memos",
+  "display": "standalone",
+  "background_color": "#fbfaf7",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "/icons/memos-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/memos-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/memos-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -5,6 +5,8 @@
 //    hier steht nur, was man zum Aufräumen braucht.
 //  - Schutz der 2FA-Freischaltung: Fehlversuche pro IP und insgesamt, und
 //    bereits benutzte Codes (jeder Code gilt nur einmal).
+//  - Memos, die der Admin per API vorbereitet hat (Umzug aus einer anderen
+//    App). Sie wandern beim nächsten Öffnen von /memos ins Admin-Konto.
 
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
@@ -40,6 +42,7 @@ export class Registry extends DurableObject<Env> {
       CREATE INDEX IF NOT EXISTS docs_updated ON docs(updated);
       CREATE TABLE IF NOT EXISTS fails (ip TEXT, at INTEGER);
       CREATE TABLE IF NOT EXISTS used_codes (counter INTEGER PRIMARY KEY, expires INTEGER);
+      CREATE TABLE IF NOT EXISTS memo_import (id TEXT PRIMARY KEY, text TEXT NOT NULL, created INTEGER NOT NULL);
     `);
     // Spalte kam später dazu (Papierkorb).
     try { this.sql.exec('ALTER TABLE docs ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0'); } catch { /* gibt es schon */ }
@@ -100,5 +103,24 @@ export class Registry extends DurableObject<Env> {
     if (hit.length) return false;
     this.sql.exec('INSERT INTO used_codes (counter, expires) VALUES (?, ?)', counter, Date.now() + 3 * 60_000);
     return true;
+  }
+
+  // ── Memos-Umzug ───────────────────────────────────────────────────────────
+
+  queueMemos(items: { id: string; text: string; created: number }[]): number {
+    for (const m of items) {
+      this.sql.exec('INSERT INTO memo_import (id, text, created) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET text = excluded.text, created = excluded.created', m.id, m.text, m.created);
+    }
+    return this.sql.exec('SELECT COUNT(*) AS n FROM memo_import').one().n as number;
+  }
+
+  /** Vorbereitete Memos; erst nach dem Übernehmen mit doneMemos() wegräumen. */
+  pendingMemos(): { id: string; text: string; created: number }[] {
+    return this.sql.exec('SELECT * FROM memo_import ORDER BY created').toArray()
+      .map(r => ({ id: r.id as string, text: r.text as string, created: r.created as number }));
+  }
+
+  doneMemos(ids: string[]) {
+    for (const id of ids) this.sql.exec('DELETE FROM memo_import WHERE id = ?', id);
   }
 }

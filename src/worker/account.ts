@@ -4,6 +4,8 @@
 // geöffnet, Bearbeitungsschlüssel (falls vorhanden) und die eigenen Tags.
 // Die Dokumente selbst liegen weiter in ihren Doc-Objekten; Tags sind
 // persönlich und tauchen im Dokument nicht auf.
+//
+// Dazu die Memos (/memos): kurze private Notizen, nur für dieses Konto.
 
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
@@ -20,6 +22,13 @@ export interface AccountDoc {
   trashed: number;
 }
 
+export interface Memo {
+  id: string;
+  text: string;
+  created: number;
+  updated: number;
+}
+
 export interface Profile {
   sub: string;
   email: string;
@@ -30,6 +39,10 @@ export interface Profile {
 const MAX_DOCS = 5000;
 const MAX_TAGS = 20;
 const MAX_TAG_LEN = 30;
+export const MAX_MEMO = 20_000;
+const MAX_MEMOS = 50_000;
+/** Memo-IDs kommen vom Browser (damit Offline-Senden und Rückgängig nichts doppelt anlegen). */
+export const MEMO_ID = /^[\w-]{8,40}$/;
 
 /** Tags säubern: getrimmt, ohne #, ohne Doppelte (Groß/klein egal), begrenzt. */
 export function cleanTags(raw: unknown): string[] {
@@ -59,6 +72,10 @@ export class Account extends DurableObject<Env> {
         id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', edit_key TEXT,
         opened INTEGER NOT NULL DEFAULT 0, tags TEXT NOT NULL DEFAULT '[]'
       );
+      CREATE TABLE IF NOT EXISTS memos (
+        id TEXT PRIMARY KEY, text TEXT NOT NULL, created INTEGER NOT NULL, updated INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS memos_created ON memos(created);
     `);
     // Spalten kamen später dazu (Papierkorb).
     for (const col of ['owner_key TEXT', 'trashed INTEGER NOT NULL DEFAULT 0']) {
@@ -138,8 +155,50 @@ export class Account extends DurableObject<Env> {
     this.write({ ...old, id: to, editKey: old.editKey || existing?.editKey || null, ownerKey: old.ownerKey || existing?.ownerKey || null, tags: old.tags.length ? old.tags : existing?.tags || [] });
   }
 
-  /** Konto löschen: Liste und Profil weg (die Tabellen bleiben, das Objekt lebt weiter). */
+  // ── Memos ───────────────────────────────────────────────────────────────
+
+  /** Alle Memos, älteste zuerst (wie in einem Chat). */
+  memos(): Memo[] {
+    return this.sql.exec('SELECT * FROM memos ORDER BY created, id').toArray().map(memoRow);
+  }
+
+  /**
+   * Memo anlegen. Gibt es die ID schon, bleibt alles, wie es ist (doppelt
+   * gesendet). `created` darf aus dem Browser kommen (offline geschrieben,
+   * Rückgängig nach dem Löschen), aber nicht in der Zukunft liegen.
+   */
+  addMemo(id: string, text: string, created?: number): Memo | null {
+    const old = this.memo(id);
+    if (old) return old;
+    if ((this.sql.exec('SELECT COUNT(*) AS n FROM memos').one().n as number) >= MAX_MEMOS) return null;
+    const now = Date.now();
+    const at = Number.isFinite(created) && created! > 0 ? Math.min(Math.floor(created!), now) : now;
+    this.sql.exec('INSERT INTO memos (id, text, created, updated) VALUES (?, ?, ?, ?)', id, text, at, Math.max(at, now));
+    return this.memo(id);
+  }
+
+  /** Mehrere auf einmal (Umzug aus einer anderen App). Liefert die übernommenen IDs. */
+  addMemos(items: { id: string; text: string; created: number }[]): string[] {
+    return items.filter(m => this.addMemo(m.id, m.text, m.created)).map(m => m.id);
+  }
+
+  editMemo(id: string, text: string): Memo | null {
+    this.sql.exec('UPDATE memos SET text = ?, updated = ? WHERE id = ?', text, Date.now(), id);
+    return this.memo(id);
+  }
+
+  deleteMemo(id: string): boolean {
+    return this.sql.exec('DELETE FROM memos WHERE id = ?', id).rowsWritten > 0;
+  }
+
+  private memo(id: string): Memo | null {
+    const r = this.sql.exec('SELECT * FROM memos WHERE id = ?', id).toArray();
+    return r.length ? memoRow(r[0]) : null;
+  }
+
+  /** Konto löschen: Liste, Memos und Profil weg (die Tabellen bleiben, das Objekt lebt weiter). */
   destroy() {
+    this.sql.exec('DELETE FROM memos');
     this.sql.exec('DELETE FROM docs');
     this.sql.exec('DELETE FROM profile');
   }
@@ -152,6 +211,10 @@ export class Account extends DurableObject<Env> {
       d.id, d.title, d.editKey, d.opened, JSON.stringify(d.tags), d.ownerKey, d.trashed || 0,
     );
   }
+}
+
+function memoRow(r: Record<string, SqlStorageValue>): Memo {
+  return { id: r.id as string, text: r.text as string, created: r.created as number, updated: r.updated as number };
 }
 
 function row(r: Record<string, SqlStorageValue>): AccountDoc {

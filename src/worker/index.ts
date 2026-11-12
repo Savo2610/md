@@ -6,6 +6,7 @@
 //                        sich der Editor und legt es beim ersten Tippen an
 //   /<id>.md             reines Markdown (für Agenten, ?download=1 zum Speichern)
 //   /admin               Übersicht aller Dokumente (2FA-Code)
+//   /memos               private Kurznotizen des Kontos (wie ein Chat mit sich selbst)
 //   /i/<id>/<datei>      Bilder aus R2
 //
 // API (JSON):
@@ -24,6 +25,8 @@
 //   POST   /api/unlock               2FA-Code → Bearbeitungsschlüssel für ein Dokument,
 //                                    oder (ohne Dokument) Admin-Token für /admin
 //   GET    /api/admin/docs           Übersicht (Admin)
+//   POST   /api/admin/memos          Memos fürs Admin-Konto vorbereiten ({ memos: [{ text, created }] }),
+//                                    sie wandern beim nächsten Öffnen von /memos hinein
 //
 // Konto (optional, Google-Login, siehe auth.ts; Cookie md_session):
 //   GET    /auth/login, /auth/callback, POST /auth/logout
@@ -32,6 +35,12 @@
 //   PUT    /api/me/docs/<id>/tags    Tags setzen ({ tags })
 //   DELETE /api/me/docs/<id>         aus der Liste nehmen (Dokument bleibt)
 //   DELETE /api/me                   Konto samt Liste löschen
+//   GET    /api/me/memos             Memos ({ memos })
+//   POST   /api/me/memos             Memo anlegen ({ id, text, created? }, ID vom Browser)
+//   PUT    /api/me/memos/<id>        Text ändern ({ text })
+//   DELETE /api/me/memos/<id>        Memo löschen
+//
+// memos.veerka.mp leitet auf /memos um (früher eine eigene Memos-Instanz).
 
 import manifest from '../generated/manifest.json';
 import { render, escapeHtml } from '../shared/render';
@@ -39,7 +48,7 @@ import { randomId, randomToken, signToken, verifyTotp, verifyToken, timingSafeEq
 import { MAX_CHARS } from './doc';
 import { accountStub, docStub, registry, type Env } from './env';
 import { auth, clearSessionCookie, currentUser, type User } from './auth';
-import type { AccountDoc } from './account';
+import { MAX_MEMO, MEMO_ID, type AccountDoc, type Memo } from './account';
 
 export { Doc } from './doc';
 export { Registry } from './registry';
@@ -47,9 +56,9 @@ export { Account } from './account';
 
 const ADMIN_TTL = 12 * 3600;
 const MAX_IMAGE = 6 * 1024 * 1024;
-const RESERVED = new Set(['api', 'auth', 'admin', 'home', 'datenschutz', 'i', 'assets', 'fonts', 'icons', 'new', 'robots.txt', 'favicon.svg', 'favicon.ico', 'sw.js', 'manifest.webmanifest', 'apple-touch-icon.png']);
+const RESERVED = new Set(['api', 'auth', 'admin', 'home', 'memos', 'datenschutz', 'i', 'assets', 'fonts', 'icons', 'new', 'robots.txt', 'favicon.svg', 'favicon.ico', 'sw.js', 'manifest.webmanifest', 'apple-touch-icon.png']);
 /** Statische Dateien, die direkt aus public/ kommen. */
-const STATIC_FILES = new Set(['/favicon.svg', '/sw.js', '/manifest.webmanifest', '/apple-touch-icon.png']);
+const STATIC_FILES = new Set(['/favicon.svg', '/sw.js', '/manifest.webmanifest', '/memos.webmanifest', '/apple-touch-icon.png', '/memos-touch-icon.png']);
 const IMAGE_TYPES: Record<string, string> = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/avif': 'avif' };
 
 // ── Hilfen ──────────────────────────────────────────────────────────────────
@@ -136,7 +145,7 @@ const CSP = [
 ].join('; ');
 
 interface Boot {
-  page: 'doc' | 'admin' | 'home';
+  page: 'doc' | 'admin' | 'home' | 'memos';
   id?: string;
   exists?: boolean;
   siteKey?: string;
@@ -153,7 +162,17 @@ interface Boot {
   ownerKey?: string;
   /** Im Papierkorb seit (ms). */
   trashed?: number;
+  /** Memos des Kontos (nur auf /memos). */
+  memos?: MemoOut[];
 }
+
+type MemoOut = Memo & { html: string };
+const memoOut = (m: Memo): MemoOut => ({ ...m, html: render(m.text).html });
+
+/** Eigene App auf dem Homescreen: /memos hat ein eigenes Manifest und Icon. */
+interface AppHead { manifest: string; title: string; icon: string }
+const MD_APP: AppHead = { manifest: '/manifest.webmanifest', title: 'md', icon: '/apple-touch-icon.png' };
+const MEMOS_APP: AppHead = { manifest: '/memos.webmanifest', title: 'Memos', icon: '/memos-touch-icon.png' };
 
 const loginEnabled = (env: Env) => !!env.GOOGLE_CLIENT_ID || env.DEV_LOGIN === '1';
 const publicUser = (u: User | null) => (u ? { name: u.name, email: u.email, picture: u.picture } : null);
@@ -183,7 +202,7 @@ function themeHead(theme: 'light' | 'dark' | ''): { html: string; metas: string 
   };
 }
 
-function page(req: Request, title: string, body: string, boot: Boot, status = 200): Response {
+function page(req: Request, title: string, body: string, boot: Boot, status = 200, app: AppHead = MD_APP): Response {
   const th = themeHead(themeOf(req));
   const exists = boot.page !== 'doc' || boot.exists ? '1' : '0';
   const html = `<!doctype html>
@@ -196,11 +215,11 @@ ${th.metas}
 <title>${escapeHtml(title)}</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="${app.icon}">
+<link rel="manifest" href="${app.manifest}">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="md">
+<meta name="apple-mobile-web-app-title" content="${app.title}">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preload" href="/fonts/iAWriterQuattroS-Regular.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="${manifest.css}">
@@ -250,6 +269,21 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
   return page(req, title, `<main id="app"><article class="doc" id="view">${html}</article></main>`, { ...common, exists: true, editKey, ownerKey });
 }
 
+async function memosPage(req: Request, env: Env): Promise<Response> {
+  const user = await currentUser(req, env);
+  const common = { page: 'memos' as const, user: publicUser(user), login: loginEnabled(env), admin: isAdminUser(user, env) };
+  if (!user) return page(req, 'Memos', '<main id="app"></main>', common, 200, MEMOS_APP);
+  const acc = accountStub(env, user.sub);
+  if (common.admin) {
+    // Umzug: vom Admin per API vorbereitete Memos übernehmen.
+    const reg = registry(env);
+    const pending = await reg.pendingMemos();
+    if (pending.length) await reg.doneMemos(await acc.addMemos(pending));
+  }
+  const memos = (await acc.memos()).map(memoOut);
+  return page(req, 'Memos', '<main id="app"></main>', { ...common, memos }, 200, MEMOS_APP);
+}
+
 function rawMarkdown(info: { exists: boolean; markdown: string; trashed?: number }, id: string, download: boolean): Response {
   if (info.trashed) return new Response('Dokument wurde gelöscht.\n', { status: 410, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
   if (!info.exists) return new Response('Dokument nicht gefunden.\n', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
@@ -275,6 +309,17 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
   if (parts[0] === 'admin' && parts[1] === 'docs' && method === 'GET') {
     if (!(await isAdmin(req, env))) return fail(401, 'Nicht freigeschaltet.');
     return json(await registry(env).list(url.searchParams.get('q') || ''));
+  }
+
+  if (parts[0] === 'admin' && parts[1] === 'memos' && method === 'POST') {
+    if (!(await isAdmin(req, env))) return fail(401, 'Nicht freigeschaltet.');
+    if (!env.ADMIN_EMAIL) return fail(503, 'ADMIN_EMAIL fehlt.');
+    const body = await req.json<{ memos?: { id?: string; text?: string; created?: number }[] }>().catch(() => ({} as { memos?: [] }));
+    if (!Array.isArray(body.memos)) return fail(400, 'memos fehlt.');
+    const items = body.memos
+      .filter(m => typeof m?.text === 'string' && m.text.trim() && m.text.length <= MAX_MEMO && Number(m.created) > 0)
+      .map(m => ({ id: typeof m.id === 'string' && MEMO_ID.test(m.id) ? m.id : randomToken(12), text: m.text!, created: Math.floor(Number(m.created)) }));
+    return json({ queued: await registry(env).queueMemos(items) });
   }
 
   if (parts[0] !== 'docs') return fail(404, 'Unbekannt.');
@@ -507,6 +552,7 @@ async function me(req: Request, env: Env, parts: string[]): Promise<Response> {
       return json({ ok: true }, 200, { 'set-cookie': clearSessionCookie(req) });
     }
   }
+  if (parts[0] === 'memos') return memos(req, acc, parts.slice(1));
   if (parts[0] !== 'docs') return fail(404, 'Unbekannt.');
 
   if (parts.length === 1 && req.method === 'POST') {
@@ -529,6 +575,42 @@ async function me(req: Request, env: Env, parts: string[]): Promise<Response> {
     return json(doc);
   }
   return fail(404, 'Unbekannt.');
+}
+
+type Body = { id?: unknown; text?: unknown; created?: unknown };
+
+async function memos(req: Request, acc: ReturnType<typeof accountStub>, parts: string[]): Promise<Response> {
+  const body = async () => (await req.json<Body>().catch(() => ({}))) as Body;
+  // Zeilenenden vereinheitlichen, Leerzeilen vorn und Leerraum hinten weg.
+  const cleanText = (t: unknown) => (typeof t === 'string' ? t.replace(/\r\n?/g, '\n').replace(/^(\s*\n)+|\s+$/g, '') : '');
+
+  if (!parts.length) {
+    if (req.method === 'GET') return json({ memos: (await acc.memos()).map(memoOut) });
+    if (req.method === 'POST') {
+      const b = await body();
+      const text = cleanText(b.text);
+      if (typeof b.id !== 'string' || !MEMO_ID.test(b.id)) return fail(400, 'Ungültige ID.');
+      if (!text) return fail(400, 'Leeres Memo.');
+      if (text.length > MAX_MEMO) return fail(413, 'Memo zu lang.');
+      const m = await acc.addMemo(b.id, text, typeof b.created === 'number' ? b.created : undefined);
+      if (!m) return fail(507, 'Zu viele Memos.');
+      return json(memoOut(m), 201);
+    }
+  }
+  const id = parts[0];
+  if (parts.length !== 1 || !MEMO_ID.test(id)) return fail(404, 'Unbekannt.');
+  if (req.method === 'PUT') {
+    const text = cleanText((await body()).text);
+    if (!text) return fail(400, 'Leeres Memo.');
+    if (text.length > MAX_MEMO) return fail(413, 'Memo zu lang.');
+    const m = await acc.editMemo(id, text);
+    return m ? json(memoOut(m)) : fail(404, 'Memo nicht gefunden.');
+  }
+  if (req.method === 'DELETE') {
+    await acc.deleteMemo(id);
+    return json({ ok: true });
+  }
+  return fail(405, 'Methode nicht erlaubt.');
 }
 
 async function unlock(req: Request, env: Env): Promise<Response> {
@@ -576,6 +658,11 @@ export default {
     const url = new URL(req.url);
     const path = url.pathname;
 
+    // Die alte Memos-Instanz lag auf memos.veerka.mp.
+    if (url.hostname === 'memos.veerka.mp') {
+      return new Response(null, { status: 301, headers: { location: 'https://md.veerka.mp/memos' } });
+    }
+
     if (/^\/(assets|fonts|icons)\//.test(path) || STATIC_FILES.has(path)) {
       return env.ASSETS.fetch(req);
     }
@@ -615,6 +702,7 @@ export default {
       const user = await currentUser(req, env);
       return page(req, 'Übersicht', '<main id="app"></main>', { page: 'admin', admin: isAdminUser(user, env) });
     }
+    if (path === '/memos') return memosPage(req, env);
     if (path === '/datenschutz') return privacyPage(req);
     if (path.startsWith('/i/')) {
       const [, , doc, file] = path.split('/');
@@ -673,7 +761,7 @@ ${th.metas}
 <h2>Ohne Anmeldung</h2>
 <p>Die Liste „zuletzt geöffnet“ und die Bearbeitungsrechte liegen nur in deinem Browser. Beim Anlegen eines Dokuments prüft Cloudflare Turnstile, ob ein Mensch schreibt. Die IP-Adresse wird kurzzeitig für eine Begrenzung der Anfragen verwendet und nicht dauerhaft gespeichert.</p>
 <h2>Mit Google anmelden (optional)</h2>
-<p>Meldest du dich an, erhält md von Google deine Google-Konto-ID, deinen Namen, deine E-Mail-Adresse und dein Profilbild. Damit wird ein Konto angelegt, in dem deine Dokumentliste, die Bearbeitungsrechte und deine Tags liegen. Name, E-Mail und Bild stehen in einem Sitzungs-Cookie in deinem Browser. Es gibt keine Werbung, kein Tracking und keine Weitergabe an Dritte. Unter „Konto löschen“ (Übersicht, oben rechts) kannst du Konto, Liste und Tags jederzeit löschen; die Dokumente selbst bleiben unter ihren Adressen bestehen.</p>
+<p>Meldest du dich an, erhält md von Google deine Google-Konto-ID, deinen Namen, deine E-Mail-Adresse und dein Profilbild. Damit wird ein Konto angelegt, in dem deine Dokumentliste, die Bearbeitungsrechte, deine Tags und deine Memos liegen. Memos sieht nur dein Konto. Name, E-Mail und Bild stehen in einem Sitzungs-Cookie in deinem Browser. Es gibt keine Werbung, kein Tracking und keine Weitergabe an Dritte. Unter „Konto löschen“ (Übersicht, oben rechts) kannst du Konto, Liste, Tags und Memos jederzeit löschen; die Dokumente selbst bleiben unter ihren Adressen bestehen.</p>
 <h2>Hosting</h2>
 <p>Die Seite läuft bei Cloudflare (Workers, Speicher in Durable Objects und R2). Cloudflare verarbeitet dabei technisch notwendige Verbindungsdaten.</p>
 <h2>Kontakt</h2>

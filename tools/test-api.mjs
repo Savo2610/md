@@ -297,8 +297,53 @@ if (!LIVE && vars.DEV_LOGIN === '1') {
   r = await fetch(`${BASE}/api/docs/${bin}`);
   ok(r.status === 404, 'Danach ist es weg');
 
+  // Memos
+  const J = { ...C, 'content-type': 'application/json' };
+  r = await fetch(`${BASE}/api/me/memos`);
+  ok(r.status === 401, 'Memos ohne Anmeldung → 401');
+  const mid = `memo-${Date.now().toString(36)}`;
+  r = await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: J, body: JSON.stringify({ id: mid, text: '\n\nMilch kaufen\r\n- [ ] Brot  \n\n', created: 1000 }) });
+  d = await j(r);
+  ok(r.status === 201 && d.text === 'Milch kaufen\n- [ ] Brot' && d.created === 1000 && d.html.includes('task'), 'Memo anlegen: Text gesäubert, Zeit übernommen, gerendert');
+  r = await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: J, body: JSON.stringify({ id: mid, text: 'doppelt' }) });
+  ok(r.status === 201 && (await j(r)).text === 'Milch kaufen\n- [ ] Brot', 'Gleiche ID nochmal: nichts doppelt, nichts überschrieben');
+  r = await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: J, body: JSON.stringify({ id: `${mid}-z`, text: 'Zukunft', created: Date.now() + 86400_000 }) });
+  ok((await j(r)).created <= Date.now(), 'Zeit in der Zukunft wird auf jetzt gesetzt');
+  r = await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: J, body: JSON.stringify({ id: 'kurz', text: 'x' }) });
+  ok(r.status === 400, 'Ungültige Memo-ID → 400');
+  r = await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: J, body: JSON.stringify({ id: `${mid}-leer`, text: '  \n ' }) });
+  ok(r.status === 400, 'Leeres Memo → 400');
+  r = await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: { ...J, origin: 'https://evil.example' }, body: JSON.stringify({ id: `${mid}-evil`, text: 'x' }) });
+  ok(r.status === 403, 'Memo von fremder Herkunft abgelehnt');
+  r = await fetch(`${BASE}/api/me/memos/${mid}`, { method: 'PUT', headers: J, body: JSON.stringify({ text: '- [x] Brot' }) });
+  ok(r.ok && (await j(r)).text === '- [x] Brot', 'Memo bearbeiten');
+  r = await fetch(`${BASE}/api/me/memos`, { headers: C });
+  d = await j(r);
+  const mine = d.memos.filter(m => m.id.startsWith(mid));
+  ok(mine.length === 2 && d.memos[0].id === mid, 'Liste: älteste zuerst');
+  r = await fetch(`${BASE}/memos`, { headers: C });
+  const memosHtml = await r.text();
+  ok(r.ok && memosHtml.includes('"page":"memos"') && memosHtml.includes(mid) && memosHtml.includes('/memos.webmanifest'), '/memos liefert Memos und eigenes App-Manifest');
+  r = await fetch(`${BASE}/memos`);
+  ok(r.ok && !(await r.text()).includes(mid), '/memos ohne Anmeldung zeigt nichts');
+  r = await fetch(`${BASE}/api/me/memos/${mid}`, { method: 'DELETE', headers: C });
+  r = await fetch(`${BASE}/api/me/memos`, { headers: C });
+  ok(!(await j(r)).memos.some(m => m.id === mid), 'Memo löschen');
+  r = await fetch(`${BASE}/api/admin/memos`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"memos":[]}' });
+  ok(r.status === 401, 'Memo-Umzug nur für Admin');
+  if (vars.ADMIN_EMAIL === 'test@localhost') {
+    r = await fetch(`${BASE}/api/admin/memos`, { method: 'POST', headers: { ...API, 'content-type': 'application/json' }, body: JSON.stringify({ memos: [{ id: `${mid}-alt`, text: 'Aus der alten App', created: 5000 }, { text: '' }] }) });
+    ok(r.ok && (await j(r)).queued >= 1, 'Memo-Umzug: Admin bereitet Memos vor');
+    await fetch(`${BASE}/memos`, { headers: C });
+    r = await fetch(`${BASE}/api/me/memos`, { headers: C });
+    d = await j(r);
+    ok(d.memos.some(m => m.id === `${mid}-alt` && m.created === 5000), 'Beim Öffnen von /memos landen sie im Admin-Konto');
+  }
+
   r = await fetch(`${BASE}/api/me`, { method: 'DELETE', headers: C });
   ok(r.ok && /md_session=;/.test(r.headers.get('set-cookie') || ''), 'Konto löschen räumt das Cookie weg');
+  r = await fetch(`${BASE}/api/me/memos`, { headers: C });
+  ok(r.ok && (await j(r)).memos.length === 0, 'Konto löschen nimmt die Memos mit');
   r = await fetch(`${BASE}/api/me`, { headers: C });
   ok(r.ok && (await j(r)).docs.length === 0, 'Gelöschtes Konto ist leer');
   await fetch(`${BASE}/api/docs/${own}-neu`, { method: 'DELETE', headers: API });

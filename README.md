@@ -56,6 +56,18 @@ Durable Object pro Dokument, Bilder in R2.
   Cursorstelle. `.md`/`.txt` unverändert, `.html` wird zu Markdown. Ebenso
   eingefügter Rich Text (Webseiten, Google Docs, Mail, die eigene Ansicht inkl.
   Formeln); ⌘⇧V fügt ohne Umwandlung ein.
+- `md.veerka.mp/memos`: Memos, private Kurznotizen im Konto, wie ein Chat mit
+  sich selbst (`src/client/memos.ts`). Neueste unten, Eingabe unten; am Rechner
+  schickt Enter ab, am Handy der Pfeil. Markdown wird gerendert, Aufgaben
+  (`- [ ]`) lassen sich abhaken. Pro Memo (⋯): Bearbeiten, Kopieren, Löschen
+  (mit Rückgängig). Suche oben rechts. Offline Geschriebenes wartet im Browser
+  und wird nachgeschickt. Eigenes App-Manifest (`public/memos.webmanifest`,
+  Icons `memos-*`), lässt sich also als eigene App auf den Homescreen legen.
+  Liegt im Account-Objekt (Tabelle `memos`), braucht also Google-Login.
+  `memos.veerka.mp` leitet hierher um (dort lief früher eine Memos-Instanz).
+  Umzug von Memos: `POST /api/admin/memos` (API-Schlüssel) mit
+  `{ "memos": [{ "text", "created" }] }`, beim nächsten Öffnen von `/memos`
+  mit dem Admin-Konto landen sie dort.
 - `md.veerka.mp/admin`: alle Dokumente, Löschen, „Behalten“ (2FA-Code oder
   angemeldet mit dem Google-Konto aus dem Secret `ADMIN_EMAIL`).
 
@@ -112,13 +124,14 @@ Live-Test ohne 2FA-Teil:
 | `src/worker/doc.ts` | Durable Object pro Dokument: Yjs-Updates in SQLite, WebSockets, Ablauf |
 | `src/worker/registry.ts` | Übersicht aller Dokumente, Fehlversuche, verbrauchte Codes |
 | `src/worker/auth.ts` | Google-Login (OIDC + PKCE), Sitzungs-Cookie |
-| `src/worker/account.ts` | Durable Object pro Konto: Dokumentliste, Schlüssel, Tags |
+| `src/worker/account.ts` | Durable Object pro Konto: Dokumentliste, Schlüssel, Tags, Memos |
 | `src/shared/render.ts` | Markdown → HTML (Server und Browser), HackMD-Erweiterungen |
 | `src/client/main.ts` | Kopfleiste, Modi, Teilen, Umbenennen, Zuletzt geöffnet, Freischalten |
 | `src/client/editor.ts` | CodeMirror + Yjs, Slash-Menü, Auswahl-Leiste, Handy-Leiste, Bilder |
 | `src/client/table.ts` | Tabellen: Tab/Enter, Ausrichten, Einfügen aus Tabellenprogrammen |
 | `src/client/settings.ts` | Einstellungen (Darstellung, Öffnen, Name, Rechtschreibung) |
 | `src/client/home.ts` | Übersicht (`/home`): Liste, Suche, Tag-Filter, Konto |
+| `src/client/memos.ts` | Memos (`/memos`): Liste, Eingabe, Bearbeiten/Löschen, Offline-Warteschlange |
 | `src/client/account.ts` | Abgleich der Liste mit dem Konto, Anmelden/Abmelden |
 | `src/client/tags.ts` | Tags bearbeiten |
 | `public/sw.js` | Service Worker (offline) |

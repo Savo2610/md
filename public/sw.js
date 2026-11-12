@@ -30,6 +30,7 @@ self.addEventListener('install', event => {
     try {
       const pages = await caches.open(PAGES);
       await pages.add(new Request('/home', { cache: 'no-store' }));
+      await pages.add(new Request('/memos', { cache: 'no-store' }));
     } catch { /* offline installiert */ }
     await self.skipWaiting();
   })());
@@ -51,7 +52,7 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname === '/sw.js') return;
 
-  if (/^\/(assets|fonts|icons)\//.test(url.pathname) || ['/favicon.svg', '/manifest.webmanifest', '/apple-touch-icon.png'].includes(url.pathname)) {
+  if (/^\/(assets|fonts|icons)\//.test(url.pathname) || ['/favicon.svg', '/manifest.webmanifest', '/memos.webmanifest', '/apple-touch-icon.png', '/memos-touch-icon.png'].includes(url.pathname)) {
     event.respondWith(cacheFirst(req, STATIC));
     return;
   }

@@ -35,7 +35,7 @@ const writeManifest = {
 
 /**
  * Was der Service Worker vorab speichert, damit die App offline startet und
- * bearbeiten kann: Einstieg, Stil, Editor und Übersicht samt allem, was sie
+ * bearbeiten kann: Einstieg, Stil, Editor, Übersicht und Memos samt allem, was sie
  * statisch importieren, dazu Schriften und Icons. Mermaid, KaTeX und
  * Highlighting kommen erst beim ersten Gebrauch in den Speicher.
  */
@@ -47,7 +47,7 @@ function precacheList(metafile) {
     wanted.add(file);
     for (const imp of outputs[file].imports) {
       if (imp.kind === 'import-statement') visit(imp.path);
-      else if (imp.kind === 'dynamic-import' && /\/(editor|admin|home|html2md)-/.test(imp.path)) visit(imp.path);
+      else if (imp.kind === 'dynamic-import' && /\/(editor|admin|home|html2md|memos)-/.test(imp.path)) visit(imp.path);
     }
   };
   for (const [file, info] of Object.entries(outputs)) {
@@ -57,7 +57,7 @@ function precacheList(metafile) {
   for (const dir of ['fonts', 'icons']) {
     for (const f of readdirSync(`public/${dir}`)) if (/\.(woff2|png|svg)$/.test(f)) files.push(`/${dir}/${f}`);
   }
-  return files.concat(['/favicon.svg', '/manifest.webmanifest', '/apple-touch-icon.png']);
+  return files.concat(['/favicon.svg', '/manifest.webmanifest', '/memos.webmanifest', '/apple-touch-icon.png', '/memos-touch-icon.png']);
 }
 
 const options = {

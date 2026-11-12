@@ -12,7 +12,7 @@ import { fineRow, spellcheckOn, startMode, rememberMode, writerName } from './se
 import { openAsNew, takePending, dropZone, fileToMarkdown } from './importer';
 
 interface Boot {
-  page: 'doc' | 'admin' | 'home';
+  page: 'doc' | 'admin' | 'home' | 'memos';
   build?: string;
   id?: string;
   exists?: boolean;
@@ -734,6 +734,8 @@ if (boot.page === 'admin') {
   import('./admin').then(m => m.start());
 } else if (boot.page === 'home') {
   import('./home').then(m => m.start());
+} else if (boot.page === 'memos') {
+  import('./memos').then(m => m.start(boot));
 } else if (boot.trashed) {
   startTrashed(boot);
 } else {

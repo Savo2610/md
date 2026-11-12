@@ -191,7 +191,9 @@ function adopt(docs: ServerDoc[]) {
 function forgetLocal() {
   try {
     for (const k of Object.keys(localStorage)) {
-      if (k.startsWith('md:key:') || k.startsWith('md:owner:') || ['md:recent', 'md:removed', IMPORTED, LAST_SYNC].includes(k)) localStorage.removeItem(k);
+      if (k.startsWith('md:key:') || k.startsWith('md:owner:') || ['md:recent', 'md:removed', 'md:memos:outbox', IMPORTED, LAST_SYNC].includes(k)) localStorage.removeItem(k);
     }
   } catch { /* egal */ }
+  // Gespeicherte Memos-Seite (Service Worker) gehört zum Konto.
+  self.caches?.open('md-pages').then(c => c.delete('/memos')).catch(() => {});
 }
