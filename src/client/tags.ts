@@ -43,8 +43,7 @@ export function tagDialog(id: string, title: string, current: string[], done: (t
   const form = el('form', { class: 'sheet tag-form' },
     el('p', { class: 'hint tag-doc' }, title || id),
     el('div', { class: 'field-row' }, chosen),
-    el('div', { class: 'field-row' }, el('div', { class: 'field-line' }, input, save),
-      el('p', { class: 'hint' }, 'Enter fügt hinzu. Tags siehst nur du, nicht wer das Dokument sonst öffnet.')),
+    el('div', { class: 'field-row' }, el('div', { class: 'field-line' }, input, save)),
     offerWrap,
   );
   input.addEventListener('input', draw);

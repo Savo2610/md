@@ -444,7 +444,8 @@ function startDoc(boot: Boot) {
     if (!res.ok) { toast(data.error || 'Löschen fehlgeschlagen.'); return; }
     trashedHere = true;
     recent.markTrashed(id, data.trashed, editor ? titleOf(editor.text()) : document.title);
-    location.href = '/home';
+    // Gleich weiterschreiben: neues, leeres Dokument.
+    location.href = '/';
   }
 
   // ── Tastatur, Leiste beim Schreiben ausblenden ────────────────────────────
