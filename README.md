@@ -61,7 +61,7 @@ Durable Object pro Dokument, Bilder in R2.
   Markdown-Hervorhebung wie iA Writer (gemeinsam mit dem Editor in
   `cmkit.ts`), Listen laufen mit Enter weiter, ⌘/Strg+Enter sichert. Leiste:
   Bild/Datei (auch Einfügen/Ziehen), Sprachmemo (MediaRecorder), Standort
-  (Ortsname über OpenStreetMap Nominatim, Link auf Apple Karten), Aufgabe.
+  (Ortsname über OpenStreetMap Nominatim, Link auf Google Maps), Aufgabe.
   Anhänge stehen als Markdown-Link `/m/<datei>` im Text und werden in der
   Ansicht zu Player, Datei- bzw. Ortskarte. `#tags` im Text: farbig, oben als
   Filter, Vervollständigung nach `#`. Pro Memo (⋯, Menü direkt am Knopf):

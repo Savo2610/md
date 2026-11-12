@@ -194,7 +194,8 @@ export function start(boot: Boot) {
         a.prepend(i);
         continue;
       }
-      if (href.startsWith('https://maps.apple.com/?ll=')) {
+      // Ort (ältere Memos verweisen noch auf Apple Karten).
+      if (href.startsWith('https://www.google.com/maps/search/?api=1&query=') || href.startsWith('https://maps.apple.com/?ll=')) {
         a.classList.add('att', 'att-place');
         const i = el('span', { class: 'att-icon' }); i.innerHTML = ICON.place;
         a.prepend(i);

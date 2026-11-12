@@ -259,7 +259,8 @@ export function memoEditor(parent: HTMLElement, o: MemoEditorOptions): MemoEdito
         if (res.ok) name = (await res.json()).name || '';
       } catch { /* offline: nur Koordinaten */ }
       const label = name || `${lat}, ${lon}`;
-      insertBlock(`[${escapeLabel(label)}](https://maps.apple.com/?ll=${lat},${lon}&q=${encodeURIComponent(name || 'Standort')})`);
+      // Google-Maps-Link: öffnet auf Android und iPhone die Karten-App, sonst die Webseite.
+      insertBlock(`[${escapeLabel(label)}](https://www.google.com/maps/search/?api=1&query=${lat},${lon})`);
       setBusy(-1);
     }, err => {
       setBusy(-1);
