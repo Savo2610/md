@@ -582,10 +582,17 @@ button.t.avatar-btn { padding: 4px; border-radius: 50%; }
 .seg button[aria-checked="true"] { background: var(--soft); color: var(--fg); }
 .menu a.recent.all .recent-title { color: var(--fg-soft); font-size: 13.5px; }
 
-/* #tags im Text: in der Ansicht ausgeblendet (sie sortieren nur die eigene
-   Liste), in den Memos sichtbar und anklickbar. Absätze nur aus Tags ganz weg. */
+/* #tags im Text: für Lesende ohne Konto ausgeblendet (Absätze nur aus Tags
+   ganz), angemeldet sichtbar und anklickbar (→ Übersicht mit diesem Tag).
+   In den Memos immer sichtbar. Auf Papier nie. */
 .doc .doc-tag, .doc p.tag-line { display: none; }
 .memo .memo-text p.tag-line { display: block; }
+body.tags-visible .doc .doc-tag { display: inline; color: var(--accent); cursor: pointer; }
+body.tags-visible .doc .doc-tag:hover { text-decoration: underline; text-underline-offset: .15em; }
+body.tags-visible .doc p.tag-line { display: block; }
+/* In Überschriften klein und normal, nicht so laut wie der Titel. */
+body.tags-visible .doc :is(h1, h2, h3, h4) .doc-tag { font-size: .55em; font-weight: 400; vertical-align: .25em; margin-left: .2em; }
+@media print { body.tags-visible .doc .doc-tag, body.tags-visible .doc p.tag-line { display: none; } }
 
 /* QR-Code im Teilen-Dialog */
 .qr-card { margin-top: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; display: flex; flex-direction: column; align-items: center; gap: 8px; }

@@ -25,8 +25,9 @@ Durable Object pro Dokument, Bilder in R2.
   werden die Spalten ausgerichtet. Aus Excel, Numbers oder Sheets kopierte
   Zellen werden beim Einfügen zur Markdown-Tabelle.
 - Tags: `#tag` im Text (ohne Leerzeichen; `# Titel` mit Leerzeichen bleibt
-  Überschrift). Im Editor farbig mit Vorschlägen nach `#`; in der Ansicht
-  ausgeblendet (Absätze nur aus Tags ganz). Mit Konto steht er bei diesem
+  Überschrift). Im Editor farbig mit Vorschlägen nach `#`. In der Ansicht
+  ohne Konto ausgeblendet (Absätze nur aus Tags ganz), angemeldet dezent
+  sichtbar; Antippen öffnet `/home` gefiltert auf diesen Tag. Mit Konto steht er bei diesem
   Dokument auf `/home` (filterbar) und folgt dem Text: weg aus dem Text, weg
   aus der Liste. Auf `/home` vergibt „#“ je Zeile weiter eigene Tags, auch für
   fremde Dokumente. Gleiche Regel in den Memos, dort sichtbar und anklickbar

@@ -86,6 +86,15 @@ function startDoc(boot: Boot) {
   const viewTags = () => [...article.querySelectorAll<HTMLElement>('.doc-tag')].map(s => s.dataset.tag || '').filter(Boolean)
     .filter((t, i, all) => all.findIndex(x => x.toLowerCase() === t.toLowerCase()) === i);
   if (exists) recent.touch(id, document.title === id ? '' : document.title, !!editKey, viewTags());
+  // Angemeldet: #tags im Text sichtbar; Antippen zeigt alle eigenen Dokumente
+  // mit diesem Tag (Übersicht, gefiltert). Ohne Konto bleiben sie unsichtbar.
+  if (account.user) document.body.classList.add('tags-visible');
+  article.addEventListener('click', e => {
+    const t = (e.target as HTMLElement).closest<HTMLElement>('.doc-tag');
+    if (!t || !account.user) return;
+    store.set('md:tag', t.dataset.tag || '');
+    location.href = '/home';
+  });
 
 
   // ── Kopfleiste ────────────────────────────────────────────────────────────
