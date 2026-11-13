@@ -413,7 +413,7 @@ function startDoc(boot: Boot) {
     }
     items.push(['Markdown kopieren', copyMarkdown]);
     items.push(['Herunterladen (.md)', () => { if (exists) location.href = `/${encodeURIComponent(id)}.md?download=1`; else toast('Noch leer.'); }]);
-    items.push(['Drucken / PDF …', printDoc]);
+    items.push(['Drucken (.pdf)', printDoc]);
     if (account.user && exists) items.push(['Tags', openTags]);
     const unlocked = (key: string | null) => {
       if (!key) return;
