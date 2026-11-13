@@ -338,6 +338,11 @@ if (!LIVE && vars.DEV_LOGIN === '1') {
   r = await fetch(`${BASE}/${tagDoc}`, { headers: C });
   const tagHtml = await r.text();
   ok((tagHtml.match(/class="doc-tag"/g) || []).length === 2 && /<title>Titel<\/title>/.test(tagHtml), '#tags werden markiert (nicht URL, Code, Zahl), nicht Teil des Titels');
+  await fetch(`${BASE}/api/docs/${tagDoc}`, { method: 'PUT', headers: { 'content-type': 'text/markdown', 'x-edit-key': tagKey }, body: 'Text\n\n#nur #tags\n\nmehr' });
+  r = await fetch(`${BASE}/${tagDoc}`, { headers: C });
+  ok(/<p class="tag-line">/.test(await r.text()), 'Absatz nur aus Tags ist markiert (wird in der Ansicht ausgeblendet)');
+  await fetch(`${BASE}/api/docs/${tagDoc}`, { method: 'PUT', headers: { 'content-type': 'text/markdown', 'x-edit-key': tagKey }, body: '# Titel #rezepte\n#schnell, aber nicht https://x.de/#teil, `#code` oder #2026' });
+  await fetch(`${BASE}/${tagDoc}`, { headers: C });
   r = await fetch(`${BASE}/api/me`, { headers: C });
   ok(JSON.stringify((await j(r)).docs.find(x => x.id === tagDoc)?.textTags) === '["rezepte","schnell"]', 'Öffnen übernimmt #tags aus dem Text ins Konto');
   await fetch(`${BASE}/api/docs/${tagDoc}`, { method: 'PUT', headers: { 'content-type': 'text/markdown', 'x-edit-key': tagKey }, body: '# Titel\nohne Tags' });

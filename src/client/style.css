@@ -582,10 +582,10 @@ button.t.avatar-btn { padding: 4px; border-radius: 50%; }
 .seg button[aria-checked="true"] { background: var(--soft); color: var(--fg); }
 .menu a.recent.all .recent-title { color: var(--fg-soft); font-size: 13.5px; }
 
-/* #tags im Text */
-.doc .doc-tag { color: var(--accent); }
-body.tags-clickable .doc .doc-tag { cursor: pointer; }
-body.tags-clickable .doc .doc-tag:hover { text-decoration: underline; text-underline-offset: .15em; }
+/* #tags im Text: in der Ansicht ausgeblendet (sie sortieren nur die eigene
+   Liste), in den Memos sichtbar und anklickbar. Absätze nur aus Tags ganz weg. */
+.doc .doc-tag, .doc p.tag-line { display: none; }
+.memo .memo-text p.tag-line { display: block; }
 
 /* QR-Code im Teilen-Dialog */
 .qr-card { margin-top: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; display: flex; flex-direction: column; align-items: center; gap: 8px; }

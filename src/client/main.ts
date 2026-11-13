@@ -86,14 +86,7 @@ function startDoc(boot: Boot) {
   const viewTags = () => [...article.querySelectorAll<HTMLElement>('.doc-tag')].map(s => s.dataset.tag || '').filter(Boolean)
     .filter((t, i, all) => all.findIndex(x => x.toLowerCase() === t.toLowerCase()) === i);
   if (exists) recent.touch(id, document.title === id ? '' : document.title, !!editKey, viewTags());
-  // #tag antippen: Übersicht nach diesem Tag gefiltert (nur mit Konto, dort gibt es die Liste).
-  if (account.user) document.body.classList.add('tags-clickable');
-  article.addEventListener('click', e => {
-    const t = (e.target as HTMLElement).closest<HTMLElement>('.doc-tag');
-    if (!t || !account.user) return;
-    store.set('md:tag', t.dataset.tag || '');
-    location.href = '/home';
-  });
+
 
   // ── Kopfleiste ────────────────────────────────────────────────────────────
 
@@ -231,7 +224,6 @@ function startDoc(boot: Boot) {
         },
         onTyping: startTyping,
         toast,
-        commands: account.user ? [{ name: 'Tags', key: 'tags tag schlagworte labels', run: openTags }] : [],
       });
       return h;
     });
@@ -474,7 +466,6 @@ function startDoc(boot: Boot) {
     items.push(['Markdown kopieren', copyMarkdown]);
     items.push(['Herunterladen (.md)', () => { if (exists) location.href = `/${encodeURIComponent(id)}.md?download=1`; else toast('Noch leer.'); }]);
     items.push(['Drucken (.pdf)', printDoc]);
-    if (account.user && exists) items.push(['Tags', openTags]);
     const unlocked = (key: string | null) => {
       if (!key) return;
       editKey = key;
@@ -571,16 +562,6 @@ function startDoc(boot: Boot) {
     if (themeBeforePrint) document.documentElement.setAttribute('data-theme', themeBeforePrint);
     else document.documentElement.removeAttribute('data-theme');
   });
-
-  function openTags() {
-    if (!exists) { toast('Erst etwas schreiben, dann Tags vergeben.'); return; }
-    const r = recent.list().find(x => x.id === id);
-    const title = editor ? titleOf(editor.text()) : document.title;
-    import('./tags').then(m => m.tagDialog(id, title, r?.tags || [], tags => {
-      toast(tags.length ? `Tags: ${tags.join(', ')}` : 'Keine Tags.');
-      editor?.view.focus();
-    }));
-  }
 
   /** In den Papierkorb (nur Ersteller oder Admin). */
   let trashedHere = false;

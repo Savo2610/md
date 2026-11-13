@@ -232,7 +232,8 @@ function fences(md: MarkdownIt) {
 
 function hashtags(md: MarkdownIt) {
   md.core.ruler.push('hashtags', (state: StateCore) => {
-    for (const block of state.tokens) {
+    for (let bi = 0; bi < state.tokens.length; bi++) {
+      const block = state.tokens[bi];
       if (block.type !== 'inline' || !block.children) continue;
       const out: Token[] = [];
       let inLink = 0;
@@ -254,6 +255,11 @@ function hashtags(md: MarkdownIt) {
         if (last < s.length) { const tx = new state.Token('text', '', 0); tx.content = s.slice(last); out.push(tx); }
       }
       block.children = out;
+      // Absatz nur aus Tags: markieren, damit die Ansicht ihn ganz ausblenden kann.
+      const onlyTags = out.some(t => t.type === 'hashtag')
+        && out.every(t => t.type === 'hashtag' || t.type === 'softbreak' || t.type === 'hardbreak' || (t.type === 'text' && !t.content.trim()));
+      const open = state.tokens[bi - 1];
+      if (onlyTags && open?.type === 'paragraph_open') open.attrJoin('class', 'tag-line');
     }
   });
   md.renderer.rules.hashtag = (tokens, i) => `<span class="doc-tag" data-tag="${escapeHtml(tokens[i].content)}">#${escapeHtml(tokens[i].content)}</span>`;

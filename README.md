@@ -15,7 +15,7 @@ Durable Object pro Dokument, Bilder in R2.
 - Einfügen über `/` am Zeilenanfang oder nach einem Leerzeichen: alle Blöcke
   und Auszeichnungen, die der Renderer kann.
   Versteckt (nur beim Tippen): `/fett`, `/kursiv`, `/durchgestrichen`,
-  `/code`, `/h4`, mit Konto `/tags`.
+  `/code`, `/h4`.
 - Einstellungen (klein unten im „md“-Menü): Hell/Dunkel/Automatisch
   (Cookie `md_theme`, der Server setzt `data-theme`), beim Öffnen Ansicht
   oder Bearbeiten (Standard: zuletzt benutzter Modus), Name beim
@@ -24,12 +24,13 @@ Durable Object pro Dokument, Bilder in R2.
   Enter eine Zeile tiefer (leere letzte Zeile: raus aus der Tabelle), dabei
   werden die Spalten ausgerichtet. Aus Excel, Numbers oder Sheets kopierte
   Zellen werden beim Einfügen zur Markdown-Tabelle.
-- `#tag` im Text (ohne Leerzeichen; `# Titel` mit Leerzeichen bleibt
-  Überschrift) ist ein Tag: farbig in Ansicht und Editor, Vorschläge nach `#`,
-  und mit Konto steht er bei diesem Dokument auf `/home` (filterbar, Antippen
-  im Text filtert dorthin). Er folgt dem Text: weg aus dem Text, weg aus der
-  Liste. Tags aus dem Dialog bleiben daneben bestehen. Gleiche Regel in den
-  Memos (`src/shared/tags.ts`).
+- Tags: `#tag` im Text (ohne Leerzeichen; `# Titel` mit Leerzeichen bleibt
+  Überschrift). Im Editor farbig mit Vorschlägen nach `#`; in der Ansicht
+  ausgeblendet (Absätze nur aus Tags ganz). Mit Konto steht er bei diesem
+  Dokument auf `/home` (filterbar) und folgt dem Text: weg aus dem Text, weg
+  aus der Liste. Auf `/home` vergibt „#“ je Zeile weiter eigene Tags, auch für
+  fremde Dokumente. Gleiche Regel in den Memos, dort sichtbar und anklickbar
+  (`src/shared/tags.ts`).
 - Klick auf „md“: neues Dokument und die zuletzt geöffneten (nur im Browser
   gespeichert, nichts auf dem Server).
 - Mehrere Leute können gleichzeitig schreiben (Yjs über WebSockets).
