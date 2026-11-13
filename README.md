@@ -65,8 +65,7 @@ Durable Object pro Dokument, Bilder in R2.
   Anhänge stehen als Markdown-Link `/m/<datei>` im Text und werden in der
   Ansicht zu Player, Datei- bzw. Ortskarte. `#tags` im Text: farbig, oben als
   Filter, Vervollständigung nach `#`. Pro Memo (⋯, Menü direkt am Knopf):
-  Bearbeiten (im Memo), Markdown kopieren, Herunterladen (.md),
-  Drucken / PDF (nur dieses Memo, immer hell), Löschen (6 s Rückgängig, erst dann geht es
+  Bearbeiten (im Memo), Kopieren, Löschen (6 s Rückgängig, erst dann geht es
   an den Server). Suche oben rechts. Offline Geschriebenes wartet im Browser.
   Eigenes App-Manifest (`public/memos.webmanifest`, Icons `memos-*`).
   Daten im Account-Objekt (Tabellen `memos`, `memo_files`), Anhänge in R2
