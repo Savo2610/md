@@ -11,6 +11,7 @@ import { account, accountItems, avatar, type User } from './account';
 import { fineRow } from './settings';
 import { enhance } from './enhance';
 import { memoEditor, tagsOf, type MemoEditor } from './memo-editor';
+import { titleOf, slugify } from '../shared/title';
 
 interface Memo { id: string; text: string; created: number; updated: number; html?: string; pending?: boolean }
 interface Boot { user?: User | null; login?: boolean; memos?: Memo[]; katexCss?: string }
@@ -173,9 +174,12 @@ export function start(boot: Boot) {
     }
     head.append(el('time', { datetime: new Date(m.created).toISOString(), title: new Date(m.created).toLocaleString('de-DE') }, when(m.created)));
     const more = el('button', { type: 'button', class: 'memo-more', title: 'Mehr', 'aria-label': 'Mehr', 'aria-haspopup': 'menu' }, '⋯');
+    // Wie das ⋯-Menü der Dokumente: Kopieren, Herunterladen, Drucken.
     more.addEventListener('click', () => popover(more, [
       ['Bearbeiten', () => startEdit(m)],
-      ['Kopieren', () => navigator.clipboard.writeText(m.text).then(() => toast('Kopiert.'), () => toast('Kopieren ging nicht.'))],
+      ['Markdown kopieren', () => navigator.clipboard.writeText(m.text).then(() => toast('Markdown kopiert.'), () => toast('Kopieren ging nicht.'))],
+      ['Herunterladen (.md)', () => download(m)],
+      ['Drucken / PDF …', () => printMemo(m)],
       ['Löschen', () => remove(m), 'danger'],
     ]));
     head.append(more);
@@ -414,6 +418,45 @@ function accountButton(u: User): HTMLElement {
   const b = el('button', { type: 'button', class: 't avatar-btn', title: u.email || u.name, 'aria-label': 'Konto', 'aria-haspopup': 'menu' }, avatar(u));
   b.addEventListener('click', () => popover(b, [...accountItems(), ['Alle Dokumente', () => (location.href = '/home')]]));
   return b;
+}
+
+/** Titel eines Memos ohne #tags (für Dateinamen). */
+const memoTitle = (text: string) => titleOf(text.replace(TAG_RE, '$1')).trim();
+/** Dateiname aus dem Titel des Memos, sonst Datum. */
+function fileName(m: { text: string; created: number }): string {
+  return slugify(memoTitle(m.text)).slice(0, 60) || `memo-${new Date(m.created).toISOString().slice(0, 10)}`;
+}
+
+function download(m: { text: string; created: number }) {
+  const a = el('a', { href: URL.createObjectURL(new Blob([m.text + '\n'], { type: 'text/markdown;charset=utf-8' })), download: `${fileName(m)}.md` });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/** Nur dieses eine Memo drucken bzw. als PDF sichern, immer hell. */
+async function printMemo(m: { id: string; text: string }) {
+  const node = document.querySelector<HTMLElement>(`.memo[data-id="${CSS.escape(m.id)}"]`);
+  if (!node) return;
+  const root = document.documentElement;
+  const theme = root.getAttribute('data-theme');
+  const title = document.title;
+  node.classList.add('print-target');
+  document.body.classList.add('print-one');
+  root.setAttribute('data-theme', 'light');
+  // Titel im Druckdialog = Dateiname des PDFs.
+  document.title = memoTitle(m.text) || 'Memo';
+  for (const img of node.querySelectorAll('img')) img.loading = 'eager';
+  await Promise.all([...node.querySelectorAll('img')].map(img => (img.complete ? null : new Promise(r => { img.addEventListener('load', r, { once: true }); img.addEventListener('error', r, { once: true }); }))));
+  await document.fonts.ready;
+  addEventListener('afterprint', () => {
+    node.classList.remove('print-target');
+    document.body.classList.remove('print-one');
+    if (theme) root.setAttribute('data-theme', theme); else root.removeAttribute('data-theme');
+    document.title = title;
+  }, { once: true });
+  print();
 }
 
 // ── Sprachmemo abspielen ─────────────────────────────────────────────────────

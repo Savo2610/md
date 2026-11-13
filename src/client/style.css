@@ -704,6 +704,17 @@ button.t.avatar-btn { padding: 4px; border-radius: 50%; }
 .aud-fill { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 2px; background: var(--caret); }
 .aud-time { font-family: var(--mono); font-size: 12px; color: var(--muted); min-width: 2.6em; text-align: right; }
 
+/* Ein einzelnes Memo drucken (⋯ → Drucken / PDF) */
+@media print {
+  body.print-one .composer, body.print-one .tag-bar, body.print-one .undo-toast, body.print-one .memo-more { display: none !important; }
+  body.print-one .memo:not(.print-target), body.print-one .memos-empty { display: none !important; }
+  body.print-one .memos { padding: 0; max-width: none; }
+  body.print-one .memo { border: 0; padding: 0; }
+  body.print-one .memo-head { margin-bottom: 14px; }
+  .memo .memo-text img { break-inside: avoid; }
+  .aud-play, .aud-track { display: none !important; }
+}
+
 /* Menü direkt am ⋯ */
 dialog.pop {
   position: fixed; inset: auto; margin: 0; padding: 5px; min-width: 190px;
