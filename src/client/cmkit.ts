@@ -2,7 +2,8 @@
 // Markdown-Hervorhebung wie bei iA Writer (Zeichen blass, Text normal) und
 // die Tastenkürzel zum Formatieren.
 
-import { EditorView, keymap } from '@codemirror/view';
+import { EditorView, keymap, MatchDecorator, Decoration, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import type { CompletionContext } from '@codemirror/autocomplete';
 import { EditorSelection } from '@codemirror/state';
 import { insertNewlineContinueMarkup } from '@codemirror/lang-markdown';
 import { HighlightStyle } from '@codemirror/language';
@@ -114,6 +115,35 @@ export const continueListsOnInput = EditorView.inputHandler.of((view, from, to, 
   }
   return true;
 });
+
+// ── #tags ───────────────────────────────────────────────────────────────────
+
+const tagDecorator = new MatchDecorator({
+  // Wie TAG_SOURCE, nur ohne das Zeichen davor im Treffer.
+  regexp: new RegExp(`(?<=^|[\\s(])#[\\p{L}\\p{N}_-]*[\\p{L}_-][\\p{L}\\p{N}_-]*`, 'gu'),
+  decoration: Decoration.mark({ class: 'cm-tag' }),
+});
+
+/** #tags im Editor farbig (Klasse cm-tag), wie später in der Ansicht. */
+export const tagHighlight = ViewPlugin.fromClass(class {
+  decorations: DecorationSet;
+  constructor(view: EditorView) { this.decorations = tagDecorator.createDeco(view); }
+  update(u: ViewUpdate) { this.decorations = tagDecorator.updateDeco(u, this.decorations); }
+}, { decorations: v => v.decorations });
+
+/** Vervollständigung nach # mit vorhandenen Tags (nur am Wortanfang). */
+export function tagCompletion(tags: () => string[]) {
+  return (ctx: CompletionContext) => {
+    const m = ctx.matchBefore(/#[\p{L}\p{N}_-]*/u);
+    if (!m) return null;
+    const before = m.from > 0 ? ctx.state.sliceDoc(m.from - 1, m.from) : '';
+    if (before && !/[\s(]/.test(before)) return null;
+    const word = m.text.slice(1).toLowerCase();
+    const options = tags().filter(t => t.toLowerCase().startsWith(word) && t.toLowerCase() !== word).map(t => ({ label: `#${t}` }));
+    if (!options.length) return null;
+    return { from: m.from, options, validFor: /^#[\p{L}\p{N}_-]*$/u };
+  };
+}
 
 export function cycleHeading(view: EditorView): boolean {
   const line = view.state.doc.lineAt(view.state.selection.main.head);

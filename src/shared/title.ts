@@ -1,5 +1,7 @@
 // Titel eines Dokuments. Eigene Datei, damit die Kopfleiste ihn ohne
-// markdown-it bestimmen kann.
+// markdown-it bestimmen kann. #tags gehören nicht zum Titel.
+
+import { withoutTags } from './tags';
 
 /** Titel: front matter `title:`, sonst erste Überschrift, sonst erste Zeile. */
 export function titleOf(src: string, fm?: string): string {
@@ -17,7 +19,7 @@ export function titleOf(src: string, fm?: string): string {
 }
 
 function clean(s: string): string {
-  return s
+  return withoutTags(s)
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[*_`~=#>]/g, '')

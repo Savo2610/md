@@ -1,7 +1,7 @@
 // Tags eines Dokuments bearbeiten (nur mit Konto). Tags sind persönlich:
 // Sie liegen im Konto, nicht im Dokument.
 
-import { el, dialog } from './ui';
+import { el, dialog, recent } from './ui';
 import { account } from './account';
 
 /** Öffnet den Dialog. `done` bekommt die gespeicherten Tags. */
@@ -40,9 +40,12 @@ export function tagDialog(id: string, title: string, current: string[], done: (t
     offerWrap.hidden = !rest.length;
   };
 
+  // #tags aus dem Text: stehen dabei, ändern lassen sie sich nur im Text.
+  const fromText = (recent.list().find(r => r.id === id)?.textTags || []).filter(t => !has(t));
+  const textRow = fromText.length ? el('p', { class: 'hint' }, `Aus dem Text: ${fromText.map(t => `#${t}`).join(' ')}`) : '';
   const form = el('form', { class: 'sheet tag-form' },
     el('p', { class: 'hint tag-doc' }, title || id),
-    el('div', { class: 'field-row' }, chosen),
+    el('div', { class: 'field-row' }, chosen, textRow),
     el('div', { class: 'field-row' }, el('div', { class: 'field-line' }, input, save)),
     offerWrap,
   );

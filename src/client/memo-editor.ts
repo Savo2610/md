@@ -3,13 +3,13 @@
 // eine Leiste für Anhänge, Sprachmemo, Standort und Aufgaben.
 // ⌘/Strg+Enter schickt ab, Enter macht nur eine neue Zeile.
 
-import { EditorView, keymap, placeholder, drawSelection, MatchDecorator, Decoration, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import { EditorView, keymap, placeholder, drawSelection } from '@codemirror/view';
 import { EditorState, Prec } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting, indentUnit } from '@codemirror/language';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { autocompletion, completionKeymap, type CompletionContext } from '@codemirror/autocomplete';
-import { highlight, formatKeys, linePrefix, continueListsOnInput } from './cmkit';
+import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
+import { highlight, formatKeys, linePrefix, continueListsOnInput, tagHighlight, tagCompletion } from './cmkit';
 import { prepareImage } from './images';
 import { el, toast } from './ui';
 
@@ -42,18 +42,6 @@ const ICON = {
   send: '<svg viewBox="0 0 20 20"><path d="M10 15.5V4.5M5.5 9l4.5-4.5L14.5 9"/></svg>',
 };
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
-const TAG_RE = /(^|[\s(])#([\p{L}\p{N}_-]*[\p{L}_-][\p{L}\p{N}_-]*)/gu;
-
-// #tags im Text farbig, wie später in der Ansicht.
-const tagDecorator = new MatchDecorator({
-  regexp: /(?<=^|[\s(])#[\p{L}\p{N}_-]*[\p{L}_-][\p{L}\p{N}_-]*/gu,
-  decoration: Decoration.mark({ class: 'cm-tag' }),
-});
-const tagMarks = ViewPlugin.fromClass(class {
-  decorations: DecorationSet;
-  constructor(view: EditorView) { this.decorations = tagDecorator.createDeco(view); }
-  update(u: ViewUpdate) { this.decorations = tagDecorator.updateDeco(u, this.decorations); }
-}, { decorations: v => v.decorations });
 
 const theme = EditorView.theme({
   '&': { backgroundColor: 'transparent', color: 'var(--fg)' },
@@ -74,11 +62,7 @@ const theme = EditorView.theme({
   '.cm-completionIcon': { display: 'none' },
 });
 
-/** Alle #tags eines Memos (ohne Code und Adressen). */
-export function tagsOf(text: string): string[] {
-  const clean = text.replace(/```[\s\S]*?```|`[^`\n]*`|\]\([^)]*\)|https?:\/\/\S+/g, ' ');
-  return [...new Set([...clean.matchAll(TAG_RE)].map(m => m[2]))];
-}
+export { tagsOf } from '../shared/tags';
 
 const fmtDuration = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const escapeLabel = (t: string) => t.replace(/([\\[\]])/g, '\\$1');
@@ -112,17 +96,6 @@ export function memoEditor(parent: HTMLElement, o: MemoEditorOptions): MemoEdito
   let busy = 0;
   const setBusy = (d: number) => { busy += d; root.classList.toggle('uploading', busy > 0); updateSend(); };
 
-  const tagSource = (ctx: CompletionContext) => {
-    const m = ctx.matchBefore(/#[\p{L}\p{N}_-]*/u);
-    if (!m) return null;
-    const before = m.from > 0 ? ctx.state.sliceDoc(m.from - 1, m.from) : '';
-    if (before && !/[\s(]/.test(before)) return null;
-    const word = m.text.slice(1).toLowerCase();
-    const options = o.tags().filter(t => t.toLowerCase().startsWith(word) && t.toLowerCase() !== word).map(t => ({ label: `#${t}` }));
-    if (!options.length) return null;
-    return { from: m.from, options, validFor: /^#[\p{L}\p{N}_-]*$/u };
-  };
-
   const submit = async () => {
     if (busy) { toast('Anhang wird noch hochgeladen …'); return true; }
     const text = view.state.doc.toString().replace(/\s+$/, '');
@@ -151,8 +124,8 @@ export function memoEditor(parent: HTMLElement, o: MemoEditorOptions): MemoEdito
         markdown({ base: markdownLanguage, addKeymap: true, pasteURLAsLink: false }),
         continueListsOnInput,
         syntaxHighlighting(highlight),
-        tagMarks,
-        autocompletion({ override: [tagSource], icons: false }),
+        tagHighlight,
+        autocompletion({ override: [tagCompletion(o.tags)], icons: false }),
         placeholder(o.placeholder || ''),
         EditorView.contentAttributes.of({ autocapitalize: 'sentences', 'aria-label': 'Memo' }),
         theme,

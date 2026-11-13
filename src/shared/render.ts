@@ -26,6 +26,7 @@ import container from 'markdown-it-container';
 import anchor from 'markdown-it-anchor';
 import frontMatter from 'markdown-it-front-matter';
 import { titleOf, slugify } from './title';
+import { tagRe } from './tags';
 
 export { titleOf, slugify };
 
@@ -224,6 +225,40 @@ function fences(md: MarkdownIt) {
   };
 }
 
+// ── #tags ───────────────────────────────────────────────────────────────────
+// #wort (ohne Leerzeichen) wird zu <span class="doc-tag">, # Wort bleibt
+// Überschrift (das regelt markdown-it selbst). Nur in normalem Text, nicht in
+// Links, Code oder Formeln. Regel siehe shared/tags.ts.
+
+function hashtags(md: MarkdownIt) {
+  md.core.ruler.push('hashtags', (state: StateCore) => {
+    for (const block of state.tokens) {
+      if (block.type !== 'inline' || !block.children) continue;
+      const out: Token[] = [];
+      let inLink = 0;
+      for (const t of block.children) {
+        if (t.type === 'link_open') inLink++;
+        if (t.type === 'link_close') inLink--;
+        if (t.type !== 'text' || inLink || !t.content.includes('#')) { out.push(t); continue; }
+        const s = t.content;
+        let last = 0;
+        for (const m of s.matchAll(tagRe())) {
+          const start = m.index! + m[1].length;
+          if (start > last) { const tx = new state.Token('text', '', 0); tx.content = s.slice(last, start); out.push(tx); }
+          const tag = new state.Token('hashtag', '', 0);
+          tag.content = m[2];
+          out.push(tag);
+          last = start + 1 + m[2].length;
+        }
+        if (!last) { out.push(t); continue; }
+        if (last < s.length) { const tx = new state.Token('text', '', 0); tx.content = s.slice(last); out.push(tx); }
+      }
+      block.children = out;
+    }
+  });
+  md.renderer.rules.hashtag = (tokens, i) => `<span class="doc-tag" data-tag="${escapeHtml(tokens[i].content)}">#${escapeHtml(tokens[i].content)}</span>`;
+}
+
 // ── Zusammenbauen ───────────────────────────────────────────────────────────
 
 let instance: MarkdownIt | null = null;
@@ -234,7 +269,7 @@ function renderer(): MarkdownIt {
   const md = new MarkdownItCtor({ html: false, linkify: true, breaks: true, typographer: false });
   md.use(frontMatter, (fm: string) => { currentFrontMatter = fm; });
   md.use(footnote).use(mark).use(sub).use(sup).use(ins).use(abbr).use(deflist).use(emoji);
-  md.use(math).use(embeds).use(boxes).use(tasks).use(fences);
+  md.use(math).use(embeds).use(boxes).use(tasks).use(fences).use(hashtags);
   md.use(anchor, {
     slugify,
     permalink: anchor.permalink.linkInsideHeader({ symbol: '#', placement: 'before', class: 'anchor', ariaHidden: true }),

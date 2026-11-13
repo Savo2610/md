@@ -55,6 +55,7 @@ import manifest from '../generated/manifest.json';
 import { render, escapeHtml } from '../shared/render';
 import { toBroadcast } from '../shared/broadcast';
 import { titleOf } from '../shared/title';
+import { tagsOf } from '../shared/tags';
 import { randomId, randomToken, signToken, verifyTotp, verifyToken, timingSafeEqual } from './crypto';
 import { MAX_CHARS } from './doc';
 import { accountStub, docStub, registry, type Env } from './env';
@@ -269,6 +270,11 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
     return page(req, 'Neues Dokument', `<main id="app"></main>`, { ...common, exists: false, siteKey: user ? undefined : env.TURNSTILE_SITEKEY }, 200);
   }
   const entry = user ? await accountStub(env, user.sub).get(id) : null;
+  // #tags aus dem Text in die eigene Dokumentliste übernehmen.
+  if (user && entry && !info.trashed) {
+    const textTags = tagsOf(info.markdown);
+    if (JSON.stringify(textTags) !== JSON.stringify(entry.textTags)) await accountStub(env, user.sub).setTextTags(id, textTags);
+  }
   const editKey = entry?.editKey || undefined;
   const ownerKey = entry?.ownerKey || undefined;
   if (info.trashed) {

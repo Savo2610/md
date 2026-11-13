@@ -16,7 +16,7 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { Provider, type Status } from './provider';
 import { uploadImage } from './images';
-import { highlight, formatKeys, wrap, link, linePrefix, cycleHeading, continueListsOnInput } from './cmkit';
+import { highlight, formatKeys, wrap, link, linePrefix, cycleHeading, continueListsOnInput, tagHighlight, tagCompletion } from './cmkit';
 import { render } from '../shared/render';
 import { enhance } from './enhance';
 import { tableKeys, tableFromClipboard } from './table';
@@ -40,6 +40,8 @@ export interface EditorOptions {
   onNotice: (n: { type: string; edit?: boolean; to?: string }) => void;
   onTyping: () => void;
   toast: (msg: string) => void;
+  /** Bekannte Tags für die Vervollständigung nach # (mit Konto). */
+  tags?: () => string[];
   /** Weitere, versteckte Slash-Befehle (z. B. /tags), nur bei passender Suche. */
   commands?: { name: string; key: string; run: () => void }[];
 }
@@ -150,6 +152,7 @@ const theme = EditorView.theme({
     backgroundColor: 'var(--selection) !important',
   },
   '.cm-placeholder': { color: 'var(--faint)' },
+  '.cm-tag': { color: 'var(--accent)' },
   '.cm-tooltip': { border: '1px solid var(--line)', backgroundColor: 'var(--bg)', borderRadius: '4px', boxShadow: 'var(--shadow)' },
   '.cm-tooltip-autocomplete > ul': { fontFamily: 'var(--font)', maxHeight: '18em' },
   '.cm-tooltip-autocomplete > ul > li': { padding: '4px 10px !important', lineHeight: '1.5' },
@@ -770,7 +773,8 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         syntaxHighlighting(highlight),
         theme,
         search({ top: false }),
-        autocompletion({ override: [slashSource(slashItems(pickImage, o.commands))], icons: false, activateOnTyping: true }),
+        autocompletion({ override: [slashSource(slashItems(pickImage, o.commands)), tagCompletion(o.tags || (() => []))], icons: false, activateOnTyping: true }),
+        tagHighlight,
         placeholder(o.exists ? '' : 'Einfach losschreiben. Mit / am Zeilenanfang fügst du Tabellen, Boxen, Bilder und mehr ein.'),
         spellComp.of(spellAttrs(o.spellcheck)),
         spellExclusions,

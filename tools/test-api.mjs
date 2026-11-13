@@ -330,6 +330,22 @@ if (!LIVE && vars.DEV_LOGIN === '1') {
   r = await fetch(`${BASE}/api/me/memos`, { headers: C });
   ok(!(await j(r)).memos.some(m => m.id === mid), 'Memo löschen');
 
+  // #tags im Dokument
+  const tagDoc = `tag-test-${Date.now().toString(36)}`;
+  r = await fetch(`${BASE}/api/docs/${tagDoc}/create`, { method: 'POST', headers: J, body: '{}' });
+  const tagKey = (await j(r)).editKey;
+  await fetch(`${BASE}/api/docs/${tagDoc}`, { method: 'PUT', headers: { 'content-type': 'text/markdown', 'x-edit-key': tagKey }, body: '# Titel #rezepte\n#schnell, aber nicht https://x.de/#teil, `#code` oder #2026' });
+  r = await fetch(`${BASE}/${tagDoc}`, { headers: C });
+  const tagHtml = await r.text();
+  ok((tagHtml.match(/class="doc-tag"/g) || []).length === 2 && /<title>Titel<\/title>/.test(tagHtml), '#tags werden markiert (nicht URL, Code, Zahl), nicht Teil des Titels');
+  r = await fetch(`${BASE}/api/me`, { headers: C });
+  ok(JSON.stringify((await j(r)).docs.find(x => x.id === tagDoc)?.textTags) === '["rezepte","schnell"]', 'Öffnen übernimmt #tags aus dem Text ins Konto');
+  await fetch(`${BASE}/api/docs/${tagDoc}`, { method: 'PUT', headers: { 'content-type': 'text/markdown', 'x-edit-key': tagKey }, body: '# Titel\nohne Tags' });
+  await fetch(`${BASE}/${tagDoc}`, { headers: C });
+  r = await fetch(`${BASE}/api/me`, { headers: C });
+  ok(((await j(r)).docs.find(x => x.id === tagDoc)?.textTags || ['x']).length === 0, 'Tag aus dem Text gelöscht: auch im Konto weg');
+  await fetch(`${BASE}/api/docs/${tagDoc}`, { method: 'DELETE', headers: API });
+
   // Memo → Dokument (verknüpft)
   const did = `${mid}-doc`;
   await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: J, body: JSON.stringify({ id: did, text: '# Aus Memo\n- [ ] eins' }) });

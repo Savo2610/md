@@ -6,7 +6,8 @@
 import { enhance } from './enhance';
 import type { EditorHandle, EditorStatus } from './editor';
 import { titleOf, slugify } from '../shared/title';
-import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, unlock, recent, ago, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, type MenuItem } from './ui';
+import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, unlock, recent, ago, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, docTags, type MenuItem } from './ui';
+import { tagsOf } from '../shared/tags';
 import { account, accountItems, type User } from './account';
 import { fineRow, spellcheckOn, startMode, rememberMode, writerName } from './settings';
 import { openAsNew, takePending, dropZone, fileToMarkdown } from './importer';
@@ -81,7 +82,18 @@ function startDoc(boot: Boot) {
   workspace.append(editorPane, previewPane);
   app.append(workspace);
 
-  if (exists) recent.touch(id, document.title === id ? '' : document.title, !!editKey);
+  /** #tags in der gerenderten Ansicht (vom Server). */
+  const viewTags = () => [...article.querySelectorAll<HTMLElement>('.doc-tag')].map(s => s.dataset.tag || '').filter(Boolean)
+    .filter((t, i, all) => all.findIndex(x => x.toLowerCase() === t.toLowerCase()) === i);
+  if (exists) recent.touch(id, document.title === id ? '' : document.title, !!editKey, viewTags());
+  // #tag antippen: Übersicht nach diesem Tag gefiltert (nur mit Konto, dort gibt es die Liste).
+  if (account.user) document.body.classList.add('tags-clickable');
+  article.addEventListener('click', e => {
+    const t = (e.target as HTMLElement).closest<HTMLElement>('.doc-tag');
+    if (!t || !account.user) return;
+    store.set('md:tag', t.dataset.tag || '');
+    location.href = '/home';
+  });
 
   // ── Kopfleiste ────────────────────────────────────────────────────────────
 
@@ -198,6 +210,7 @@ function startDoc(boot: Boot) {
           return u.toString();
         },
         auth: (): Record<string, string> => (editKey ? { 'x-edit-key': editKey } : {}),
+        tags: () => account.allTags(),
         ensureCreated: create,
         onStatus: s => { lastStatus = s; renderStatus(); },
         onNotice: n => {
@@ -241,7 +254,7 @@ function startDoc(boot: Boot) {
         const r = render(editor.text());
         article.innerHTML = r.html;
         document.title = r.title || id;
-        if (exists) recent.touch(id, r.title, true);
+        if (exists) recent.touch(id, r.title, true, tagsOf(editor.text()));
         enableTasks();
         enhance(article, boot.katexCss);
       }
@@ -442,7 +455,7 @@ function startDoc(boot: Boot) {
     for (const r of list.slice(0, 5)) {
       items.push(el('a', { href: `/${encodeURIComponent(r.id)}`, class: 'recent' },
         el('span', { class: 'recent-title' }, r.title || r.id),
-        el('span', { class: 'recent-meta' }, `${ago(r.at)}${r.own ? ' · bearbeitbar' : ''}${r.tags?.length ? ' · ' + r.tags.join(', ') : ''}`),
+        el('span', { class: 'recent-meta' }, `${ago(r.at)}${r.own ? ' · bearbeitbar' : ''}${docTags(r).length ? ' · ' + docTags(r).join(', ') : ''}`),
       ));
     }
     items.push(...accountItems());
@@ -614,7 +627,7 @@ function startDoc(boot: Boot) {
 
   // Titel in „Zuletzt geöffnet“ aktuell halten.
   addEventListener('pagehide', () => {
-    if (editor && exists && !trashedHere) recent.touch(id, titleOf(editor.text()), true);
+    if (editor && exists && !trashedHere) recent.touch(id, titleOf(editor.text()), true, tagsOf(editor.text()));
   });
 
   // Aufgaben in der Ansicht abhaken, wenn man bearbeiten darf.

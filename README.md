@@ -24,6 +24,12 @@ Durable Object pro Dokument, Bilder in R2.
   Enter eine Zeile tiefer (leere letzte Zeile: raus aus der Tabelle), dabei
   werden die Spalten ausgerichtet. Aus Excel, Numbers oder Sheets kopierte
   Zellen werden beim Einfügen zur Markdown-Tabelle.
+- `#tag` im Text (ohne Leerzeichen; `# Titel` mit Leerzeichen bleibt
+  Überschrift) ist ein Tag: farbig in Ansicht und Editor, Vorschläge nach `#`,
+  und mit Konto steht er bei diesem Dokument auf `/home` (filterbar, Antippen
+  im Text filtert dorthin). Er folgt dem Text: weg aus dem Text, weg aus der
+  Liste. Tags aus dem Dialog bleiben daneben bestehen. Gleiche Regel in den
+  Memos (`src/shared/tags.ts`).
 - Klick auf „md“: neues Dokument und die zuletzt geöffneten (nur im Browser
   gespeichert, nichts auf dem Server).
 - Mehrere Leute können gleichzeitig schreiben (Yjs über WebSockets).

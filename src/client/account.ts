@@ -5,11 +5,11 @@
 // Konto, samt Bearbeitungsschlüsseln und Tags. Beim ersten Login auf einem
 // Gerät wandert alles, was dort schon in der Liste steht, ins Konto.
 
-import { el, store, recent, toast, type MenuItem, type Recent } from './ui';
+import { el, store, recent, toast, docTags, type MenuItem, type Recent } from './ui';
 
 export interface User { name: string; email: string; picture: string }
 
-interface ServerDoc { id: string; title: string; editKey: string | null; opened: number; tags: string[]; ownerKey: string | null; trashed: number }
+interface ServerDoc { id: string; title: string; editKey: string | null; opened: number; tags: string[]; textTags?: string[]; ownerKey: string | null; trashed: number }
 
 let user: User | null = null;
 let enabled = false;
@@ -85,7 +85,7 @@ export const account = {
   /** Alle Tags im Konto, die häufigsten zuerst. */
   allTags(): string[] {
     const count = new Map<string, number>();
-    for (const r of recent.list()) for (const t of r.tags || []) count.set(t, (count.get(t) || 0) + 1);
+    for (const r of recent.list()) for (const t of docTags(r)) count.set(t, (count.get(t) || 0) + 1);
     return [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'de')).map(([t]) => t);
   },
 
@@ -151,7 +151,7 @@ async function push(): Promise<boolean> {
       recent.removed = recent.removed.filter(x => x !== id);
     }
     if (dirty.length) {
-      const items = dirty.map(r => ({ id: r.id, title: r.title, opened: r.at, editKey: store.get(`md:key:${r.id}`) || undefined, ownerKey: store.get(`md:owner:${r.id}`) || undefined, trashed: r.trashed || 0 }));
+      const items = dirty.map(r => ({ id: r.id, title: r.title, opened: r.at, editKey: store.get(`md:key:${r.id}`) || undefined, ownerKey: store.get(`md:owner:${r.id}`) || undefined, trashed: r.trashed || 0, ...(r.textTags ? { textTags: r.textTags } : {}) }));
       const res = await fetch('/api/me/docs', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -180,7 +180,7 @@ function adopt(docs: ServerDoc[]) {
     if (d.ownerKey && !store.get(`md:owner:${d.id}`)) store.set(`md:owner:${d.id}`, d.ownerKey);
     const mine = local.get(d.id);
     if (mine?.dirty) { next.push(mine); local.delete(d.id); continue; }
-    next.push({ id: d.id, title: d.title || mine?.title || '', at: Math.max(d.opened, mine?.at || 0), own: !!d.editKey || !!mine?.own, tags: d.tags, trashed: d.trashed || undefined });
+    next.push({ id: d.id, title: d.title || mine?.title || '', at: Math.max(d.opened, mine?.at || 0), own: !!d.editKey || !!mine?.own, tags: d.tags, textTags: d.textTags || [], trashed: d.trashed || undefined });
     local.delete(d.id);
   }
   for (const r of local.values()) if (r.dirty) next.push(r);

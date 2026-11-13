@@ -19,6 +19,8 @@ export interface AccountDoc {
   editKey: string | null;
   opened: number;
   tags: string[];
+  /** #tags, die im Text des Dokuments stehen (zuletzt gesehener Stand). */
+  textTags: string[];
   /** Besitzer-Schlüssel: dieses Konto hat das Dokument angelegt. */
   ownerKey: string | null;
   /** Im Papierkorb seit (ms), sonst 0. */
@@ -94,7 +96,7 @@ export class Account extends DurableObject<Env> {
       );
     `);
     // Spalten kamen später dazu (Papierkorb).
-    for (const col of ['owner_key TEXT', 'trashed INTEGER NOT NULL DEFAULT 0']) {
+    for (const col of ['owner_key TEXT', 'trashed INTEGER NOT NULL DEFAULT 0', "text_tags TEXT NOT NULL DEFAULT '[]'"]) {
       try { this.sql.exec(`ALTER TABLE docs ADD COLUMN ${col}`); } catch { /* gibt es schon */ }
     }
     // Memo → Dokument.
@@ -138,6 +140,8 @@ export class Account extends DurableObject<Env> {
         editKey: typeof it.editKey === 'string' && it.editKey ? it.editKey.slice(0, 100) : old?.editKey ?? null,
         opened: Math.max(opened, old?.opened || 0),
         tags: it.tags !== undefined && !old?.tags.length ? cleanTags(it.tags) : old?.tags || [],
+        // Tags aus dem Text folgen dem Text: der neueste Stand ersetzt den alten.
+        textTags: Array.isArray(it.textTags) && newer ? cleanTags(it.textTags) : old?.textTags || [],
         ownerKey: typeof it.ownerKey === 'string' && it.ownerKey ? it.ownerKey.slice(0, 100) : old?.ownerKey ?? null,
         trashed: typeof it.trashed === 'number' && newer ? Math.max(0, it.trashed) : old?.trashed || 0,
       };
@@ -153,6 +157,11 @@ export class Account extends DurableObject<Env> {
     const next = { ...old, tags: cleanTags(tags) };
     this.write(next);
     return next;
+  }
+
+  /** #tags aus dem Text (Server sieht das Dokument beim Öffnen). */
+  setTextTags(id: string, tags: string[]) {
+    this.sql.exec('UPDATE docs SET text_tags = ? WHERE id = ?', JSON.stringify(cleanTags(tags)), id);
   }
 
   /** Papierkorb-Stand eines eigenen Dokuments (vom Server beim Löschen/Wiederherstellen). */
@@ -283,10 +292,10 @@ export class Account extends DurableObject<Env> {
 
   private write(d: AccountDoc) {
     this.sql.exec(
-      `INSERT INTO docs (id, title, edit_key, opened, tags, owner_key, trashed) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO docs (id, title, edit_key, opened, tags, owner_key, trashed, text_tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET title = excluded.title, edit_key = excluded.edit_key, opened = excluded.opened,
-         tags = excluded.tags, owner_key = excluded.owner_key, trashed = excluded.trashed`,
-      d.id, d.title, d.editKey, d.opened, JSON.stringify(d.tags), d.ownerKey, d.trashed || 0,
+         tags = excluded.tags, owner_key = excluded.owner_key, trashed = excluded.trashed, text_tags = excluded.text_tags`,
+      d.id, d.title, d.editKey, d.opened, JSON.stringify(d.tags), d.ownerKey, d.trashed || 0, JSON.stringify(d.textTags || []),
     );
   }
 }
@@ -298,8 +307,10 @@ function memoRow(r: Record<string, SqlStorageValue>): Memo {
 function row(r: Record<string, SqlStorageValue>): AccountDoc {
   let tags: string[] = [];
   try { tags = JSON.parse(r.tags as string); } catch { /* leer */ }
+  let textTags: string[] = [];
+  try { textTags = JSON.parse((r.text_tags as string) || '[]'); } catch { /* leer */ }
   return {
-    id: r.id as string, title: r.title as string, editKey: (r.edit_key as string) || null, opened: r.opened as number, tags,
+    id: r.id as string, title: r.title as string, editKey: (r.edit_key as string) || null, opened: r.opened as number, tags, textTags,
     ownerKey: (r.owner_key as string) || null, trashed: (r.trashed as number) || 0,
   };
 }

@@ -4,7 +4,7 @@
 // Mit Konto: alle Dokumente des Kontos auf jedem Gerät, mit eigenen Tags
 // zum Filtern. So lässt sich md wie ein Notizbuch benutzen.
 
-import { $, el, recent, ago, toast, store, menu, isAdmin, ask, adminHeaders, ownerHeaders, trashDaysLeft, type MenuItem, type Recent } from './ui';
+import { $, el, recent, ago, toast, store, menu, isAdmin, ask, adminHeaders, ownerHeaders, trashDaysLeft, docTags, type MenuItem, type Recent } from './ui';
 import { account, accountItems, avatar } from './account';
 import { tagChips, tagDialog } from './tags';
 import { fineRow } from './settings';
@@ -94,7 +94,7 @@ export function start() {
       tagBar.append(b);
     };
     for (const t of tags) chip(t, t);
-    if (tags.length && all.some(r => !r.tags?.length)) chip('ohne Tag', UNTAGGED);
+    if (tags.length && all.some(r => !docTags(r).length)) chip('ohne Tag', UNTAGGED);
     if (trashed.length) chip('Papierkorb', TRASH);
     const inTrash = filter === TRASH;
 
@@ -102,8 +102,8 @@ export function start() {
     const matches = (r: Recent) => !q
       || (r.title || r.id).toLowerCase().includes(q)
       || r.id.includes(q)
-      || (r.tags || []).some(t => t.toLowerCase().includes(q));
-    const inFilter = (r: Recent) => !filter || (filter === UNTAGGED ? !r.tags?.length : (r.tags || []).includes(filter));
+      || docTags(r).some(t => t.toLowerCase().includes(q));
+    const inFilter = (r: Recent) => !filter || (filter === UNTAGGED ? !docTags(r).length : docTags(r).some(t => t.toLowerCase() === filter.toLowerCase()));
     const items = inTrash ? trashed.filter(matches) : all.filter(r => matches(r) && inFilter(r));
     search.hidden = all.length < 6;
 
@@ -131,7 +131,7 @@ export function start() {
       actions.append(remove);
 
       const meta = el('span', { class: 'note-meta' }, `${ago(r.at)}${r.own ? ' · bearbeitbar' : ''}`);
-      const chips = tagChips(r.tags, setFilter);
+      const chips = tagChips(docTags(r), setFilter);
       if (chips) meta.append(chips);
       list.append(el('li', {},
         el('a', { href: `/${encodeURIComponent(r.id)}`, class: 'note' },

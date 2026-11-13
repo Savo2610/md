@@ -28,7 +28,14 @@ export const store = {
 // Dokumentliste im Konto: `dirty` heißt „noch nicht ans Konto geschickt“,
 // entfernte IDs warten in md:removed (siehe account.ts).
 
-export interface Recent { id: string; title: string; at: number; own: boolean; tags?: string[]; dirty?: boolean; trashed?: number }
+export interface Recent { id: string; title: string; at: number; own: boolean; tags?: string[]; textTags?: string[]; dirty?: boolean; trashed?: number }
+
+/** Alle Tags eines Dokuments: eigene (Dialog) und #tags aus dem Text, ohne Doppelte. */
+export function docTags(r: Recent): string[] {
+  const out: string[] = [];
+  for (const t of [...(r.tags || []), ...(r.textTags || [])]) if (!out.some(x => x.toLowerCase() === t.toLowerCase())) out.push(t);
+  return out;
+}
 const RECENT = 'md:recent';
 const REMOVED = 'md:removed';
 const listeners: (() => void)[] = [];
@@ -39,10 +46,11 @@ export const recent = {
   },
   save(list: Recent[]) { store.set(RECENT, JSON.stringify(list.sort((a, b) => b.at - a.at).slice(0, 2000))); },
   /** Vorne einsortieren bzw. aktualisieren. */
-  touch(id: string, title: string, own: boolean) {
+  /** `textTags`: #tags aus dem aktuellen Text (nur mitgeben, wenn bekannt). */
+  touch(id: string, title: string, own: boolean, textTags?: string[]) {
     const list = recent.list();
     const old = list.find(r => r.id === id);
-    recent.save([{ ...old, id, title: title || old?.title || '', at: Date.now(), own: own || !!old?.own, trashed: undefined, dirty: true }, ...list.filter(r => r.id !== id)]);
+    recent.save([{ ...old, id, title: title || old?.title || '', at: Date.now(), own: own || !!old?.own, ...(textTags ? { textTags } : {}), trashed: undefined, dirty: true }, ...list.filter(r => r.id !== id)]);
     recent.unremove(id);
     recent.changed();
   },

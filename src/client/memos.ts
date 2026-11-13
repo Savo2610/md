@@ -11,7 +11,8 @@ import { toBroadcast } from '../shared/broadcast';
 import { account, accountItems, avatar, type User } from './account';
 import { fineRow } from './settings';
 import { enhance } from './enhance';
-import { memoEditor, tagsOf, type MemoEditor } from './memo-editor';
+import { memoEditor, type MemoEditor } from './memo-editor';
+import { tagsOf, tagRe, withoutTags } from '../shared/tags';
 
 interface Memo { id: string; text: string; created: number; updated: number; html?: string; pending?: boolean; doc?: string | null; docTitle?: string }
 interface Boot { user?: User | null; login?: boolean; memos?: Memo[]; katexCss?: string; admin?: boolean }
@@ -19,7 +20,6 @@ interface Boot { user?: User | null; login?: boolean; memos?: Memo[]; katexCss?:
 const OUTBOX = 'md:memos:outbox';
 const DRAFT = 'md:memos:draft';
 const UNDO_MS = 6000;
-const TAG_RE = /(^|[\s(])#([\p{L}\p{N}_-]*[\p{L}_-][\p{L}\p{N}_-]*)/gu;
 const AUDIO = /^\/m\/[\w-]+\.(m4a|mp3|aac|webm|ogg|oga|opus|wav)$/;
 
 const ICON = {
@@ -233,8 +233,16 @@ export function start(boot: Boot) {
     }
   }
 
-  /** #tags im Text werden zu Knöpfen, die nach diesem Tag filtern. */
+  /** #tags werden zu Knöpfen, die nach diesem Tag filtern. */
   function tagify(root: HTMLElement) {
+    const tagButton = (tag: string) => {
+      const b = el('button', { type: 'button', class: 'memo-tag' }, `#${tag}`);
+      b.addEventListener('click', () => { filter = filter === tag ? '' : tag; render(); scrollTo({ top: 0, behavior: 'smooth' }); });
+      return b;
+    };
+    // Vom Server gerendert: <span class="doc-tag">.
+    for (const span of root.querySelectorAll<HTMLElement>('.doc-tag')) span.replaceWith(tagButton(span.dataset.tag || span.textContent!.slice(1)));
+    // Noch nicht gesendete Memos sind reiner Text.
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: n => (n.parentElement?.closest('a, code, pre, button') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
     });
@@ -244,14 +252,11 @@ export function start(boot: Boot) {
       const text = node.textContent || '';
       const frag = document.createDocumentFragment();
       let last = 0;
-      for (const m of text.matchAll(TAG_RE)) {
+      for (const m of text.matchAll(tagRe())) {
         const start = m.index! + m[1].length;
         frag.append(text.slice(last, start));
-        const b = el('button', { type: 'button', class: 'memo-tag' }, `#${m[2]}`);
-        const tag = m[2];
-        b.addEventListener('click', () => { filter = filter === tag ? '' : tag; render(); scrollTo({ top: 0, behavior: 'smooth' }); });
-        frag.append(b);
-        last = start + 1 + tag.length;
+        frag.append(tagButton(m[2]));
+        last = start + 1 + m[2].length;
       }
       if (!last) continue;
       frag.append(text.slice(last));
