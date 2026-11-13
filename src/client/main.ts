@@ -43,6 +43,7 @@ const ICONS = {
   saving: '<svg viewBox="0 0 16 16" aria-hidden="true" class="spin"><path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5"/></svg>',
   offline: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 12.5h7a3 3 0 0 0 .4-6 4 4 0 0 0-7.6 1A2.5 2.5 0 0 0 4.5 12.5zM2.5 2.5l11 11"/></svg>',
   pen: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3l2.5 2.5L6 12.5l-3 .5.5-3z"/></svg>',
+  qr: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="4" height="4" rx=".6"/><rect x="9.5" y="2.5" width="4" height="4" rx=".6"/><rect x="2.5" y="9.5" width="4" height="4" rx=".6"/><path d="M9.5 9.5h1.5v1.5M13.5 9.5v.01M9.5 13.5h.01M12 12v1.5h1.5"/></svg>',
 };
 
 function startDoc(boot: Boot) {
@@ -368,6 +369,19 @@ function startDoc(boot: Boot) {
       }, 't boxed');
       const line = el('div', { class: 'field-line' }, input);
       const row = el('div', { class: 'field-row' }, el('label', {}, label), line, el('p', { class: 'hint' }, hint));
+      // QR-Code: klein neben „Kopieren“, klappt bei Bedarf darunter auf.
+      const qrBtn = label === 'Als Markdown' ? null : el('button', { type: 'button', class: 't icon', title: 'QR-Code', 'aria-label': `QR-Code: ${label}`, 'aria-expanded': 'false' });
+      if (qrBtn) {
+        qrBtn.innerHTML = ICONS.qr;
+        let box: HTMLElement | null = null;
+        qrBtn.addEventListener('click', async () => {
+          if (box) { box.remove(); box = null; qrBtn.setAttribute('aria-expanded', 'false'); return; }
+          const { qrSvg } = await import('./qr');
+          box = qrCard(qrSvg(url), `${id}${label === 'Zum Bearbeiten' ? '-bearbeiten' : ''}`, label === 'Zum Bearbeiten');
+          line.after(box);
+          qrBtn.setAttribute('aria-expanded', 'true');
+        });
+      }
       // Erste Zeile: kleiner Stift zum Ändern der Adresse (nur mit Bearbeitungsrecht).
       if (i === 0 && canEdit()) {
         const pen = el('button', { type: 'button', class: 't icon', title: 'Adresse ändern', 'aria-label': 'Adresse ändern' });
@@ -379,11 +393,39 @@ function startDoc(boot: Boot) {
         // Stift im grauen Feld, damit alle Linkfelder gleich breit bleiben.
         line.replaceChildren(el('div', { class: 'field-pen' }, input, pen));
       }
+      if (qrBtn) line.append(qrBtn);
       line.append(copy);
       body.append(row);
     });
     if (!exists) body.append(el('p', { class: 'hint' }, 'Das Dokument wird angelegt, sobald du etwas schreibst.'));
     dialog('Teilen', body);
+  }
+
+  /** Aufgeklappter QR-Code: dunkel auf weiß (das lesen alle Kameras), als Bild sicherbar. */
+  function qrCard(svg: string, name: string, editing: boolean): HTMLElement {
+    const pic = el('div', { class: 'qr-pic' });
+    pic.innerHTML = svg;
+    const save = el('button', { type: 'button', class: 'qr-save' }, 'Als Bild sichern');
+    save.addEventListener('click', async () => {
+      // SVG → PNG (1024 px), damit es sich überall verschicken lässt.
+      const img = new Image();
+      img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = c.height = 1024;
+      const g = c.getContext('2d')!;
+      g.imageSmoothingEnabled = false;
+      g.drawImage(img, 0, 0, 1024, 1024);
+      const blob = await new Promise<Blob | null>(r => c.toBlob(r, 'image/png'));
+      if (!blob) return;
+      const a = el('a', { href: URL.createObjectURL(blob), download: `qr-${name}.png` });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+    const note = editing ? el('span', { class: 'qr-warn' }, 'Wer ihn scannt, kann bearbeiten.') : el('span', {});
+    return el('div', { class: 'qr-card' }, pic, el('div', { class: 'qr-foot' }, note, save));
   }
 
   // ── Menüs ─────────────────────────────────────────────────────────────────
