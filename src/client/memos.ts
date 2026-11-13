@@ -6,14 +6,15 @@
 // (md:memos:outbox) und wird nachgeschickt. Löschen wartet ein paar Sekunden
 // auf „Rückgängig“, bevor es an den Server geht.
 
-import { $, el, store, toast, ask } from './ui';
+import { $, el, store, toast, ask, dialog } from './ui';
+import { toBroadcast } from '../shared/broadcast';
 import { account, accountItems, avatar, type User } from './account';
 import { fineRow } from './settings';
 import { enhance } from './enhance';
 import { memoEditor, tagsOf, type MemoEditor } from './memo-editor';
 
 interface Memo { id: string; text: string; created: number; updated: number; html?: string; pending?: boolean }
-interface Boot { user?: User | null; login?: boolean; memos?: Memo[]; katexCss?: string }
+interface Boot { user?: User | null; login?: boolean; memos?: Memo[]; katexCss?: string; admin?: boolean }
 
 const OUTBOX = 'md:memos:outbox';
 const DRAFT = 'md:memos:draft';
@@ -176,6 +177,8 @@ export function start(boot: Boot) {
     more.addEventListener('click', () => popover(more, [
       ['Bearbeiten', () => startEdit(m)],
       ['Kopieren', () => navigator.clipboard.writeText(m.text).then(() => toast('Kopiert.'), () => toast('Kopieren ging nicht.'))],
+      // Nur das Admin-Konto: öffentlich auf broadcast.veerka.mp stellen.
+      ...(boot.admin && !m.pending ? [['Auf Broadcast senden', () => sendToBroadcast(m)] as [string, () => void]] : []),
       ['Löschen', () => remove(m), 'danger'],
     ]));
     head.append(more);
@@ -414,6 +417,50 @@ function accountButton(u: User): HTMLElement {
   const b = el('button', { type: 'button', class: 't avatar-btn', title: u.email || u.name, 'aria-label': 'Konto', 'aria-haspopup': 'menu' }, avatar(u));
   b.addEventListener('click', () => popover(b, [...accountItems(), ['Alle Dokumente', () => (location.href = '/home')]]));
   return b;
+}
+
+/**
+ * Vorschau und Bestätigung, dann senden. broadcast zeigt schlichten Text,
+ * darum genau die Fassung zeigen, die dort ankommt.
+ */
+function sendToBroadcast(m: { id: string; text: string }) {
+  const draft = toBroadcast(m.text);
+  const body = el('div', { class: 'bc' });
+  if (draft.text) body.append(el('div', { class: 'bc-preview' }, draft.text));
+  if (draft.files.length) body.append(el('p', { class: 'bc-files' }, `${draft.files.length === 1 ? 'Anhang' : `${draft.files.length} Anhänge`}: ${draft.files.map(f => f.name).join(', ')}`));
+  body.append(el('p', { class: 'hint' }, 'Ersetzt die Nachricht, die dort gerade steht. Jeder mit der Adresse kann sie lesen, nach 7 Tagen ist sie wieder weg. #tags werden nicht mitgeschickt.'));
+  const send = el('button', { type: 'button', class: 't boxed' }, 'Senden');
+  const cancel = el('button', { type: 'button', class: 't' }, 'Abbrechen');
+  body.append(el('div', { class: 'ask-row' }, cancel, send));
+  const d = dialog('Auf broadcast.veerka.mp senden', body);
+  cancel.addEventListener('click', () => d.close());
+  send.addEventListener('click', async () => {
+    send.disabled = true;
+    send.textContent = 'Wird gesendet …';
+    try {
+      const res = await fetch(`/api/me/memos/${encodeURIComponent(m.id)}/broadcast`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Senden ging nicht.');
+      d.close();
+      linkToast('Auf Sendung.', 'Ansehen', 'https://broadcast.veerka.mp');
+    } catch (err) {
+      send.disabled = false;
+      send.textContent = 'Senden';
+      toast(navigator.onLine ? (err as Error).message : 'Offline: Senden geht nur mit Verbindung.');
+    }
+  });
+  setTimeout(() => send.focus(), 30);
+}
+
+/** Hinweis unten mit Link (z. B. „Ansehen“). */
+function linkToast(msg: string, label: string, href: string) {
+  $('#toast')?.classList.remove('show');
+  $('.undo-toast')?.remove();
+  const a = el('a', { href, target: '_blank', rel: 'noopener' }, label);
+  const t = el('div', { class: 'undo-toast', role: 'status' }, el('span', {}, msg), a);
+  document.body.append(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 6000);
 }
 
 // ── Sprachmemo abspielen ─────────────────────────────────────────────────────

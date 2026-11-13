@@ -45,12 +45,14 @@
 // Memos sind pro Konto privat: Es gibt keinen Zugriff darauf über Admin,
 // API-Schlüssel oder die Übersicht. Inhalte und Koordinaten stehen nie in
 // Adressen (die landen in den Logs).
+//   POST   /api/me/memos/<id>/broadcast  Memo auf broadcast.veerka.mp senden (nur Admin-Konto)
 //   GET    /m/<datei>                Anhang, nur fürs eigene Konto
 //
 // memos.veerka.mp leitet auf /memos um (früher eine eigene Memos-Instanz).
 
 import manifest from '../generated/manifest.json';
 import { render, escapeHtml } from '../shared/render';
+import { toBroadcast } from '../shared/broadcast';
 import { randomId, randomToken, signToken, verifyTotp, verifyToken, timingSafeEqual } from './crypto';
 import { MAX_CHARS } from './doc';
 import { accountStub, docStub, registry, type Env } from './env';
@@ -665,6 +667,7 @@ async function memos(req: Request, env: Env, user: User, acc: ReturnType<typeof 
   }
 
   const id = parts[0];
+  if (parts.length === 2 && parts[1] === 'broadcast' && req.method === 'POST' && MEMO_ID.test(id)) return broadcastMemo(env, user, acc, id);
   if (parts.length !== 1 || !MEMO_ID.test(id)) return fail(404, 'Unbekannt.');
   if (req.method === 'PUT') {
     const text = cleanText((await body()).text);
@@ -679,6 +682,33 @@ async function memos(req: Request, env: Env, user: User, acc: ReturnType<typeof 
     return json({ ok: true });
   }
   return fail(405, 'Methode nicht erlaubt.');
+}
+
+/**
+ * Memo öffentlich auf broadcast.veerka.mp stellen: ersetzt die Nachricht, die
+ * dort steht, und verschwindet dort nach 7 Tagen. Nur das Admin-Konto.
+ * Text als schlichter Text (shared/broadcast.ts), Anhänge als Datenstrom.
+ */
+async function broadcastMemo(env: Env, user: User, acc: ReturnType<typeof accountStub>, id: string): Promise<Response> {
+  if (!isAdminUser(user, env)) return fail(403, 'Nur für das Admin-Konto.');
+  if (!env.BROADCAST) return fail(503, 'broadcast ist nicht verbunden.');
+  const memo = await acc.getMemo(id);
+  if (!memo) return fail(404, 'Memo nicht gefunden.');
+  const draft = toBroadcast(memo.text);
+  const files: { name: string; type: string; size: number; body: ReadableStream }[] = [];
+  for (const f of draft.files.slice(0, 20)) {
+    const obj = await env.IMAGES.get(memoFileKey(env, user.sub, f.file));
+    if (!obj) continue;
+    files.push({ name: f.name, type: obj.httpMetadata?.contentType || 'application/octet-stream', size: obj.size, body: obj.body });
+  }
+  if (!draft.text && !files.length) return fail(400, 'Nichts zu senden.');
+  try {
+    const r = await env.BROADCAST.publish({ text: draft.text, files });
+    return json(r);
+  } catch (err) {
+    console.error('broadcast', err);
+    return fail(502, (err as Error)?.message || 'broadcast hat nicht angenommen.');
+  }
 }
 
 async function placeName(lat: number, lon: number): Promise<string> {

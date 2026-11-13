@@ -72,6 +72,11 @@ Durable Object pro Dokument, Bilder in R2.
   unter `memos/<Account-ID>/` (max. 50 MB pro Datei, 2 GB pro Konto),
   ausgeliefert nur ans eigene Konto, mit Range. Anhänge, die kein Memo mehr
   nutzt, werden gelöscht; nie abgeschickte nach einem Tag.
+  Nur Admin-Konto: ⋯ → **Auf Broadcast senden** stellt das Memo auf
+  broadcast.veerka.mp (Vorschau vorher; Text über `src/shared/broadcast.ts`
+  zu schlichtem Text, Anhänge als Datenstrom). Läuft über das Service Binding
+  `BROADCAST` auf den Eingang `Sender` des broadcast-Workers, ohne öffentliche
+  Adresse und ohne Passwort.
   `memos.veerka.mp` leitet hierher um. Umzug von Memos: `POST /api/admin/memos`
   (API-Schlüssel) mit `{ "memos": [{ "text", "created" }] }`, beim nächsten
   Öffnen von `/memos` mit dem Admin-Konto landen sie dort.

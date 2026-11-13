@@ -41,6 +41,11 @@
     { "tag": "v2", "new_sqlite_classes": ["Account"] }
   ],
 
+  // broadcast.veerka.mp: Memo dorthin senden (nur Admin-Konto). Service
+  // Binding auf den benannten Eingang „Sender“ des broadcast-Workers – der ist
+  // aus dem Internet nicht erreichbar, nur über dieses Binding.
+  "services": [{ "binding": "BROADCAST", "service": "broadcast", "entrypoint": "Sender" }],
+
   // Bilder. Nicht öffentlich, ausgeliefert wird über /i/<dokument>/<datei>.
   "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "md-veerka-mp" }],
 

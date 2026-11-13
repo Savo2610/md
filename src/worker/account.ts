@@ -247,6 +247,10 @@ export class Account extends DurableObject<Env> {
     return gone;
   }
 
+  getMemo(id: string): Memo | null {
+    return this.memo(id);
+  }
+
   private memo(id: string): Memo | null {
     const r = this.sql.exec('SELECT * FROM memos WHERE id = ?', id).toArray();
     return r.length ? memoRow(r[0]) : null;

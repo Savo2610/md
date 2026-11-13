@@ -2,12 +2,19 @@ import type { Doc } from './doc';
 import type { Registry } from './registry';
 import type { Account } from './account';
 
+/** Eingang „Sender“ des broadcast-Workers (Service Binding, siehe wrangler.jsonc). */
+export interface BroadcastSender {
+  publish(input: { text: string; files: { name: string; type: string; size: number; body: ReadableStream }[] }): Promise<{ ok: boolean; id: string; attachments: number; url: string }>;
+}
+
 export interface Env {
   DOC: DurableObjectNamespace<Doc>;
   REGISTRY: DurableObjectNamespace<Registry>;
   ACCOUNT: DurableObjectNamespace<Account>;
   IMAGES: R2Bucket;
   ASSETS: Fetcher;
+  /** Fehlt lokal, wenn broadcast nicht mitläuft. */
+  BROADCAST?: BroadcastSender;
   CREATE_LIMIT: RateLimit;
   UPLOAD_LIMIT: RateLimit;
   TURNSTILE_SITEKEY?: string;
