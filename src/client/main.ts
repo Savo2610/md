@@ -431,7 +431,7 @@ function startDoc(boot: Boot) {
   // ── Menüs ─────────────────────────────────────────────────────────────────
 
   function openRecent() {
-    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')], ['Datei öffnen …', () => openAsNew()], ['Alle Dokumente', () => (location.href = '/home')]];
+    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')], ['Datei öffnen …', () => openAsNew()], ['Alle Dokumente', () => (location.href = '/home')], ['Memos', () => (location.href = '/memos')]];
     const list = recent.list().filter(r => r.id !== id && !r.trashed);
     if (list.length) items.push(el('div', { class: 'menu-label' }, 'Zuletzt geöffnet'));
     for (const r of list.slice(0, 5)) {

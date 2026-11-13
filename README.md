@@ -77,6 +77,14 @@ Durable Object pro Dokument, Bilder in R2.
   zu schlichtem Text, Anhänge als Datenstrom). Läuft über das Service Binding
   `BROADCAST` auf den Eingang `Sender` des broadcast-Workers, ohne öffentliche
   Adresse und ohne Passwort.
+  ⋯ → **Als Dokument öffnen** macht aus dem Memo ein md-Dokument (zufällige
+  Adresse, Anhänge werden zu Bildern des Dokuments, steht samt Schlüsseln in
+  der Dokumentliste) und öffnet es zum Bearbeiten. Beide bleiben verknüpft:
+  das Dokument ist die Quelle, das Memo zeigt dessen aktuellen Stand (Text wird
+  beim Laden nachgezogen, Abhaken im Memo schreibt ins Dokument). Ist das
+  Dokument weg, bleibt das Memo mit dem letzten Stand.
+  Teilen-Dialog der Dokumente: QR-Code neben Lese- und Bearbeiten-Link
+  (`src/client/qr.ts`, aus broadcast übernommen), als PNG sicherbar.
   `memos.veerka.mp` leitet hierher um. Umzug von Memos: `POST /api/admin/memos`
   (API-Schlüssel) mit `{ "memos": [{ "text", "created" }] }`, beim nächsten
   Öffnen von `/memos` mit dem Admin-Konto landen sie dort.

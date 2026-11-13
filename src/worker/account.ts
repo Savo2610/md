@@ -30,6 +30,8 @@ export interface Memo {
   text: string;
   created: number;
   updated: number;
+  /** Verknüpftes md-Dokument (Memo → Dokument). Dann ist das Dokument die Quelle, `text` die letzte Kopie davon. */
+  doc?: string | null;
 }
 
 export interface Profile {
@@ -95,6 +97,8 @@ export class Account extends DurableObject<Env> {
     for (const col of ['owner_key TEXT', 'trashed INTEGER NOT NULL DEFAULT 0']) {
       try { this.sql.exec(`ALTER TABLE docs ADD COLUMN ${col}`); } catch { /* gibt es schon */ }
     }
+    // Memo → Dokument.
+    try { this.sql.exec('ALTER TABLE memos ADD COLUMN doc TEXT'); } catch { /* gibt es schon */ }
   }
 
   setProfile(p: Profile) {
@@ -251,6 +255,19 @@ export class Account extends DurableObject<Env> {
     return this.memo(id);
   }
 
+  /** Memo mit einem Dokument verknüpfen (oder lösen, doc = null). */
+  setMemoDoc(id: string, doc: string | null) {
+    this.sql.exec('UPDATE memos SET doc = ? WHERE id = ?', doc, id);
+  }
+
+  /**
+   * Text eines verknüpften Memos aus dem Dokument nachziehen (für Suche,
+   * Tags und als Kopie, falls das Dokument einmal weg ist).
+   */
+  syncMemoText(id: string, text: string, updated: number) {
+    this.sql.exec('UPDATE memos SET text = ?, updated = ? WHERE id = ? AND text <> ?', text, updated, id, text);
+  }
+
   private memo(id: string): Memo | null {
     const r = this.sql.exec('SELECT * FROM memos WHERE id = ?', id).toArray();
     return r.length ? memoRow(r[0]) : null;
@@ -275,7 +292,7 @@ export class Account extends DurableObject<Env> {
 }
 
 function memoRow(r: Record<string, SqlStorageValue>): Memo {
-  return { id: r.id as string, text: r.text as string, created: r.created as number, updated: r.updated as number };
+  return { id: r.id as string, text: r.text as string, created: r.created as number, updated: r.updated as number, doc: (r.doc as string) || null };
 }
 
 function row(r: Record<string, SqlStorageValue>): AccountDoc {

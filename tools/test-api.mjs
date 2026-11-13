@@ -330,6 +330,29 @@ if (!LIVE && vars.DEV_LOGIN === '1') {
   r = await fetch(`${BASE}/api/me/memos`, { headers: C });
   ok(!(await j(r)).memos.some(m => m.id === mid), 'Memo löschen');
 
+  // Memo → Dokument (verknüpft)
+  const did = `${mid}-doc`;
+  await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: J, body: JSON.stringify({ id: did, text: '# Aus Memo\n- [ ] eins' }) });
+  r = await fetch(`${BASE}/api/me/memos/${did}/doc`, { method: 'POST', headers: C });
+  d = await j(r);
+  ok(r.status === 201 && /^[a-z0-9]{10}$/.test(d.doc) && d.editKey, 'Memo → Dokument mit zufälliger Adresse');
+  const linked = d;
+  r = await fetch(`${BASE}/${linked.doc}.md`);
+  ok((await r.text()) === '# Aus Memo\n- [ ] eins', 'Dokument hat den Text des Memos');
+  r = await fetch(`${BASE}/api/me/memos/${did}/doc`, { method: 'POST', headers: C });
+  ok((await j(r)).doc === linked.doc, 'Zweites Mal: dasselbe Dokument');
+  await fetch(`${BASE}/api/docs/${linked.doc}`, { method: 'PUT', headers: { 'content-type': 'text/markdown', 'x-edit-key': linked.editKey }, body: '# Aus Memo\n- [ ] eins\n- [ ] zwei' });
+  r = await fetch(`${BASE}/api/me/memos`, { headers: C });
+  ok((await j(r)).memos.find(m => m.id === did)?.text.includes('zwei'), 'Änderung im Dokument kommt im Memo an');
+  await fetch(`${BASE}/api/me/memos/${did}`, { method: 'PUT', headers: J, body: JSON.stringify({ text: '# Aus Memo\n- [x] eins\n- [ ] zwei' }) });
+  r = await fetch(`${BASE}/${linked.doc}.md`);
+  ok((await r.text()).includes('- [x] eins'), 'Abhaken im Memo landet im Dokument');
+  await fetch(`${BASE}/api/docs/${linked.doc}`, { method: 'DELETE', headers: API });
+  r = await fetch(`${BASE}/api/me/memos`, { headers: C });
+  d = (await j(r)).memos.find(m => m.id === did);
+  ok(d && !d.doc && d.text.includes('zwei'), 'Dokument weg: Memo bleibt mit letztem Stand, ohne Verknüpfung');
+  await fetch(`${BASE}/api/me/memos/${did}`, { method: 'DELETE', headers: C });
+
   // Anhänge
   const audio = new Uint8Array(4000).map((_, i) => i % 251);
   r = await fetch(`${BASE}/api/me/memos/files`, { method: 'POST', headers: { ...C, 'content-type': 'audio/mp4', 'x-file-name': 'Sprachmemo.m4a' }, body: audio });

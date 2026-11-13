@@ -46,6 +46,7 @@
 // API-Schlüssel oder die Übersicht. Inhalte und Koordinaten stehen nie in
 // Adressen (die landen in den Logs).
 //   POST   /api/me/memos/<id>/broadcast  Memo auf broadcast.veerka.mp senden (nur Admin-Konto)
+//   POST   /api/me/memos/<id>/doc    Memo als md-Dokument (verknüpft), liefert { doc, url }
 //   GET    /m/<datei>                Anhang, nur fürs eigene Konto
 //
 // memos.veerka.mp leitet auf /memos um (früher eine eigene Memos-Instanz).
@@ -53,6 +54,7 @@
 import manifest from '../generated/manifest.json';
 import { render, escapeHtml } from '../shared/render';
 import { toBroadcast } from '../shared/broadcast';
+import { titleOf } from '../shared/title';
 import { randomId, randomToken, signToken, verifyTotp, verifyToken, timingSafeEqual } from './crypto';
 import { MAX_CHARS } from './doc';
 import { accountStub, docStub, registry, type Env } from './env';
@@ -175,7 +177,7 @@ interface Boot {
   memos?: MemoOut[];
 }
 
-type MemoOut = Memo & { html: string };
+type MemoOut = Memo & { html: string; docTitle?: string };
 const memoOut = (m: Memo): MemoOut => ({ ...m, html: render(m.text).html });
 
 /** Eigene App auf dem Homescreen: /memos hat ein eigenes Manifest und Icon. */
@@ -278,6 +280,29 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
   return page(req, title, `<main id="app"><article class="doc" id="view">${html}</article></main>`, { ...common, exists: true, editKey, ownerKey });
 }
 
+/**
+ * Memos samt HTML. Verknüpfte Memos zeigen den aktuellen Stand ihres
+ * Dokuments (das ist die Quelle); der Text im Memo wird nachgezogen. Ist das
+ * Dokument weg oder im Papierkorb, bleibt das Memo mit seiner letzten Kopie
+ * stehen und die Verknüpfung fällt weg.
+ */
+async function linkedMemos(env: Env, acc: ReturnType<typeof accountStub>, list: Memo[]): Promise<MemoOut[]> {
+  return Promise.all(list.map(async m => {
+    if (!m.doc) return memoOut(m);
+    let doc = m.doc;
+    let info = await docStub(env, doc).info(true);
+    if (info.movedTo) { doc = info.movedTo; info = await docStub(env, doc).info(true); }
+    if (!info.exists || info.trashed) {
+      await acc.setMemoDoc(m.id, null);
+      return memoOut({ ...m, doc: null });
+    }
+    if (doc !== m.doc) await acc.setMemoDoc(m.id, doc);
+    if (info.markdown !== m.text && info.markdown.trim()) await acc.syncMemoText(m.id, info.markdown, info.updated || Date.now());
+    const text = info.markdown.trim() ? info.markdown : m.text;
+    return { ...m, doc, text, html: render(text).html, docTitle: info.title || doc };
+  }));
+}
+
 async function memosPage(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const user = await currentUser(req, env);
   const common = { page: 'memos' as const, user: publicUser(user), login: loginEnabled(env), admin: isAdminUser(user, env) };
@@ -289,7 +314,7 @@ async function memosPage(req: Request, env: Env, ctx: ExecutionContext): Promise
     const pending = await reg.pendingMemos();
     if (pending.length) await reg.doneMemos(await acc.addMemos(pending));
   }
-  const memos = (await acc.memos()).map(memoOut);
+  const memos = await linkedMemos(env, acc, await acc.memos());
   // Nie abgeschickte Anhänge wegräumen.
   ctx.waitUntil(acc.sweepFiles().then(names => deleteMemoFiles(env, user.sub, names)).catch(() => {}));
   return page(req, 'Memos', '<main id="app"></main>', { ...common, memos }, 200, MEMOS_APP);
@@ -624,7 +649,7 @@ async function memos(req: Request, env: Env, user: User, acc: ReturnType<typeof 
   const cleanText = (t: unknown) => (typeof t === 'string' ? t.replace(/\r\n?/g, '\n').replace(/^(\s*\n)+|\s+$/g, '') : '');
 
   if (!parts.length) {
-    if (req.method === 'GET') return json({ memos: (await acc.memos()).map(memoOut) });
+    if (req.method === 'GET') return json({ memos: await linkedMemos(env, acc, await acc.memos()) });
     if (req.method === 'POST') {
       const b = await body();
       const text = cleanText(b.text);
@@ -668,6 +693,7 @@ async function memos(req: Request, env: Env, user: User, acc: ReturnType<typeof 
 
   const id = parts[0];
   if (parts.length === 2 && parts[1] === 'broadcast' && req.method === 'POST' && MEMO_ID.test(id)) return broadcastMemo(env, user, acc, id);
+  if (parts.length === 2 && parts[1] === 'doc' && req.method === 'POST' && MEMO_ID.test(id)) return memoToDoc(env, user, acc, id, ctx);
   if (parts.length !== 1 || !MEMO_ID.test(id)) return fail(404, 'Unbekannt.');
   if (req.method === 'PUT') {
     const text = cleanText((await body()).text);
@@ -675,7 +701,14 @@ async function memos(req: Request, env: Env, user: User, acc: ReturnType<typeof 
     if (text.length > MAX_MEMO) return fail(413, 'Memo zu lang.');
     const { memo, orphans } = await acc.editMemo(id, text);
     ctx.waitUntil(deleteMemoFiles(env, user.sub, orphans));
-    return memo ? json(memoOut(memo)) : fail(404, 'Memo nicht gefunden.');
+    if (!memo) return fail(404, 'Memo nicht gefunden.');
+    // Verknüpft (z. B. Aufgabe abgehakt): ins Dokument schreiben, das ist die Quelle.
+    if (memo.doc) {
+      if (!(await docStub(env, memo.doc).replace(text))) await acc.setMemoDoc(id, null);
+      const [out] = await linkedMemos(env, acc, [memo]);
+      return json(out);
+    }
+    return json(memoOut(memo));
   }
   if (req.method === 'DELETE') {
     ctx.waitUntil(deleteMemoFiles(env, user.sub, await acc.deleteMemo(id)));
@@ -709,6 +742,53 @@ async function broadcastMemo(env: Env, user: User, acc: ReturnType<typeof accoun
     console.error('broadcast', err);
     return fail(502, (err as Error)?.message || 'broadcast hat nicht angenommen.');
   }
+}
+
+/**
+ * Aus einem Memo ein md-Dokument machen und beide verknüpfen. Das Dokument
+ * bekommt eine zufällige Adresse (Memos sind privat, ein Dokument liest jeder
+ * mit Link), landet samt Schlüsseln in der Dokumentliste des Kontos, und die
+ * Anhänge werden zu Bildern des Dokuments kopiert (/m/… → /i/…). Danach ist
+ * das Dokument die Quelle; das Memo zeigt dessen Inhalt.
+ */
+async function memoToDoc(env: Env, user: User, acc: ReturnType<typeof accountStub>, id: string, ctx: ExecutionContext): Promise<Response> {
+  const memo = await acc.getMemo(id);
+  if (!memo) return fail(404, 'Memo nicht gefunden.');
+  if (memo.doc) {
+    const info = await docStub(env, memo.doc).info();
+    if (info.exists && !info.trashed) return json({ doc: memo.doc, url: `/${encodeURIComponent(memo.doc)}` });
+  }
+  const { success } = await env.CREATE_LIMIT.limit({ key: `u:${user.sub}` });
+  if (!success) return fail(429, 'Zu viele neue Dokumente. Bitte kurz warten.');
+
+  let docId = '', stub: ReturnType<typeof docStub> | null = null, editKey: string | null = null;
+  for (let i = 0; i < 5 && !editKey; i++) {
+    docId = randomId();
+    stub = docStub(env, docId);
+    editKey = await stub.create(docId, memo.text);
+  }
+  if (!stub || !editKey) return fail(500, 'Dokument konnte nicht angelegt werden.');
+
+  // Anhänge mitnehmen: im Dokument müssen sie für alle mit Link lesbar sein.
+  let text = memo.text;
+  const files = [...new Set([...memo.text.matchAll(/\/m\/([\w-]{6,40}\.[a-z0-9]{1,8})/g)].map(m => m[1]))];
+  for (const file of files) {
+    const obj = await env.IMAGES.get(memoFileKey(env, user.sub, file));
+    if (!obj) continue;
+    const prefix = await stub.reserveImage(obj.size);
+    if (!prefix) break; // Bilderspeicher des Dokuments voll: Rest bleibt verlinkt (dann nur für dich sichtbar)
+    await env.IMAGES.put(`${prefix}/${file}`, obj.body, { httpMetadata: obj.httpMetadata });
+    text = text.split(`/m/${file}`).join(`/i/${encodeURIComponent(prefix)}/${file}`);
+  }
+  if (text !== memo.text) await stub.replace(text);
+
+  const ownerKey = await stub.ownerKey();
+  await acc.upsert([{ id: docId, editKey, ownerKey, opened: Date.now(), title: titleOf(text) }]);
+  await acc.setMemoDoc(id, docId);
+  // Memo-Text auf den Stand des Dokuments; nicht mehr gebrauchte Memo-Anhänge weg.
+  const { orphans } = await acc.editMemo(id, text);
+  ctx.waitUntil(deleteMemoFiles(env, user.sub, orphans));
+  return json({ doc: docId, url: `/${encodeURIComponent(docId)}`, editKey, ownerKey }, 201);
 }
 
 async function placeName(lat: number, lon: number): Promise<string> {

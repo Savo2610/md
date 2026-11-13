@@ -13,7 +13,7 @@ import { fineRow } from './settings';
 import { enhance } from './enhance';
 import { memoEditor, tagsOf, type MemoEditor } from './memo-editor';
 
-interface Memo { id: string; text: string; created: number; updated: number; html?: string; pending?: boolean }
+interface Memo { id: string; text: string; created: number; updated: number; html?: string; pending?: boolean; doc?: string | null; docTitle?: string }
 interface Boot { user?: User | null; login?: boolean; memos?: Memo[]; katexCss?: string; admin?: boolean }
 
 const OUTBOX = 'md:memos:outbox';
@@ -27,6 +27,7 @@ const ICON = {
   pending: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg>',
   file: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11.5 2.75H6a1.75 1.75 0 0 0-1.75 1.75v11A1.75 1.75 0 0 0 6 17.25h8a1.75 1.75 0 0 0 1.75-1.75V7z"/><path d="M11.5 2.75V7h4.25"/></svg>',
   place: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 17.5s5.5-5 5.5-9.25a5.5 5.5 0 0 0-11 0C4.5 12.5 10 17.5 10 17.5z"/><circle cx="10" cy="8.25" r="2"/></svg>',
+  doc: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 2.5H4.75A1.25 1.25 0 0 0 3.5 3.75v8.5c0 .7.56 1.25 1.25 1.25h6.5c.7 0 1.25-.56 1.25-1.25V5.5z"/><path d="M9.5 2.5v3h3M5.75 8.5h4.5M5.75 10.75h3"/></svg>',
   play: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4.8v10.4a.6.6 0 0 0 .9.5l8.2-5.2a.6.6 0 0 0 0-1L7.9 4.3a.6.6 0 0 0-.9.5z"/></svg>',
   pause: '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5.5" y="4.5" width="3" height="11" rx="1"/><rect x="11.5" y="4.5" width="3" height="11" rx="1"/></svg>',
 };
@@ -173,10 +174,20 @@ export function start(boot: Boot) {
       head.append(p);
     }
     head.append(el('time', { datetime: new Date(m.created).toISOString(), title: new Date(m.created).toLocaleString('de-DE') }, when(m.created)));
+    // Verknüpftes Dokument: kleiner Verweis oben; das Dokument ist die Quelle.
+    if (m.doc) {
+      const link = el('a', { href: `/${encodeURIComponent(m.doc)}`, class: 'memo-doc', title: `Dokument: ${m.docTitle || m.doc}` });
+      link.innerHTML = ICON.doc;
+      link.append('Dokument');
+      head.append(link);
+    }
     const more = el('button', { type: 'button', class: 'memo-more', title: 'Mehr', 'aria-label': 'Mehr', 'aria-haspopup': 'menu' }, '⋯');
     more.addEventListener('click', () => popover(more, [
-      ['Bearbeiten', () => startEdit(m)],
+      m.doc
+        ? ['Dokument öffnen', () => (location.href = `/${encodeURIComponent(m.doc!)}`)]
+        : ['Bearbeiten', () => startEdit(m)],
       ['Kopieren', () => navigator.clipboard.writeText(m.text).then(() => toast('Kopiert.'), () => toast('Kopieren ging nicht.'))],
+      ...(!m.doc && !m.pending ? [['Als Dokument öffnen', () => toDoc(m)] as [string, () => void]] : []),
       // Nur das Admin-Konto: öffentlich auf broadcast.veerka.mp stellen.
       ...(boot.admin && !m.pending ? [['Auf Broadcast senden', () => sendToBroadcast(m)] as [string, () => void]] : []),
       ['Löschen', () => remove(m), 'danger'],
@@ -357,6 +368,25 @@ export function start(boot: Boot) {
     }
   }
 
+  // ── Als Dokument ──────────────────────────────────────────────────────────
+
+  /** md-Dokument aus dem Memo machen (verknüpft) und dorthin wechseln. */
+  async function toDoc(m: Memo) {
+    if (!navigator.onLine) { toast('Offline: geht nur mit Verbindung.'); return; }
+    try {
+      const res = await api(`/${m.id}/doc`, 'POST');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Dokument konnte nicht angelegt werden.');
+      if (data.editKey) store.set(`md:key:${data.doc}`, data.editKey);
+      if (data.ownerKey) store.set(`md:owner:${data.doc}`, data.ownerKey);
+      // Direkt im Bearbeiten-Modus öffnen (wie main.ts es für neue Dokumente kennt).
+      try { sessionStorage.setItem('md:open-edit', data.doc); } catch { /* egal */ }
+      location.href = data.url;
+    } catch (err) {
+      toast((err as Error).message);
+    }
+  }
+
   // ── Löschen (mit Rückgängig) ──────────────────────────────────────────────
 
   const finishDelete = (id: string, keepalive = false) => {
@@ -377,7 +407,7 @@ export function start(boot: Boot) {
     if (editingId === m.id) stopEdit();
     deleting.set(m.id, setTimeout(() => finishDelete(m.id), UNDO_MS));
     render();
-    undoToast('Memo gelöscht.', () => {
+    undoToast(m.doc ? 'Memo gelöscht, das Dokument bleibt.' : 'Memo gelöscht.', () => {
       clearTimeout(deleting.get(m.id));
       deleting.delete(m.id);
       render();
