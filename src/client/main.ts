@@ -369,7 +369,9 @@ function startDoc(boot: Boot) {
       }, 't boxed');
       const line = el('div', { class: 'field-line' }, input);
       const row = el('div', { class: 'field-row' }, el('label', {}, label), line, el('p', { class: 'hint' }, hint));
-      // QR-Code: klein neben „Kopieren“, klappt bei Bedarf darunter auf.
+      // Symbole im grauen Feld (Stift, QR-Code), damit alle Linkfelder gleich breit bleiben.
+      const icons: HTMLElement[] = [];
+      // QR-Code: klappt bei Bedarf unter der Zeile auf.
       const qrBtn = label === 'Als Markdown' ? null : el('button', { type: 'button', class: 't icon', title: 'QR-Code', 'aria-label': `QR-Code: ${label}`, 'aria-expanded': 'false' });
       if (qrBtn) {
         qrBtn.innerHTML = ICONS.qr;
@@ -390,10 +392,13 @@ function startDoc(boot: Boot) {
           const form = renameForm(() => { form.replaceWith(row); pen.focus(); });
           row.replaceWith(form);
         });
-        // Stift im grauen Feld, damit alle Linkfelder gleich breit bleiben.
-        line.replaceChildren(el('div', { class: 'field-pen' }, input, pen));
+        icons.push(pen);
       }
-      if (qrBtn) line.append(qrBtn);
+      if (qrBtn) icons.push(qrBtn);
+      if (icons.length) {
+        input.style.paddingRight = `${8 + icons.length * 30}px`;
+        line.replaceChildren(el('div', { class: 'field-pen' }, input, el('div', { class: 'field-icons' }, ...icons)));
+      }
       line.append(copy);
       body.append(row);
     });
