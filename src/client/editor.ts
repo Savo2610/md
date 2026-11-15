@@ -19,8 +19,8 @@ import { uploadImage } from './images';
 import { highlight, formatKeys, wrap, link, linePrefix, cycleHeading, continueListsOnInput, tagHighlight, tagCompletion, calcResults } from './cmkit';
 import { render } from '../shared/render';
 import { enhance } from './enhance';
-import { tableKeys, tableCursor, tableFromClipboard, convertible, convertSelection } from './table';
-import { tableGrid, tableBar, tablePointer, pickTableSize, insertTable } from './table-ui';
+import { tableKeys, tableCursor, tableFromClipboard, convertible, convertSelection, findTable, nextCell } from './table';
+import { tableFont, pickTableSize, insertTable } from './table-ui';
 import { isTextFile, fileToMarkdown, looksRich } from './importer';
 
 export { render };
@@ -554,7 +554,7 @@ function mobileToolbar(view: EditorView, pickImage: () => void): () => void {
     ['Link', 'Link', () => link(view)],
     ['Bild', 'Bild', pickImage],
   ];
-  for (const [label, title, run] of buttons) {
+  const make = ([label, title, run]: [string, string, () => void]) => {
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = label;
@@ -562,7 +562,14 @@ function mobileToolbar(view: EditorView, pickImage: () => void): () => void {
     b.addEventListener('pointerdown', e => e.preventDefault());
     b.addEventListener('click', run);
     bar.append(b);
-  }
+    return b;
+  };
+  // In einer Tabelle vorne ⇥ (die Bildschirmtastatur hat kein Tab).
+  const tab = make(['⇥', 'Nächste Zelle', () => nextCell(view)]);
+  tab.hidden = true;
+  for (const b of buttons) make(b);
+  const inTable = () => { tab.hidden = !(view.hasFocus && findTable(view.state, view.state.selection.main.head)); };
+  document.addEventListener('selectionchange', inTable);
   document.body.append(bar);
   const vv = window.visualViewport;
   const place = () => {
@@ -574,7 +581,7 @@ function mobileToolbar(view: EditorView, pickImage: () => void): () => void {
   const onFocus = () => { bar.classList.toggle('show', view.hasFocus); place(); };
   view.contentDOM.addEventListener('focus', onFocus);
   view.contentDOM.addEventListener('blur', () => setTimeout(onFocus, 100));
-  return () => bar.remove();
+  return () => { bar.remove(); document.removeEventListener('selectionchange', inTable); };
 }
 
 // ── Zusammenbauen ───────────────────────────────────────────────────────────
@@ -805,10 +812,8 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         spellComp.of(spellAttrs(o.spellcheck)),
         spellExclusions,
         linkFolding,
-        tableGrid(v => v.plugin(linkFolding)?.decorations),
-        tableBar(),
+        tableFont,
         tableCursor,
-        tablePointer,
         yCollab(ytext, awareness, { undoManager }),
         selectionToolbar(),
         EditorView.domEventHandlers({
