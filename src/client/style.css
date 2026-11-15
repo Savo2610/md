@@ -229,42 +229,38 @@ body[data-mode="split"] { --measure: 34rem; }
 }
 .mobiletools button:active { background: var(--soft); }
 
-/* Tabellen im Editor: Mono-Raster (table-ui.ts). --tbl-ch ist die Breite der
-   Tabelle in Zeichen (Mono: 1ch = .6em). Passt sie nicht in die Textspalte
-   (--tbl-t), wird sie bis .68em kleiner, dann darf sie nach rechts in den
-   freien Rand (--tbl-a) und wird erst danach weiter verkleinert (min. 11px). */
+/* Tabellen im Editor: Raster in der Textschrift (table-ui.ts). --tbl-n ist
+   die Breite der Tabelle in em, --tbl-p die Zahl der | (je 1px). Passt sie
+   nicht in die Textspalte (--tbl-t), wird sie bis .78em kleiner, dann darf
+   sie nach rechts in den freien Rand (--tbl-a) und wird erst danach weiter
+   verkleinert (min. 11px). */
 .pane-editor .cm-scroller { container-type: inline-size; }
 .cm-line.cm-tbl {
-  --tbl-w: calc(var(--tbl-ch) * 1ch);
+  --tbl-w: calc(var(--tbl-n) * 1em + var(--tbl-p) * 1px);
   --tbl-t: calc(min(var(--measure), 100cqw) - 2 * var(--gutter));
   --tbl-a: calc((100cqw + min(var(--measure), 100cqw)) / 2 - 2 * var(--gutter));
-  font-family: var(--mono); line-height: 1.7;
-  --tbl-n: calc((var(--tbl-ch) + 1) * .6); /* ein Zeichen Luft gegen Rundung */
-  font-size: max(11px, min(.8em, max(calc(var(--tbl-t) / var(--tbl-n)), min(.68em, calc(var(--tbl-a) / var(--tbl-n))))));
-  width: clamp(100%, calc(var(--tbl-w) + 1ch), var(--tbl-a));
+  --tbl-k: calc(var(--tbl-n) + 1); /* etwas Luft für die Striche */
+  line-height: 1.7;
+  font-size: max(11px, min(.9em, max(calc(var(--tbl-t) / var(--tbl-k)), min(.78em, calc(var(--tbl-a) / var(--tbl-k))))));
+  width: clamp(100%, calc(var(--tbl-w) + 1em), var(--tbl-a));
 }
-/* Waagrechte Linien laufen von Mitte bis Mitte der äußeren | (je ½ Zeichen
-   eingerückt). Die Kopfzeile trägt oben den Rahmen und unten die kräftigere
-   Linie, damit ihr Text mittig sitzt; die Trennzeile selbst ist unsichtbar. */
-.cm-tbl-head, .cm-tbl-row { --tbl-pos: .5ch; --tbl-size: calc(var(--tbl-w) - 1ch) 1px; }
+/* Die Kopfzeile trägt oben den Rahmen und unten die kräftigere Linie, damit
+   ihr Text mittig sitzt; die Trennzeile selbst ist unsichtbar. */
 .cm-tbl-head {
   font-weight: 700;
   background:
-    linear-gradient(var(--line), var(--line)) var(--tbl-pos) top / var(--tbl-size) no-repeat,
-    linear-gradient(var(--fg-soft), var(--fg-soft)) var(--tbl-pos) bottom / var(--tbl-size) no-repeat;
+    linear-gradient(var(--line), var(--line)) left top / var(--tbl-w) 1px no-repeat,
+    linear-gradient(var(--fg-soft), var(--fg-soft)) left bottom / var(--tbl-w) 1px no-repeat;
 }
-.cm-tbl-row { background: linear-gradient(var(--line), var(--line)) var(--tbl-pos) bottom / var(--tbl-size) no-repeat; }
+.cm-tbl-row { background: linear-gradient(var(--line), var(--line)) left bottom / var(--tbl-w) 1px no-repeat; }
 .cm-tbl-pipe {
-  display: inline-block; width: 1ch; height: 1.7em; vertical-align: top; color: transparent;
-  background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat;
+  display: inline-block; width: 1px; height: 1.7em; vertical-align: top; overflow: hidden;
+  color: transparent; background: var(--line);
 }
 .cm-tbl-pipe * { color: transparent !important; }
 .cm-tbl-gap { display: inline-block; }
 .cm-tbl-missing .cm-tbl-pipe { opacity: .5; }
-.cm-tbl .cm-linkfold { display: inline-block; width: 1ch; padding: 0; font-size: 1em; text-align: center; }
-.cm-line.cm-tbl-delim { height: 0; line-height: 0; overflow: hidden; color: transparent; }
-.cm-tbl-delim * { color: transparent !important; }
-.cm-tbl-delim .cm-tbl-pipe, .cm-tbl-delim .cm-widgetBuffer { height: 0; }
+.cm-line.cm-tbl-delim { height: 0; line-height: 0; overflow: hidden; }
 
 /* Tabellen-Leiste */
 .tablebar {

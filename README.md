@@ -21,9 +21,9 @@ Durable Object pro Dokument, Bilder in R2.
   oder Bearbeiten (Standard: zuletzt benutzter Modus), Name beim
   gemeinsamen Schreiben, Rechtschreibprüfung.
 - Tabellen (`src/client/table.ts`, Darstellung und Leiste in `table-ui.ts`):
-  Im Editor als Raster in Mono-Schrift, Spalten werden beim Tippen sichtbar
-  ausgerichtet (ohne den Text zu ändern), breite Tabellen kleiner bzw. in den
-  rechten Rand. Anlegen: `/tabelle` (Größe im Raster wählen), `/3x4`, Enter
+  Im Editor als Raster in der Textschrift; Spalten werden beim Tippen
+  sichtbar ausgerichtet (ohne den Text zu ändern, Breiten per Canvas
+  vermessen), breite Tabellen kleiner bzw. in den rechten Rand. Anlegen: `/tabelle` (Größe im Raster wählen), `/3x4`, Enter
   hinter `Name | Alter | Ort`, markierte Zeilen mit Tab/`;`/`,` → „Tabelle“
   in der Auswahl-Leiste, oder Zellen aus Excel/Numbers/Sheets einfügen.
   Tab/Shift-Tab springen zwischen Zellen, Pfeiltasten am Zellrand in die

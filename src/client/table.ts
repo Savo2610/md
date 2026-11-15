@@ -437,15 +437,22 @@ function arrow(view: EditorView, dir: Dir): boolean {
   return true;
 }
 
-let pointer: { line: number; col: number; touch: boolean; at: number } | null = null;
+let pointer: { line: number; col: number; touch: boolean; at: number; target: number } | null = null;
 
 /**
  * Zeile und Spalte, in die gerade geklickt/getippt wurde, ermittelt aus der
  * Lage der | im Raster (table-ui.ts). CodeMirror ordnet Klicks auf
  * ausgeblendete Füllung sonst gern der Nachbarzelle zu.
  */
-export function notePointer(line: number, col: number, touch: boolean) {
-  pointer = { line, col, touch, at: Date.now() };
+export function notePointer(line: number, col: number, touch: boolean, target: number) {
+  pointer = { line, col, touch, at: Date.now(), target };
+}
+
+/** Inhaltsbereich der Zelle col in Zeile line (letzte Zelle, wenn es weniger gibt). */
+export function cellSlot(state: EditorState, line: number, col: number): { cs: number; ce: number } | null {
+  const l = state.doc.line(line);
+  const s = slots(l.text, l.from);
+  return s.length ? s[Math.min(col, s.length - 1)] : null;
 }
 
 /**
@@ -481,7 +488,8 @@ export const tableCursor = EditorState.transactionFilter.of((tr: Transaction): T
   if (!s.length) return tr;
   const slot = s[Math.min(k ?? slotAt(s, head), s.length - 1)];
   let to: number;
-  if (jumped) to = slot.cs;
+  if (p && !jumped && p.target >= slot.cs && p.target <= slot.ce) to = p.target;
+  else if (jumped) to = slot.cs;
   else if (head < line.from || head > line.to) to = slot.ce; // in einer anderen Zeile gelandet
   else if (head < slot.from) to = slot.cs;
   else if (head > slot.to) to = slot.ce;

@@ -1,41 +1,76 @@
 // Tabellen im Editor: Darstellung als Raster, Tabellen-Leiste und Größenwahl.
 //
-// Raster: Tabellenzeilen stehen in Mono-Schrift, | werden zu feinen
+// Raster: Tabellenzeilen stehen in der Textschrift, | werden zu feinen
 // senkrechten Linien, die Trennzeile zur Linie unter der Kopfzeile. Die
-// Spalten werden beim Tippen sichtbar ausgerichtet (Lücken als Widgets), ohne
-// dass sich der Text ändert; das Ausrichten im Text macht Tab/Enter
-// (table.ts). Breite Tabellen werden kleiner gesetzt, damit sie in die Zeile
-// passen. Die Trennzeile ist nur noch die Linie unter der Kopfzeile; der
-// Cursor landet nie darin (table.ts).
+// Spalten werden beim Tippen sichtbar ausgerichtet, ohne dass sich der Text
+// ändert: Füll-Leerzeichen sind ausgeblendet, an ihrer Stelle stehen Lücken
+// (Widgets) mit berechneter Breite. Das Ausrichten im Text macht Tab/Enter
+// (table.ts). Breite Tabellen werden kleiner gesetzt, damit sie passen.
+//
+// Breiten: Zelltext wird per Canvas in der Editorschrift vermessen (in em,
+// zwischengespeichert pro Text), ohne Layout im Dokument. Zellen mit
+// Auszeichnung (fett, Code, Links …) sehen im Editor anders aus als ihr
+// Rohtext; sie werden nach dem Zeichnen einmal im DOM nachgemessen.
 //
 // Leiste: über der Tabelle, solange der Cursor darin steht (Handy: unten
 // über der Tastatur statt der normalen Leiste).
 
 import { EditorView, ViewPlugin, Decoration, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
-import type { Extension, Range } from '@codemirror/state';
+import { StateEffect, type Extension, type Range } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import {
   findTable, cellAt, insertRow, deleteRow, insertCol, deleteCol, moveRow, moveCol, alignCol, current,
-  sortBy, sortState, emptyTable, edit, notePointer, type Align, type Table, type Cell,
+  sortBy, sortState, emptyTable, edit, notePointer, cellSlot, type Align, type Table, type Cell,
 } from './table';
+
+// ── Breiten ─────────────────────────────────────────────────────────────────
+
+/** Innenabstand links und rechts einer Zelle, Mindestbreite des Inhalts (em). */
+const PAD = 0.55;
+const MIN = 1.2;
+
+const em = (n: number) => `${Math.max(0, Math.round(n * 1000) / 1000)}em`;
+
+let ctx: CanvasRenderingContext2D | null = null;
+let family = '';
+const widthCache = new Map<string, number>();
+/** Im DOM nachgemessene Breiten (Zellen mit Auszeichnung), gleicher Schlüssel. */
+const measured = new Map<string, number>();
+
+/** Breite von text in em der Editorschrift (fett für die Kopfzeile). */
+function textWidth(text: string, bold: boolean): number {
+  const key = (bold ? 'b' : 'r') + text;
+  const hit = measured.get(key) ?? widthCache.get(key);
+  if (hit !== undefined) return hit;
+  ctx ??= document.createElement('canvas').getContext('2d');
+  if (!ctx) return text.length * 0.55;
+  ctx.font = `${bold ? 700 : 400} 100px ${family}`;
+  const w = ctx.measureText(text).width / 100;
+  // Erst zwischenspeichern, wenn die Schrift geladen ist (sonst Ersatzschrift).
+  if (document.fonts.check(`${bold ? 700 : 400} 16px ${family}`)) widthCache.set(key, w);
+  return w;
+}
+
+/** Neu aufbauen (Schrift geladen, Zellen nachgemessen). */
+const remeasure = StateEffect.define<null>();
 
 // ── Raster ──────────────────────────────────────────────────────────────────
 
-/** Sichtbare Lücke von n Zeichen. */
+/** Sichtbare Lücke (Breite in em). */
 class Gap extends WidgetType {
-  constructor(readonly n: number) { super(); }
-  eq(o: Gap) { return o.n === this.n; }
+  constructor(readonly w: string) { super(); }
+  eq(o: Gap) { return o.w === this.w; }
   toDOM() {
     const el = document.createElement('span');
     el.className = 'cm-tbl-gap';
-    el.style.width = `${this.n}ch`;
+    el.style.width = this.w;
     return el;
   }
 }
 
 /** Fehlende Zellen am Zeilenende: Lücken mit angedeuteten Trennstrichen. */
 class Missing extends WidgetType {
-  constructor(readonly close: boolean, readonly widths: number[]) { super(); }
+  constructor(readonly close: boolean, readonly widths: string[]) { super(); }
   eq(o: Missing) { return o.close === this.close && o.widths.join() === this.widths.join(); }
   toDOM() {
     const el = document.createElement('span');
@@ -45,7 +80,7 @@ class Missing extends WidgetType {
     for (const w of this.widths) {
       const g = document.createElement('span');
       g.className = 'cm-tbl-gap';
-      g.style.width = `${w}ch`;
+      g.style.width = w;
       el.append(g);
       pipe();
     }
@@ -55,30 +90,83 @@ class Missing extends WidgetType {
 
 interface Seg { from: number; to: number; cs: number; ce: number; w: number }
 
-const chars = (s: string) => [...s].length;
+/** Zelle, deren Aussehen vom Rohtext abweicht: nach dem Zeichnen nachmessen. */
+interface Check { cs: number; ce: number; key: string; w: number }
+
+const MARKUP = /[*_`~=[\]$<>^\\!]/;
 
 /**
  * folds: eingeklappte Link-Adressen ([Text]↗). Sie stehen im Text, sind aber
- * nur ein Zeichen breit zu sehen; die Breiten rechnen damit.
+ * nur als ↗ zu sehen; die Breiten rechnen damit.
  */
 export function tableGrid(folds: (view: EditorView) => DecorationSet | undefined): Extension {
   return ViewPlugin.fromClass(class {
     decorations: DecorationSet;
-    constructor(view: EditorView) { this.decorations = this.build(view); }
+    checks: Check[] = [];
+    constructor(readonly view: EditorView) {
+      family = getComputedStyle(view.contentDOM).fontFamily;
+      this.decorations = this.build(view);
+      this.check();
+      document.fonts.ready.then(() => {
+        widthCache.clear();
+        measured.clear();
+        if (view.dom.isConnected) view.dispatch({ effects: remeasure.of(null) });
+      });
+    }
     update(u: ViewUpdate) {
-      if (u.docChanged || u.selectionSet || u.viewportChanged || u.focusChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) {
+      if (u.docChanged || u.selectionSet || u.viewportChanged || u.focusChanged || syntaxTree(u.startState) !== syntaxTree(u.state)
+        || u.transactions.some(tr => tr.effects.some(e => e.is(remeasure)))) {
         this.decorations = this.build(u.view);
+        this.check();
       }
+    }
+    /** Zellen mit Auszeichnung so messen, wie sie im Editor erscheinen. */
+    check() {
+      if (!this.checks.length) return;
+      const checks = this.checks;
+      this.view.requestMeasure({
+        key: this,
+        read: view => {
+          let changed = false;
+          const sizes = new Map<Element, number>();
+          for (const c of checks) {
+            if (c.ce > view.state.doc.length || c.ce < view.viewport.from || c.cs > view.viewport.to) continue;
+            try {
+              const a = view.domAtPos(c.cs), b = view.domAtPos(c.ce);
+              const line = (a.node.nodeType === 1 ? a.node as Element : a.node.parentElement)?.closest('.cm-line');
+              if (!line) continue;
+              let px = sizes.get(line);
+              if (px === undefined) { px = parseFloat(getComputedStyle(line).fontSize); sizes.set(line, px); }
+              const r = document.createRange();
+              r.setStart(a.node, a.offset);
+              r.setEnd(b.node, b.offset);
+              const w = r.getBoundingClientRect().width / px;
+              if (w > 0 && Math.abs(w - c.w) > 0.02) { measured.set(c.key, w); changed = true; }
+            } catch { /* Stelle gerade nicht im DOM */ }
+          }
+          return changed;
+        },
+        write: (changed, view) => {
+          if (changed) queueMicrotask(() => { if (view.dom.isConnected) view.dispatch({ effects: remeasure.of(null) }); });
+        },
+      });
     }
     build(view: EditorView): DecorationSet {
       const { state } = view;
       const out: Range<Decoration>[] = [];
       const folded = folds(view);
       const seen = new Set<number>();
-      const visible = (a: number, b: number) => {
-        let n = chars(state.sliceDoc(a, b));
-        folded?.between(a, b, (x, y) => { if (x >= a && y <= b) n -= chars(state.sliceDoc(x, y)) - 1; });
-        return n;
+      this.checks = [];
+      /** Zellinhalt so, wie er zu sehen ist: eingeklappte Adressen als ↗. */
+      const shown = (a: number, b: number) => {
+        let text = '', at = a, fold = false;
+        folded?.between(a, b, (x, y) => {
+          if (x < a || y > b) return;
+          text += state.sliceDoc(at, x) + '↗';
+          at = y;
+          fold = true;
+        });
+        return { text: text + state.sliceDoc(at, b), fold };
       };
       for (const { from, to } of view.visibleRanges) {
         syntaxTree(state).iterate({
@@ -93,8 +181,7 @@ export function tableGrid(folds: (view: EditorView) => DecorationSet | undefined
               const line = state.doc.lineAt(c.from);
               if (c.name === 'TableDelimiter') {
                 if (c.from !== line.from || c.to - c.from < 3) continue; // ein | der Zeile, nicht die Trennzeile
-                const pipes = [...line.text.matchAll(/(?<!\\)\|/g)].map(m => line.from + m.index!);
-                lines.push({ from: line.from, to: line.to, pipes, delim: true });
+                lines.push({ from: line.from, to: line.to, pipes: [], delim: true });
               } else if (c.name === 'TableHeader' || c.name === 'TableRow') {
                 const pipes: number[] = [];
                 for (let d = c.node.firstChild; d; d = d.nextSibling) if (d.name === 'TableDelimiter') pipes.push(d.from);
@@ -102,61 +189,71 @@ export function tableGrid(folds: (view: EditorView) => DecorationSet | undefined
               }
             }
             // Nur Tabellen, deren Zeilen mit | beginnen (wie md sie anlegt).
-            if (lines.length < 2 || lines.some(l => l.pipes[0] !== l.from)) return false;
-            // Zellen: Inhalt ohne Füll-Leerzeichen (je eins bleibt stehen),
-            // den Rest blendet das Raster aus und richtet selbst aus.
-            const segs: { segs: Seg[]; open: boolean }[] = lines.map(l => {
+            if (lines.length < 2 || lines.some(l => !l.delim && l.pipes[0] !== l.from)) return false;
+            // Zellen: Inhalt ohne Füll-Leerzeichen; das Raster richtet selbst aus.
+            const segs: { segs: Seg[]; open: boolean }[] = lines.map((l, i) => {
               const s: Seg[] = [];
+              if (l.delim) return { segs: s, open: false };
+              const bold = i === 0;
               const add = (from: number, to: number) => {
                 const text = state.sliceDoc(from, to);
-                const lead = text.length - text.trimStart().length;
-                const trail = text.length - text.trimEnd().length;
                 const empty = !text.trim();
-                const cs = empty ? from + Math.min(1, text.length) : from + lead;
-                const ce = empty ? cs : to - trail;
-                // Immer ein Zeichen Luft links und rechts, auch wenn im Text keins steht.
-                const w = visible(cs, ce) + 2;
+                const cs = empty ? from + Math.min(1, text.length) : from + text.length - text.trimStart().length;
+                const ce = empty ? cs : to - (text.length - text.trimEnd().length);
+                let w = 0;
+                if (!empty) {
+                  const v = shown(cs, ce);
+                  const key = (bold ? 'b' : 'r') + v.text;
+                  w = textWidth(v.text, bold);
+                  if ((v.fold || MARKUP.test(v.text)) && !measured.has(key) && ce >= view.viewport.from && cs <= view.viewport.to) this.checks.push({ cs, ce, key, w });
+                }
                 s.push({ from, to, cs, ce, w });
               };
-              for (let i = 0; i + 1 < l.pipes.length; i++) add(l.pipes[i] + 1, l.pipes[i + 1]);
+              for (let k = 0; k + 1 < l.pipes.length; k++) add(l.pipes[k] + 1, l.pipes[k + 1]);
               const last = l.pipes[l.pipes.length - 1] + 1;
               const open = last < l.to && state.sliceDoc(last, l.to).trim() !== '';
               if (open) add(last, l.to);
               return { segs: s, open };
             });
-            const delimIdx = lines.findIndex(l => l.delim);
+            const delim = lines.find(l => l.delim);
             const cols = Math.max(...segs.map(s => s.segs.length));
-            // Die Trennzeile zählt nicht mit: Sie wird ganz vom Raster gezeichnet.
-            const widths = Array.from({ length: cols }, (_, j) => Math.max(3, ...segs.filter((_s, i) => i !== delimIdx).map(s => s.segs[j]?.w ?? 0)));
-            const total = 1 + widths.reduce((a, w) => a + w + 1, 0);
-            const aligns: Align[] = (segs[delimIdx]?.segs ?? []).map(s => {
-              const t = state.sliceDoc(s.from, s.to).trim();
-              const l = t.startsWith(':'), r = t.endsWith(':');
-              return l && r ? 'center' : r ? 'right' : '';
-            });
-            const style = `--tbl-ch: ${total}`;
-            /** Bereich ausblenden, an seiner Stelle eine Lücke von n Zeichen (oder nichts). */
-            const fill = (from: number, to: number, n: number, side: 1 | -1) => {
-              if (to > from) out.push(Decoration.replace(n > 0 ? { widget: new Gap(n) } : {}).range(from, to));
-              else if (n > 0) out.push(Decoration.widget({ widget: new Gap(n), side }).range(from));
+            const widths = Array.from({ length: cols }, (_, j) => Math.max(MIN, ...segs.map(s => s.segs[j]?.w ?? 0)));
+            const total = widths.reduce((a, w) => a + w + 2 * PAD, 0);
+            const aligns: Align[] = delim
+              ? state.sliceDoc(delim.from, delim.to).replace(/^\s*\|/, '').replace(/\|\s*$/, '').split(/(?<!\\)\|/).map(c => {
+                const t = c.trim();
+                const l = t.startsWith(':'), r = t.endsWith(':');
+                return l && r ? 'center' : r ? 'right' : '';
+              })
+              : [];
+            const style = `--tbl-n: ${Math.round(total * 1000) / 1000}; --tbl-p: ${cols + 1}`;
+            /** Bereich ausblenden, an seiner Stelle eine Lücke (oder nichts). */
+            const fill = (from: number, to: number, w: number, side: 1 | -1) => {
+              if (to > from) out.push(Decoration.replace(w > 0 ? { widget: new Gap(em(w)) } : {}).range(from, to));
+              else if (w > 0) out.push(Decoration.widget({ widget: new Gap(em(w)), side }).range(from));
             };
+            // Breiten aus allen Zeilen, Dekorationen nur für die gezeichneten.
+            const { from: vFrom, to: vTo } = view.viewport;
             lines.forEach((l, i) => {
+              if (l.to < vFrom || l.from > vTo) return;
               const kind = l.delim ? 'cm-tbl-delim' : i === 0 ? 'cm-tbl-head' : 'cm-tbl-row';
               out.push(Decoration.line({ class: `cm-tbl ${kind}`, attributes: { style } }).range(l.from));
+              if (l.delim) {
+                if (l.to > l.from) out.push(Decoration.replace({}).range(l.from, l.to));
+                return;
+              }
               for (const p of l.pipes) out.push(Decoration.mark({ class: 'cm-tbl-pipe' }).range(p, p + 1));
               const { segs: s, open } = segs[i];
               s.forEach((seg, j) => {
-                if (l.delim) { fill(seg.from, seg.to, widths[j], 1); return; }
                 const gap = Math.max(0, widths[j] - seg.w);
                 const a = aligns[j] ?? '';
-                const leadGap = a === 'right' ? gap : a === 'center' ? Math.floor(gap / 2) : 0;
-                const lead = Math.min(seg.from + 1, seg.cs);
-                fill(lead, seg.cs, leadGap + (seg.cs > seg.from ? 0 : 1), 1);
-                const trail = Math.min(seg.ce + 1, seg.to);
-                fill(trail, seg.to, gap - leadGap + (seg.to > seg.ce ? 0 : 1), -1);
+                const lead = PAD + (a === 'right' ? gap : a === 'center' ? gap / 2 : 0);
+                // Lücke vor dem Inhalt, Cursor am Inhaltsanfang dahinter; danach umgekehrt.
+                fill(seg.from, seg.cs, lead, -1);
+                fill(seg.ce, seg.to, widths[j] + 2 * PAD - seg.w - lead, 1);
               });
               if (open || s.length < cols) {
-                out.push(Decoration.widget({ widget: new Missing(open, widths.slice(s.length)), side: 1 }).range(l.to));
+                out.push(Decoration.widget({ widget: new Missing(open, widths.slice(s.length).map(w => em(w + 2 * PAD))), side: 1 }).range(l.to));
               }
             });
             return false;
@@ -181,7 +278,25 @@ export const tablePointer = EditorView.domEventHandlers({
       .map(r => (r.left + r.right) / 2);
     if (xs.length < 2) return false;
     const col = Math.max(0, xs.filter(x => x < e.clientX).length - 1);
-    notePointer(line.number, col, e.pointerType === 'touch');
+    // Ziel im Inhalt: links davon an den Anfang, rechts davon ans Ende, sonst die Stelle.
+    const slot = cellSlot(view.state, line.number, col);
+    if (!slot) return false;
+    let target = slot.cs;
+    if (slot.ce > slot.cs) {
+      try {
+        const a = view.domAtPos(slot.cs), b = view.domAtPos(slot.ce);
+        const r = document.createRange();
+        r.setStart(a.node, a.offset);
+        r.setEnd(b.node, b.offset);
+        const box = r.getBoundingClientRect();
+        if (e.clientX >= box.right) target = slot.ce;
+        else if (e.clientX > box.left) {
+          const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+          target = pos === null ? slot.ce : Math.max(slot.cs, Math.min(slot.ce, pos));
+        }
+      } catch { target = slot.ce; }
+    }
+    notePointer(line.number, col, e.pointerType === 'touch', target);
     return false;
   },
 });
