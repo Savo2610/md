@@ -26,7 +26,7 @@ import {
 // ── Breiten ─────────────────────────────────────────────────────────────────
 
 /** Innenabstand links und rechts einer Zelle, Mindestbreite des Inhalts (em). */
-const PAD = 0.55;
+const PAD = 0.8;
 const MIN = 1.2;
 
 const em = (n: number) => `${Math.max(0, Math.round(n * 1000) / 1000)}em`;
