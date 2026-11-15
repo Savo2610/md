@@ -26,8 +26,9 @@ Durable Object pro Dokument, Bilder in R2.
   rechten Rand. Anlegen: `/tabelle` (Größe im Raster wählen), `/3x4`, Enter
   hinter `Name | Alter | Ort`, markierte Zeilen mit Tab/`;`/`,` → „Tabelle“
   in der Auswahl-Leiste, oder Zellen aus Excel/Numbers/Sheets einfügen.
-  Tab/Shift-Tab springen zwischen Zellen, Enter eine Zeile tiefer (leere
-  letzte Zeile: raus), ⌥↑/⌥↓ verschieben, ⌘↵/⌘⇧↵ fügen ein, ⌘⇧K oder ⌫ in
+  Tab/Shift-Tab springen zwischen Zellen, Pfeiltasten am Zellrand in die
+  Nachbarzelle, Enter in die erste Zelle der nächsten Zeile (leere letzte
+  Zeile: raus); ein Klick setzt den Cursor in den Zellinhalt (leer: links), ⌥↑/⌥↓ verschieben, ⌘↵/⌘⇧↵ fügen ein, ⌘⇧K oder ⌫ in
   leerer Zeile löschen. Leiste über der Tabelle (Handy: unten): Zeilen und
   Spalten einfügen, löschen, verschieben, ausrichten, sortieren. Reine
   Zahlenspalten werden rechtsbündig.

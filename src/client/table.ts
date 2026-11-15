@@ -2,8 +2,11 @@
 //
 //  - Tab / Shift-Tab springen zur nächsten bzw. vorigen Zelle; Tab in der
 //    letzten Zelle legt eine neue Zeile an.
-//  - Enter springt in dieselbe Spalte der nächsten Zeile (am Ende: neue
+//  - Enter springt in die erste Zelle der nächsten Zeile (am Ende: neue
 //    Zeile). Enter in einer leeren letzten Zeile verlässt die Tabelle.
+//  - Pfeiltasten wechseln am Rand einer Zelle in die Nachbarzelle, ↑/↓
+//    bleiben in der Spalte. Ein Klick setzt den Cursor in den Inhalt der
+//    Zelle (leer: links), nie in Füllung oder Trennzeile (tableCursor).
 //    Enter hinter „Name | Alter | Ort“ macht daraus die Kopfzeile.
 //  - ⌥↑/⌥↓ verschieben die Zeile, ⌘↵ / ⌘⇧↵ fügen darunter/darüber eine ein,
 //    ⌘⇧K oder ⌫ in einer leeren Zeile löschen sie.
@@ -17,7 +20,7 @@
 // Darstellung im Editor und die Tabellen-Leiste: table-ui.ts.
 
 import type { EditorView } from '@codemirror/view';
-import type { EditorState } from '@codemirror/state';
+import { EditorState, type Transaction, type TransactionSpec } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 
 export type Align = '' | 'left' | 'center' | 'right';
@@ -237,6 +240,7 @@ function move(view: EditorView, dir: Move): boolean {
       return true;
     }
     row++;
+    col = 0;
     if (row >= rows.length) rows.push(blank(t.cols));
   }
   commit(view, t, { rows, aligns, cell: { row, col } });
@@ -248,7 +252,7 @@ export const insertRow = (view: EditorView, above = false) => edit(view, (t, c) 
   const { rows, aligns } = copy(t);
   const at = above ? Math.max(1, c.row) : c.row + 1;
   rows.splice(at, 0, blank(t.cols));
-  return { rows, aligns, cell: { row: at, col: c.col } };
+  return { rows, aligns, cell: { row: at, col: 0 } };
 });
 
 export const deleteRow = (view: EditorView) => edit(view, (t, c) => {
@@ -353,6 +357,116 @@ function backspace(view: EditorView): boolean {
   commit(view, t, { rows, aligns, cell: { row: c.row - 1, col: t.cols - 1 } });
   return true;
 }
+
+// ── Cursor in Zellen ────────────────────────────────────────────────────────
+// Im Raster sind Füll-Leerzeichen ausgeblendet. Der Cursor gehört deshalb
+// immer in den Inhalt einer Zelle (leere Zelle: ganz links), nie in die
+// Füllung, an ein | oder in die Trennzeile.
+
+interface Slot { from: number; to: number; cs: number; ce: number }
+
+/** Zellen einer Tabellenzeile mit Inhaltsbereich (cs–ce). */
+function slots(text: string, from: number): Slot[] {
+  const pipes = [...text.matchAll(/(?<!\\)\|/g)].map(m => m.index!);
+  const out: Slot[] = [];
+  const add = (a: number, b: number) => {
+    const t = text.slice(a, b);
+    const lead = t.length - t.trimStart().length;
+    const empty = !t.trim();
+    const cs = from + a + (empty ? Math.min(1, t.length) : lead);
+    const ce = empty ? cs : from + b - (t.length - t.trimEnd().length);
+    out.push({ from: from + a, to: from + b, cs, ce });
+  };
+  for (let i = 0; i + 1 < pipes.length; i++) add(pipes[i] + 1, pipes[i + 1]);
+  const last = pipes.length ? pipes[pipes.length - 1] + 1 : 0;
+  if (text.slice(last).trim()) add(last, text.length);
+  return out;
+}
+
+/** Zeile im Dokument zu Tabellenzeile row (0 = Kopfzeile). */
+const lineOf = (t: Table, row: number) => row === 0 ? t.firstLine : t.firstLine + row + 1;
+
+function slotsOf(state: EditorState, t: Table, row: number): Slot[] {
+  const line = state.doc.line(lineOf(t, row));
+  return slots(line.text, line.from);
+}
+
+/** Zelle (Index) an einer Position der Zeile. */
+function slotAt(s: Slot[], pos: number): number {
+  for (let i = 0; i < s.length; i++) if (pos <= s[i].to) return i;
+  return s.length - 1;
+}
+
+const clampTo = (s: Slot, pos: number) => Math.max(s.cs, Math.min(s.ce, pos));
+
+type Dir = 'left' | 'right' | 'up' | 'down';
+
+/** Pfeiltasten: am Rand einer Zelle in die Nachbarzelle, hoch/runter in derselben Spalte. */
+function arrow(view: EditorView, dir: Dir): boolean {
+  const { state } = view;
+  const sel = state.selection.main;
+  if (!sel.empty || state.selection.ranges.length > 1) return false;
+  const t = findTable(state, sel.head);
+  if (!t) return false;
+  const line = state.doc.lineAt(sel.head);
+  const idx = line.number - t.firstLine;
+  if (idx === 1) return false; // Trennzeile: regelt der Filter unten
+  const row = idx === 0 ? 0 : idx - 1;
+  const here = slots(line.text, line.from);
+  if (!here.length) return false;
+  const k = slotAt(here, sel.head);
+  const cur = here[k];
+  let to: number | null = null;
+  if (dir === 'left') {
+    if (sel.head > cur.cs) return false;
+    if (k > 0) to = here[k - 1].ce;
+    else if (row > 0) { const s = slotsOf(state, t, row - 1); to = s[s.length - 1]?.ce ?? null; }
+  } else if (dir === 'right') {
+    if (sel.head < cur.ce) return false;
+    if (k < here.length - 1) to = here[k + 1].cs;
+    else if (row < t.rows.length - 1) to = slotsOf(state, t, row + 1)[0]?.cs ?? null;
+  } else {
+    const next = row + (dir === 'up' ? -1 : 1);
+    if (next < 0 || next >= t.rows.length) return false; // raus aus der Tabelle wie gewohnt
+    const s = slotsOf(state, t, next);
+    const target = s[Math.min(k, s.length - 1)];
+    if (target) to = Math.min(target.ce, target.cs + Math.max(0, sel.head - cur.cs));
+  }
+  if (to === null) return false;
+  view.dispatch({ selection: { anchor: to }, scrollIntoView: true, userEvent: 'select' });
+  return true;
+}
+
+/**
+ * Klicks und Cursorbewegungen in einer Tabelle: Landet der Cursor in der
+ * Füllung, an einem | oder in der Trennzeile, rückt er in den Inhalt der
+ * Zelle (leere Zelle: links). Tippen bleibt unberührt.
+ */
+export const tableCursor = EditorState.transactionFilter.of((tr: Transaction): Transaction | readonly (Transaction | TransactionSpec)[] => {
+  if (tr.docChanged || !tr.selection || !tr.isUserEvent('select')) return tr;
+  const sel = tr.selection;
+  if (sel.ranges.length > 1 || !sel.main.empty) return tr;
+  const state = tr.state;
+  const head = sel.main.head;
+  const t = findTable(state, head);
+  if (!t) return tr;
+  let line = state.doc.lineAt(head);
+  let k: number | null = null;
+  if (line.number - t.firstLine === 1) {
+    // Trennzeile: von unten kommend in die Kopfzeile, sonst in die erste Zeile darunter.
+    k = slotAt(slots(line.text, line.from), head);
+    const old = tr.startState.selection.main.head;
+    const row = old > line.to || t.rows.length < 2 ? 0 : 1;
+    line = state.doc.line(lineOf(t, row));
+  }
+  const s = slots(line.text, line.from);
+  if (!s.length) return tr;
+  const i = k ?? slotAt(s, head);
+  const slot = s[Math.min(i, s.length - 1)];
+  const to = k !== null ? slot.cs : clampTo(slot, head);
+  if (to === head) return tr;
+  return [tr, { selection: { anchor: to }, sequential: true }];
+});
 
 // ── Neue Tabellen aus Text ──────────────────────────────────────────────────
 
@@ -459,6 +573,10 @@ export const tableKeys = [
   { key: 'Shift-Mod-Enter', run: (v: EditorView) => insertRow(v, true) },
   { key: 'Shift-Mod-k', run: deleteRow },
   { key: 'Backspace', run: backspace },
+  { key: 'ArrowLeft', run: (v: EditorView) => arrow(v, 'left') },
+  { key: 'ArrowRight', run: (v: EditorView) => arrow(v, 'right') },
+  { key: 'ArrowUp', run: (v: EditorView) => arrow(v, 'up') },
+  { key: 'ArrowDown', run: (v: EditorView) => arrow(v, 'down') },
 ];
 
 /**

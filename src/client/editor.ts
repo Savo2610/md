@@ -19,7 +19,7 @@ import { uploadImage } from './images';
 import { highlight, formatKeys, wrap, link, linePrefix, cycleHeading, continueListsOnInput, tagHighlight, tagCompletion } from './cmkit';
 import { render } from '../shared/render';
 import { enhance } from './enhance';
-import { tableKeys, tableFromClipboard, convertible, convertSelection } from './table';
+import { tableKeys, tableCursor, tableFromClipboard, convertible, convertSelection } from './table';
 import { tableGrid, tableBar, pickTableSize, insertTable } from './table-ui';
 import { isTextFile, fileToMarkdown, looksRich } from './importer';
 
@@ -806,6 +806,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         linkFolding,
         tableGrid(v => v.plugin(linkFolding)?.decorations),
         tableBar(),
+        tableCursor,
         yCollab(ytext, awareness, { undoManager }),
         selectionToolbar(),
         EditorView.domEventHandlers({

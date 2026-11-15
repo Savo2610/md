@@ -5,7 +5,8 @@
 // Spalten werden beim Tippen sichtbar ausgerichtet (Lücken als Widgets), ohne
 // dass sich der Text ändert; das Ausrichten im Text macht Tab/Enter
 // (table.ts). Breite Tabellen werden kleiner gesetzt, damit sie in die Zeile
-// passen. Steht der Cursor in der Trennzeile, erscheint sie als Text.
+// passen. Die Trennzeile ist nur noch die Linie unter der Kopfzeile; der
+// Cursor landet nie darin (table.ts).
 //
 // Leiste: über der Tabelle, solange der Cursor darin steht (Handy: unten
 // über der Tastatur statt der normalen Leiste).
@@ -72,7 +73,6 @@ export function tableGrid(folds: (view: EditorView) => DecorationSet | undefined
     build(view: EditorView): DecorationSet {
       const { state } = view;
       const out: Range<Decoration>[] = [];
-      const head = state.selection.main.head;
       const folded = folds(view);
       const seen = new Set<number>();
       const visible = (a: number, b: number) => {
@@ -140,12 +140,10 @@ export function tableGrid(folds: (view: EditorView) => DecorationSet | undefined
               else if (n > 0) out.push(Decoration.widget({ widget: new Gap(n), side }).range(from));
             };
             lines.forEach((l, i) => {
-              const onLine = view.hasFocus && head >= l.from && head <= l.to;
-              const kind = l.delim ? `cm-tbl-delim${onLine ? ' cm-tbl-raw' : ''}` : i === 0 ? 'cm-tbl-head' : 'cm-tbl-row';
+              const kind = l.delim ? 'cm-tbl-delim' : i === 0 ? 'cm-tbl-head' : 'cm-tbl-row';
               out.push(Decoration.line({ class: `cm-tbl ${kind}`, attributes: { style } }).range(l.from));
               for (const p of l.pipes) out.push(Decoration.mark({ class: 'cm-tbl-pipe' }).range(p, p + 1));
               const { segs: s, open } = segs[i];
-              if (l.delim && onLine) return; // Trennzeile zum Bearbeiten: so, wie sie im Text steht
               s.forEach((seg, j) => {
                 if (l.delim) { fill(seg.from, seg.to, widths[j], 1); return; }
                 const gap = Math.max(0, widths[j] - seg.w);
@@ -406,19 +404,21 @@ export function tableBar(): Extension {
         return this.show(true);
       }
       // Über der Tabelle; ist ihr Anfang weggescrollt, oben am Rand, solange sie zu sehen ist.
+      // Oberkante der ersten Zeile (nicht der Schrift), damit der Rahmen frei bleibt.
       const start = view.coordsAtPos(t.from);
-      const end = view.coordsAtPos(t.to);
+      const tableTop = view.lineBlockAt(t.from).top + view.documentTop;
+      const tableBottom = view.lineBlockAt(t.to).bottom + view.documentTop;
       const box = view.scrollDOM.getBoundingClientRect();
-      if (!start || !end) return this.show(false);
+      if (!start) return this.show(false);
       const rect = this.el.getBoundingClientRect();
       const minTop = Math.max(box.top, 56) + 4;
-      let top = start.top - rect.height - 6;
-      if (top < minTop) top = minTop;
-      if (top + rect.height > end.bottom - 4 && start.top - rect.height - 6 < minTop) {
-        // Tabelle fast ganz weggescrollt: Leiste würde nur noch stören.
-        if (end.bottom < minTop + rect.height + 20) return this.show(false);
+      let top = tableTop - rect.height - 10;
+      if (top < minTop) {
+        // Tabelle oben weggescrollt: Leiste am oberen Rand, solange noch genug von ihr zu sehen ist.
+        if (tableBottom < minTop + rect.height + 24) return this.show(false);
+        top = minTop;
       }
-      const left = Math.max(box.left + 8, Math.min(box.right - rect.width - 8, start.left));
+      const left = Math.max(box.left + 8, Math.min(box.right - rect.width - 8, start.left - 4));
       this.el.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
       this.show(true);
     }

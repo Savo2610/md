@@ -243,8 +243,10 @@ body[data-mode="split"] { --measure: 34rem; }
   font-size: max(11px, min(.8em, max(calc(var(--tbl-t) / var(--tbl-n)), min(.68em, calc(var(--tbl-a) / var(--tbl-n))))));
   width: clamp(100%, calc(var(--tbl-w) + 1ch), var(--tbl-a));
 }
-.cm-tbl-head { font-weight: 700; }
-.cm-tbl-row { background: linear-gradient(var(--line), var(--line)) left bottom / var(--tbl-w) 1px no-repeat; }
+/* Waagrechte Linien laufen von Mitte bis Mitte der äußeren | (je ½ Zeichen eingerückt). */
+.cm-tbl-head, .cm-tbl-row, .cm-tbl-delim { --tbl-line: .5ch var(--tbl-y) / calc(var(--tbl-w) - 1ch) 1px no-repeat; }
+.cm-tbl-head { font-weight: 700; --tbl-y: top; background: linear-gradient(var(--line), var(--line)) var(--tbl-line); }
+.cm-tbl-row { --tbl-y: bottom; background: linear-gradient(var(--line), var(--line)) var(--tbl-line); }
 .cm-tbl-pipe {
   display: inline-block; width: 1ch; height: 1.7em; vertical-align: top; color: transparent;
   background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat;
@@ -253,14 +255,14 @@ body[data-mode="split"] { --measure: 34rem; }
 .cm-tbl-gap { display: inline-block; }
 .cm-tbl-missing .cm-tbl-pipe { opacity: .5; }
 .cm-tbl .cm-linkfold { display: inline-block; width: 1ch; padding: 0; font-size: 1em; text-align: center; }
-/* Trennzeile: als Linie unter der Kopfzeile; Doppelpunkte zeigen die Ausrichtung. */
-.cm-tbl-delim:not(.cm-tbl-raw) {
-  color: transparent; line-height: .7;
-  background: linear-gradient(var(--fg-soft), var(--fg-soft)) left center / var(--tbl-w) 1px no-repeat;
+/* Trennzeile: schmale Linie unter der Kopfzeile, die senkrechten Linien laufen durch. */
+.cm-line.cm-tbl-delim {
+  color: transparent; line-height: 1; --tbl-y: center;
+  background: linear-gradient(var(--fg-soft), var(--fg-soft)) var(--tbl-line);
 }
-.cm-tbl-delim:not(.cm-tbl-raw) * { color: transparent !important; }
-.cm-tbl-delim:not(.cm-tbl-raw) .cm-tbl-pipe { height: .7em; background: none; }
-.cm-tbl-raw { color: var(--markup); }
+.cm-tbl-delim * { color: transparent !important; }
+.cm-tbl-delim .cm-tbl-pipe { height: 1em; }
+.cm-tbl-delim .cm-widgetBuffer { vertical-align: top; }
 
 /* Tabellen-Leiste */
 .tablebar {
