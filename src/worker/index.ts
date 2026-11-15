@@ -22,6 +22,7 @@
 //   POST   /api/docs/<id>/rename     neue Adresse (X-Edit-Key); die alte leitet weiter
 //   GET    /api/docs/<id>/title?url= Titel bzw. Bild für eingefügte Links (X-Edit-Key)
 //   GET    /api/docs/<id>/ws         WebSocket fürs gemeinsame Bearbeiten
+//   GET    /api/fx                   Wechselkurse fürs Rechnen im Text (EZB, pro 1 EUR)
 //   POST   /api/unlock               2FA-Code → Bearbeitungsschlüssel für ein Dokument,
 //                                    oder (ohne Dokument) Admin-Token für /admin
 //   GET    /api/admin/docs           Übersicht (Admin)
@@ -56,6 +57,7 @@ import { render, escapeHtml } from '../shared/render';
 import { toFunk } from '../shared/funk';
 import { titleOf } from '../shared/title';
 import { tagsOf } from '../shared/tags';
+import { fxRates, ratesFor } from './fx';
 import { randomId, randomToken, signToken, verifyTotp, verifyToken, timingSafeEqual } from './crypto';
 import { MAX_CHARS } from './doc';
 import { accountStub, docStub, registry, type Env } from './env';
@@ -281,6 +283,7 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
     // Für alle weg. Der Ersteller holt sich den Inhalt im Browser mit seinem Schlüssel.
     return page(req, 'Gelöscht', '<main id="app"></main>', { ...common, exists: true, trashed: info.trashed, ownerKey }, 410);
   }
+  await ratesFor([info.markdown]);
   const { html } = render(info.markdown);
   const title = info.title || id;
   return page(req, title, `<main id="app"><article class="doc" id="view">${html}</article></main>`, { ...common, exists: true, editKey, ownerKey });
@@ -293,6 +296,7 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
  * stehen und die Verknüpfung fällt weg.
  */
 async function linkedMemos(env: Env, acc: ReturnType<typeof accountStub>, list: Memo[]): Promise<MemoOut[]> {
+  await ratesFor(list.map(m => m.text));
   return Promise.all(list.map(async m => {
     if (!m.doc) return memoOut(m);
     let doc = m.doc;
@@ -346,6 +350,11 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
   const method = req.method;
 
   if (parts[0] === 'unlock' && method === 'POST') return unlock(req, env);
+  if (parts[0] === 'fx' && method === 'GET') {
+    const rates = await fxRates();
+    if (!rates) return fail(503, 'Keine Kurse.');
+    return new Response(JSON.stringify({ rates }), { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' } });
+  }
   if (parts[0] === 'me') return me(req, env, parts.slice(1), url, ctx);
 
   if (parts[0] === 'admin' && parts[1] === 'docs' && method === 'GET') {

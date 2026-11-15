@@ -27,6 +27,7 @@ import anchor from 'markdown-it-anchor';
 import frontMatter from 'markdown-it-front-matter';
 import { titleOf, slugify } from './title';
 import { tagRe } from './tags';
+import { calc, calcNeedsRates, type CalcHit } from './calc';
 
 export { titleOf, slugify };
 
@@ -265,6 +266,51 @@ function hashtags(md: MarkdownIt) {
   md.renderer.rules.hashtag = (tokens, i) => `<span class="doc-tag" data-tag="${escapeHtml(tokens[i].content)}">#${escapeHtml(tokens[i].content)}</span>`;
 }
 
+// ── Rechnen: Zeilen auf = bekommen ihr Ergebnis (shared/calc.ts) ───────────
+// Gerechnet wird auf dem Quelltext; hier wird das Ergebnis nur hinter das =
+// der passenden Zeile bzw. Tabellenzelle gehängt.
+
+let needsRates = false;
+
+function calcResults(md: MarkdownIt) {
+  md.core.ruler.push('calc', (state: StateCore) => {
+    if (!state.src.includes('=')) return;
+    const hits = calc(state.src);
+    needsRates = calcNeedsRates();
+    if (!hits.length) return;
+    const byLine = new Map<number, CalcHit[]>();
+    for (const h of hits) byLine.set(h.line, [...(byLine.get(h.line) || []), h]);
+    const result = (h: CalcHit) => { const t = new state.Token('calc_result', '', 0); t.content = h.text; return t; };
+    const endsEq = (t: Token | undefined) => !!t && t.type === 'text' && t.content.trimEnd().endsWith('=');
+    let row = -1, cell = -1;
+    for (const block of state.tokens) {
+      if (block.type === 'tr_open') { row = block.map ? block.map[0] : -1; cell = -1; continue; }
+      if (block.type === 'td_open' || block.type === 'th_open') { cell++; continue; }
+      if (block.type !== 'inline' || !block.children) continue;
+      const kids = block.children;
+      if (!block.map) {
+        // Tabellenzelle
+        const h = byLine.get(row)?.find(x => x.cell === cell);
+        if (h && endsEq(kids[kids.length - 1])) kids.push(result(h));
+        continue;
+      }
+      let line = block.map[0];
+      const out: Token[] = [];
+      const flush = () => {
+        const h = byLine.get(line)?.find(x => x.cell === undefined);
+        if (h && endsEq(out[out.length - 1])) out.push(result(h));
+      };
+      for (const t of kids) {
+        if (t.type === 'softbreak' || t.type === 'hardbreak') { flush(); line++; }
+        out.push(t);
+      }
+      flush();
+      block.children = out;
+    }
+  });
+  md.renderer.rules.calc_result = (tokens, i) => ` <span class="calc-result">${escapeHtml(tokens[i].content)}</span>`;
+}
+
 // ── Zusammenbauen ───────────────────────────────────────────────────────────
 
 let instance: MarkdownIt | null = null;
@@ -275,7 +321,7 @@ function renderer(): MarkdownIt {
   const md = new MarkdownItCtor({ html: false, linkify: true, breaks: true, typographer: false });
   md.use(frontMatter, (fm: string) => { currentFrontMatter = fm; });
   md.use(footnote).use(mark).use(sub).use(sup).use(ins).use(abbr).use(deflist).use(emoji);
-  md.use(math).use(embeds).use(boxes).use(tasks).use(fences).use(hashtags);
+  md.use(math).use(embeds).use(boxes).use(tasks).use(fences).use(hashtags).use(calcResults);
   md.use(anchor, {
     slugify,
     permalink: anchor.permalink.linkInsideHeader({ symbol: '#', placement: 'before', class: 'anchor', ariaHidden: true }),
@@ -296,10 +342,13 @@ function renderer(): MarkdownIt {
 export interface Rendered {
   html: string;
   title: string;
+  /** Enthält Währungsumrechnungen, für die noch Kurse fehlen (siehe calc.setRates). */
+  needsRates?: boolean;
 }
 
 export function render(src: string, opts: { lines?: boolean } = {}): Rendered {
   currentFrontMatter = '';
+  needsRates = false;
   const html = renderer().render(src, { lines: !!opts.lines });
-  return { html, title: titleOf(src, currentFrontMatter) };
+  return { html, title: titleOf(src, currentFrontMatter), needsRates };
 }

@@ -2,9 +2,11 @@
 // Markdown-Hervorhebung wie bei iA Writer (Zeichen blass, Text normal) und
 // die Tastenkürzel zum Formatieren.
 
-import { EditorView, keymap, MatchDecorator, Decoration, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import { EditorView, keymap, MatchDecorator, Decoration, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import type { CompletionContext } from '@codemirror/autocomplete';
-import { EditorSelection } from '@codemirror/state';
+import { EditorSelection, StateEffect, RangeSetBuilder } from '@codemirror/state';
+import { calc, calcNeedsRates } from '../shared/calc';
+import { loadRates } from './rates';
 import { insertNewlineContinueMarkup } from '@codemirror/lang-markdown';
 import { HighlightStyle } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
@@ -144,6 +146,42 @@ export function tagCompletion(tags: () => string[]) {
     return { from: m.from, options, validFor: /^#[\p{L}\p{N}_-]*$/u };
   };
 }
+
+// ── Rechnen: Ergebnis hinter dem = (shared/calc.ts) ────────────────────────
+
+class CalcResult extends WidgetType {
+  constructor(readonly text: string) { super(); }
+  eq(o: CalcResult) { return o.text === this.text; }
+  toDOM() {
+    const s = document.createElement('span');
+    s.className = 'cm-calc';
+    s.textContent = this.text;
+    return s;
+  }
+}
+
+const recalc = StateEffect.define<null>();
+
+/** Zeilen auf = zeigen ihr Ergebnis, ohne dass es im Text steht. */
+export const calcResults = ViewPlugin.fromClass(class {
+  decorations: DecorationSet;
+  constructor(view: EditorView) { this.decorations = this.build(view); }
+  update(u: ViewUpdate) {
+    if (u.docChanged || u.transactions.some(tr => tr.effects.some(e => e.is(recalc)))) this.decorations = this.build(u.view);
+  }
+  build(view: EditorView): DecorationSet {
+    const doc = view.state.doc;
+    const hits = calc(doc.toString());
+    if (calcNeedsRates()) loadRates().then(got => { if (got) view.dispatch({ effects: recalc.of(null) }); });
+    const b = new RangeSetBuilder<Decoration>();
+    for (const h of hits.sort((x, y) => x.line - y.line || x.at - y.at)) {
+      if (h.line + 1 > doc.lines) continue;
+      const line = doc.line(h.line + 1);
+      b.add(line.from + h.at, line.from + h.at, Decoration.widget({ widget: new CalcResult(h.text), side: 1 }));
+    }
+    return b.finish();
+  }
+}, { decorations: v => v.decorations });
 
 export function cycleHeading(view: EditorView): boolean {
   const line = view.state.doc.lineAt(view.state.selection.main.head);

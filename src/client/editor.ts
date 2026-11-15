@@ -16,7 +16,7 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { Provider, type Status } from './provider';
 import { uploadImage } from './images';
-import { highlight, formatKeys, wrap, link, linePrefix, cycleHeading, continueListsOnInput, tagHighlight, tagCompletion } from './cmkit';
+import { highlight, formatKeys, wrap, link, linePrefix, cycleHeading, continueListsOnInput, tagHighlight, tagCompletion, calcResults } from './cmkit';
 import { render } from '../shared/render';
 import { enhance } from './enhance';
 import { tableKeys, tableFromClipboard } from './table';
@@ -775,6 +775,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         search({ top: false }),
         autocompletion({ override: [slashSource(slashItems(pickImage, o.commands)), tagCompletion(o.tags || (() => []))], icons: false, activateOnTyping: true }),
         tagHighlight,
+        calcResults,
         placeholder(o.exists ? '' : 'Einfach losschreiben. Mit / am Zeilenanfang fügst du Tabellen, Boxen, Bilder und mehr ein.'),
         spellComp.of(spellAttrs(o.spellcheck)),
         spellExclusions,

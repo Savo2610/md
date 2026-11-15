@@ -32,6 +32,17 @@ Durable Object pro Dokument, Bilder in R2.
   aus der Liste. Auf `/home` vergibt „#“ je Zeile weiter eigene Tags, auch für
   fremde Dokumente. Gleiche Regel in den Memos, dort sichtbar und anklickbar
   (`src/shared/tags.ts`).
+- Rechnen im Text (`src/shared/calc.ts`, wie Apple Math Notes): Eine Zeile,
+  die auf `=` endet, zeigt das Ergebnis farbig dahinter, im Editor, in der
+  Ansicht und in den Memos. Im Text steht es nie. Variablen (`Miete = 1.250 €`),
+  Prozent (`240 + 19 % =`, `19 % von 240 =`), Einheiten (`90 €/h * 7,5 h =`,
+  `3 km in mi =`), Uhrzeiten und Daten (`14:30 + 2 h 45 min =`, `bis 24.12. =`),
+  Währungen mit EZB-Kursen (`50 € in CHF =`, Route `/api/fx`). `Summe =`,
+  `Durchschnitt =`, `Anzahl =`, `Min =`, `Max =` fassen die Zeilen darüber
+  zusammen (letzte Zahl je Zeile, bis zur Leerzeile; eine Zwischensumme
+  darüber läuft mit). In Tabellen rechnet eine Zelle `=` die Spalte darüber,
+  die Art steht in der Zeile (`| Schnitt | = |`). Zahlen deutsch oder
+  schweizerisch (`1.250,50`, `1'250.50`); Codeblöcke und Formeln bleiben außen vor.
 - Klick auf „md“: neues Dokument und die zuletzt geöffneten (nur im Browser
   gespeichert, nichts auf dem Server).
 - Mehrere Leute können gleichzeitig schreiben (Yjs über WebSockets).

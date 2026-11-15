@@ -9,7 +9,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting, indentUnit } from '@codemirror/language';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
-import { highlight, formatKeys, linePrefix, continueListsOnInput, tagHighlight, tagCompletion } from './cmkit';
+import { highlight, formatKeys, linePrefix, continueListsOnInput, tagHighlight, tagCompletion, calcResults } from './cmkit';
 import { prepareImage } from './images';
 import { el, toast } from './ui';
 
@@ -125,6 +125,7 @@ export function memoEditor(parent: HTMLElement, o: MemoEditorOptions): MemoEdito
         continueListsOnInput,
         syntaxHighlighting(highlight),
         tagHighlight,
+        calcResults,
         autocompletion({ override: [tagCompletion(o.tags)], icons: false }),
         placeholder(o.placeholder || ''),
         EditorView.contentAttributes.of({ autocapitalize: 'sentences', 'aria-label': 'Memo' }),
