@@ -180,9 +180,10 @@ function toc(md: MarkdownIt) {
         heads.push({ level: Number(t.tag[1]), id: String(t.attrGet('id') || ''), html: escapeHtml(text) });
       }
     }
+    // Nur das erste [toc]: sonst wüchse die Seite mit (Anzahl [toc] × Überschriften).
     for (let i = 1; i < tokens.length - 1; i++) {
       if (tokens[i].type === 'inline' && /^\[toc\]$/i.test(tokens[i].content.trim()) && tokens[i - 1].type === 'paragraph_open') {
-        if (!heads.length) continue;
+        if (!heads.length) break;
         const min = Math.min(...heads.map(h => h.level));
         let html = '<nav class="toc">';
         for (const h of heads) {
@@ -192,6 +193,7 @@ function toc(md: MarkdownIt) {
         const tok = new state.Token('html_block', '', 0);
         tok.content = html;
         tokens.splice(i - 1, 3, tok);
+        break;
       }
     }
   });

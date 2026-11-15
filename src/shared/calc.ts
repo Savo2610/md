@@ -800,6 +800,7 @@ function table(lines: Line[], from: number, to: number, vars: Map<string, Q>, hi
   const grid: Cell[][] = rows.map(() => []);
   for (let r = 0; r < rows.length; r++) {
     const row = rows[r];
+    let rowAgg: Agg | undefined; // Art der Zusammenfassung für leere „=“-Zellen, einmal pro Zeile
     for (let c = 0; c < row.cells.length; c++) {
       const cell = row.cells[c];
       const text = maskCode(cell.text);
@@ -808,7 +809,7 @@ function table(lines: Line[], from: number, to: number, vars: Map<string, Q>, hi
       const at = cell.s + eq + 1;
       const body = text.slice(0, eq);
       let agg: Agg | null = body.trim() ? aggOf(body) : null;
-      if (!body.trim()) agg = row.cells.map(x => aggOf(x.text.trim())).find(Boolean) || 'sum';
+      if (!body.trim()) agg = rowAgg ??= row.cells.map(x => aggOf(x.text.trim())).find(Boolean) || 'sum';
       if (agg) {
         const items: (Q | null)[] = [];
         let count = 0;

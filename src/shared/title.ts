@@ -19,7 +19,8 @@ export function titleOf(src: string, fm?: string): string {
 }
 
 function clean(s: string): string {
-  return withoutTags(s)
+  // Gekürzt vor den Ersetzungen: [ ohne ] davor wäre bei langen Zeilen quadratisch.
+  return withoutTags(s.slice(0, 1000))
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[*_`~=#>]/g, '')
