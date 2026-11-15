@@ -20,10 +20,18 @@ Durable Object pro Dokument, Bilder in R2.
   (Cookie `md_theme`, der Server setzt `data-theme`), beim Öffnen Ansicht
   oder Bearbeiten (Standard: zuletzt benutzter Modus), Name beim
   gemeinsamen Schreiben, Rechtschreibprüfung.
-- Tabellen (`src/client/table.ts`): Tab/Shift-Tab springen zwischen Zellen,
-  Enter eine Zeile tiefer (leere letzte Zeile: raus aus der Tabelle), dabei
-  werden die Spalten ausgerichtet. Aus Excel, Numbers oder Sheets kopierte
-  Zellen werden beim Einfügen zur Markdown-Tabelle.
+- Tabellen (`src/client/table.ts`, Darstellung und Leiste in `table-ui.ts`):
+  Im Editor als Raster in der Textschrift; Spalten werden beim Tippen
+  sichtbar ausgerichtet (ohne den Text zu ändern, Breiten per Canvas
+  vermessen), breite Tabellen kleiner bzw. in den rechten Rand. Anlegen: `/tabelle` (Größe im Raster wählen), `/3x4`, Enter
+  hinter `Name | Alter | Ort`, markierte Zeilen mit Tab/`;`/`,` → „Tabelle“
+  in der Auswahl-Leiste, oder Zellen aus Excel/Numbers/Sheets einfügen.
+  Tab/Shift-Tab springen zwischen Zellen, Pfeiltasten am Zellrand in die
+  Nachbarzelle, Enter in die erste Zelle der nächsten Zeile (leere letzte
+  Zeile: raus); ein Klick setzt den Cursor in den Zellinhalt (leer: links), ⌥↑/⌥↓ verschieben, ⌘↵/⌘⇧↵ fügen ein, ⌘⇧K oder ⌫ in
+  leerer Zeile löschen. Leiste über der Tabelle (Handy: unten): Zeilen und
+  Spalten einfügen, löschen, verschieben, ausrichten, sortieren. Reine
+  Zahlenspalten werden rechtsbündig.
 - Tags: `#tag` im Text (ohne Leerzeichen; `# Titel` mit Leerzeichen bleibt
   Überschrift). Im Editor farbig mit Vorschlägen nach `#`. In der Ansicht
   ohne Konto ausgeblendet (Absätze nur aus Tags ganz), angemeldet dezent
