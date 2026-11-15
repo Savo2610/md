@@ -740,6 +740,41 @@ body.tags-visible .doc :is(h1, h2, h3, h4) .doc-tag { font-size: .55em; font-wei
 @keyframes rec { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .me-rec-dot { animation: none; } }
 
+/* Handy: Eingabe unten, mit dem Daumen erreichbar */
+@media (max-width: 600px) {
+  .memos { padding-top: calc(var(--bar) + env(safe-area-inset-top) + 12px); padding-bottom: calc(var(--dock, 120px) + 24px); }
+  .composer {
+    position: fixed; left: 0; right: 0; bottom: var(--kb, 0px); z-index: 15; margin: 0;
+    padding: 8px max(10px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    background: var(--bg); border-top: 1px solid var(--line);
+  }
+  body.kb-open .composer { padding-bottom: 8px; }
+  body.memo-editing .composer { display: none; }
+  .composer .me:focus-within { box-shadow: none; }
+  .composer .me-text { padding: 10px 14px 2px; max-height: 34dvh; overflow-y: auto; overscroll-behavior: contain; }
+  .composer .me-text .cm-editor { min-height: 1.6em; }
+  .me-tools { padding: 2px 6px 6px 6px; flex-wrap: wrap; row-gap: 2px; }
+  .me-tools .me-right { margin-left: auto; }
+  .me-tool { width: 44px; height: 44px; border-radius: 9px; }
+  .memo-edit .me-tool { width: 38px; }
+  .me-tool svg { width: 21px; height: 21px; }
+  .me-send { min-width: 44px; height: 40px; border-radius: 9px; padding: 0 12px; font-size: 15px; }
+  .me-send svg { width: 20px; height: 20px; }
+  .me-rec { padding: 6px 6px 6px 16px; }
+  body[data-mode="memos"] #toast, body[data-mode="memos"] .undo-toast { bottom: calc(var(--kb, 0px) + var(--dock, 0px) + 12px); }
+  body.memo-editing #toast, body.memo-editing .undo-toast { bottom: calc(var(--kb, 0px) + 16px + env(safe-area-inset-bottom)); }
+
+  dialog.pop.sheet {
+    inset: auto 0 0 0; width: 100%; max-width: 100%; min-width: 0;
+    border-radius: 10px 10px 0 0; border-bottom: 0;
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+    animation: sheet-in .18s ease-out;
+  }
+  dialog.pop.sheet::backdrop { background: rgba(0, 0, 0, .18); }
+  dialog.pop.sheet .menu > button { padding: 13px 12px; font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { dialog.pop.sheet { animation: none; } }
+
 /* Tags */
 .memos .tag-bar { margin: 0 0 6px; }
 

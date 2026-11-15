@@ -20,6 +20,8 @@ interface Boot { user?: User | null; login?: boolean; memos?: Memo[]; katexCss?:
 const OUTBOX = 'md:memos:outbox';
 const DRAFT = 'md:memos:draft';
 const UNDO_MS = 6000;
+/** Handy: Eingabe unten am Daumen, Menüs als Blatt von unten (wie die Dialoge). */
+const PHONE = matchMedia('(max-width: 600px)');
 const AUDIO = /^\/m\/[\w-]+\.(m4a|mp3|aac|webm|ogg|oga|opus|wav)$/;
 
 const ICON = {
@@ -122,6 +124,8 @@ export function start(boot: Boot) {
       return true;
     },
   });
+
+  dock(composer);
 
   const search = el('input', { type: 'search', class: 'memos-search', placeholder: 'Suchen …', 'aria-label': 'Memos durchsuchen', hidden: '' }) as HTMLInputElement;
   const searchBtn = el('button', { type: 'button', class: 't icon', title: 'Suchen', 'aria-label': 'Suchen' });
@@ -309,6 +313,8 @@ export function start(boot: Boot) {
     outbox.save([...outbox.list(), m]);
     if (filter && !tagsOf(text).includes(filter)) filter = '';
     render();
+    // Eingabe unten, neuestes Memo oben: dorthin, wo es erscheint.
+    if (PHONE.matches) scrollTo({ top: 0, behavior: 'smooth' });
     if (await post(m)) render();
     else toast('Offline: Das Memo wird gesendet, sobald wieder Verbindung besteht.');
   }
@@ -324,6 +330,7 @@ export function start(boot: Boot) {
     if (!node) return;
     editingId = m.id;
     node.classList.add('editing');
+    document.body.classList.add('memo-editing');
     const body = node.querySelector('.memo-text')!;
     const slot = el('div', { class: 'memo-edit' });
     body.replaceWith(slot);
@@ -353,6 +360,7 @@ export function start(boot: Boot) {
     inline?.destroy();
     inline = null;
     editingId = null;
+    document.body.classList.remove('memo-editing');
     render();
   }
 
@@ -445,6 +453,26 @@ export function start(boot: Boot) {
   flush();
   // Am Rechner gleich losschreiben; am Handy nicht die Tastatur aufreißen.
   if (!matchMedia('(pointer: coarse)').matches) editor.focus();
+}
+
+/**
+ * Handy: Die Eingabe steht unten fest. Ihre Höhe (--dock) hält unten Platz
+ * frei, --kb hebt sie über die Bildschirmtastatur (iOS verkleinert dafür
+ * nur den sichtbaren Ausschnitt, nicht die Seite).
+ */
+function dock(composer: HTMLElement) {
+  const root = document.documentElement.style;
+  new ResizeObserver(() => root.setProperty('--dock', `${composer.offsetHeight}px`)).observe(composer);
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const update = () => {
+    const kb = Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop));
+    root.setProperty('--kb', `${kb}px`);
+    document.body.classList.toggle('kb-open', kb > 80);
+  };
+  vv.addEventListener('resize', update);
+  vv.addEventListener('scroll', update);
+  update();
 }
 
 /** Rundes Profilbild oben rechts: wer angemeldet ist, Abmelden. */
@@ -559,6 +587,7 @@ function popover(anchor: HTMLElement, items: Item[], align: 'left' | 'right' = '
     if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) d.close();
   });
   document.body.append(d);
+  if (PHONE.matches) { d.classList.add('sheet'); d.showModal(); return; }
   d.showModal();
   const a = anchor.getBoundingClientRect();
   const w = d.offsetWidth, h = d.offsetHeight;
