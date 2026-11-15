@@ -12,8 +12,8 @@
 // Auszeichnung (fett, Code, Links …) sehen im Editor anders aus als ihr
 // Rohtext; sie werden nach dem Zeichnen einmal im DOM nachgemessen.
 //
-// Leiste: über der Tabelle, solange der Cursor darin steht (Handy: unten
-// über der Tastatur statt der normalen Leiste).
+// Leiste: in der Kopfleiste, solange der Cursor in einer Tabelle steht
+// (Handy: unten über der Tastatur statt der normalen Leiste).
 
 import { EditorView, ViewPlugin, Decoration, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { StateEffect, type Extension, type Range } from '@codemirror/state';
@@ -157,6 +157,8 @@ export function tableGrid(folds: (view: EditorView) => DecorationSet | undefined
       const out: Range<Decoration>[] = [];
       const folded = folds(view);
       const seen = new Set<number>();
+      const sel = state.selection.main;
+      const head = sel.empty ? sel.head : -1;
       this.checks = [];
       /** Zellinhalt so, wie er zu sehen ist: eingeklappte Adressen als ↗. */
       const shown = (a: number, b: number) => {
@@ -198,9 +200,12 @@ export function tableGrid(folds: (view: EditorView) => DecorationSet | undefined
               const bold = i === 0;
               const add = (from: number, to: number) => {
                 const text = state.sliceDoc(from, to);
-                const empty = !text.trim();
+                let empty = !text.trim();
                 const cs = empty ? from + Math.min(1, text.length) : from + text.length - text.trimStart().length;
-                const ce = empty ? cs : to - (text.length - text.trimEnd().length);
+                let ce = empty ? cs : to - (text.length - text.trimEnd().length);
+                // Gerade getippte Leerzeichen am Ende gehören zum Inhalt, sonst stünde
+                // der Cursor in ausgeblendeter Füllung und das nächste Zeichen am Zellenende.
+                if (head > ce && head <= to) { ce = head; empty = false; }
                 let w = 0;
                 if (!empty) {
                   const v = shown(cs, ce);
@@ -502,12 +507,14 @@ export function tableBar(): Extension {
           this.el.append(b);
         }
       }
-      document.body.append(this.el);
+      // Am Rechner in der Kopfleiste zwischen links und rechts, am Handy über der Tastatur.
+      const bar = this.mobile ? null : document.getElementById('bar');
+      if (bar) bar.insertBefore(this.el, bar.querySelector('.bar-right'));
+      else document.body.append(this.el);
       if (this.mobile) {
         window.visualViewport?.addEventListener('resize', this.schedule);
         window.visualViewport?.addEventListener('scroll', this.schedule);
       }
-      window.addEventListener('scroll', this.schedule, true);
     }
     update(u: ViewUpdate) {
       if (u.selectionSet || u.focusChanged || u.geometryChanged || u.docChanged || u.viewportChanged) this.schedule();
@@ -539,25 +546,7 @@ export function tableBar(): Extension {
       if (this.mobile) {
         const vv = window.visualViewport;
         if (vv) this.el.style.transform = `translateY(${-(window.innerHeight - vv.height - vv.offsetTop)}px)`;
-        return this.show(true);
       }
-      // Über der Tabelle; ist ihr Anfang weggescrollt, oben am Rand, solange sie zu sehen ist.
-      // Oberkante der ersten Zeile (nicht der Schrift), damit der Rahmen frei bleibt.
-      const start = view.coordsAtPos(t.from);
-      const tableTop = view.lineBlockAt(t.from).top + view.documentTop;
-      const tableBottom = view.lineBlockAt(t.to).bottom + view.documentTop;
-      const box = view.scrollDOM.getBoundingClientRect();
-      if (!start) return this.show(false);
-      const rect = this.el.getBoundingClientRect();
-      const minTop = Math.max(box.top, 56) + 4;
-      let top = tableTop - rect.height - 10;
-      if (top < minTop) {
-        // Tabelle oben weggescrollt: Leiste am oberen Rand, solange noch genug von ihr zu sehen ist.
-        if (tableBottom < minTop + rect.height + 24) return this.show(false);
-        top = minTop;
-      }
-      const left = Math.max(box.left + 8, Math.min(box.right - rect.width - 8, start.left - 4));
-      this.el.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
       this.show(true);
     }
     destroy() {
@@ -566,7 +555,6 @@ export function tableBar(): Extension {
       document.body.classList.remove('in-table');
       window.visualViewport?.removeEventListener('resize', this.schedule);
       window.visualViewport?.removeEventListener('scroll', this.schedule);
-      window.removeEventListener('scroll', this.schedule, true);
       closePicker?.();
     }
   });
