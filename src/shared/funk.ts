@@ -1,6 +1,6 @@
-// Memo → Nachricht für broadcast.veerka.mp.
+// Memo → Nachricht für funk.veerka.mp.
 //
-// broadcast zeigt schlichten Text (Adressen werden anklickbar) und Anhänge,
+// funk zeigt schlichten Text (Adressen werden anklickbar) und Anhänge,
 // kein Markdown. Darum: Auszeichnungen weg, Listen als Punkte, Links als
 // „Text: Adresse“, #tags weg (die sind privat zum Sortieren). Bilder,
 // Dateien und Sprachmemos (/m/<datei>) werden zu echten Anhängen.
@@ -10,14 +10,14 @@
 const FILE_LINK = /!?\[([^\]]*)\]\(\/m\/([\w-]{6,40}\.[a-z0-9]{1,8})\)/g;
 const TAG = /(^|[\s(])#[\p{L}\p{N}_-]*[\p{L}_-][\p{L}\p{N}_-]*/gu;
 
-export interface BroadcastDraft {
+export interface FunkDraft {
   text: string;
   /** Anhänge in Reihenfolge: Dateiname in R2 (ohne /m/) und Anzeigename. */
   files: { file: string; name: string }[];
 }
 
-export function toBroadcast(src: string): BroadcastDraft {
-  const files: BroadcastDraft['files'] = [];
+export function toFunk(src: string): FunkDraft {
+  const files: FunkDraft['files'] = [];
   let text = src.replace(/\r\n?/g, '\n');
 
   // Anhänge herausziehen (Bilder, Dateien, Sprachmemos).

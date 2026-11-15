@@ -1,5 +1,5 @@
 // QR-Code als SVG (Byte-Modus, Versionen 1–10, Reed-Solomon über GF(256)).
-// Übernommen aus broadcast/tools/make-qr.mjs (dort gegen die Normtabellen
+// Übernommen aus funk/src/qr.js (damals broadcast/tools/make-qr.mjs; dort gegen die Normtabellen
 // geprüft), ohne Abhängigkeiten. Wird erst beim Antippen von „QR-Code“ geladen.
 // @ts-nocheck – reiner Algorithmus, unverändert aus der getesteten JS-Fassung.
 

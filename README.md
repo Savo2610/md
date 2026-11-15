@@ -80,11 +80,11 @@ Durable Object pro Dokument, Bilder in R2.
   unter `memos/<Account-ID>/` (max. 50 MB pro Datei, 2 GB pro Konto),
   ausgeliefert nur ans eigene Konto, mit Range. Anhänge, die kein Memo mehr
   nutzt, werden gelöscht; nie abgeschickte nach einem Tag.
-  Nur Admin-Konto: ⋯ → **Auf Broadcast senden** stellt das Memo auf
-  broadcast.veerka.mp (Vorschau vorher; Text über `src/shared/broadcast.ts`
+  Nur Admin-Konto: ⋯ → **Auf Funk senden** stellt das Memo auf
+  funk.veerka.mp (Vorschau vorher; Text über `src/shared/funk.ts`
   zu schlichtem Text, Anhänge als Datenstrom). Läuft über das Service Binding
-  `BROADCAST` auf den Eingang `Sender` des broadcast-Workers, ohne öffentliche
-  Adresse und ohne Passwort.
+  `FUNK` auf den Eingang `Sender` des funk-Workers, ohne öffentliche
+  Adresse und ohne Passwort. (Bis November 2026 hieß funk „broadcast“.)
   ⋯ → **Als Dokument öffnen** macht aus dem Memo ein md-Dokument (zufällige
   Adresse, Anhänge werden zu Bildern des Dokuments, steht samt Schlüsseln in
   der Dokumentliste) und öffnet es zum Bearbeiten. Beide bleiben verknüpft:
@@ -92,7 +92,7 @@ Durable Object pro Dokument, Bilder in R2.
   beim Laden nachgezogen, Abhaken im Memo schreibt ins Dokument). Ist das
   Dokument weg, bleibt das Memo mit dem letzten Stand.
   Teilen-Dialog der Dokumente: QR-Code neben Lese- und Bearbeiten-Link
-  (`src/client/qr.ts`, aus broadcast übernommen), als PNG sicherbar.
+  (`src/client/qr.ts`, aus funk übernommen), als PNG sicherbar.
   `memos.veerka.mp` leitet hierher um. Umzug von Memos: `POST /api/admin/memos`
   (API-Schlüssel) mit `{ "memos": [{ "text", "created" }] }`, beim nächsten
   Öffnen von `/memos` mit dem Admin-Konto landen sie dort.

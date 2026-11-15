@@ -7,7 +7,7 @@
 // auf „Rückgängig“, bevor es an den Server geht.
 
 import { $, el, store, toast, ask, dialog } from './ui';
-import { toBroadcast } from '../shared/broadcast';
+import { toFunk } from '../shared/funk';
 import { account, accountItems, avatar, type User } from './account';
 import { fineRow } from './settings';
 import { enhance } from './enhance';
@@ -188,8 +188,8 @@ export function start(boot: Boot) {
         : ['Bearbeiten', () => startEdit(m)],
       ['Kopieren', () => navigator.clipboard.writeText(m.text).then(() => toast('Kopiert.'), () => toast('Kopieren ging nicht.'))],
       ...(!m.doc && !m.pending ? [['Als Dokument öffnen', () => toDoc(m)] as [string, () => void]] : []),
-      // Nur das Admin-Konto: öffentlich auf broadcast.veerka.mp stellen.
-      ...(boot.admin && !m.pending ? [['Auf Broadcast senden', () => sendToBroadcast(m)] as [string, () => void]] : []),
+      // Nur das Admin-Konto: öffentlich auf funk.veerka.mp stellen.
+      ...(boot.admin && !m.pending ? [['Auf Funk senden', () => sendToFunk(m)] as [string, () => void]] : []),
       ['Löschen', () => remove(m), 'danger'],
     ]));
     head.append(more);
@@ -455,11 +455,11 @@ function accountButton(u: User): HTMLElement {
 }
 
 /**
- * Vorschau und Bestätigung, dann senden. broadcast zeigt schlichten Text,
+ * Vorschau und Bestätigung, dann senden. funk zeigt schlichten Text,
  * darum genau die Fassung zeigen, die dort ankommt.
  */
-function sendToBroadcast(m: { id: string; text: string }) {
-  const draft = toBroadcast(m.text);
+function sendToFunk(m: { id: string; text: string }) {
+  const draft = toFunk(m.text);
   const body = el('div', { class: 'bc' });
   if (draft.text) body.append(el('div', { class: 'bc-preview' }, draft.text));
   if (draft.files.length) body.append(el('p', { class: 'bc-files' }, `${draft.files.length === 1 ? 'Anhang' : `${draft.files.length} Anhänge`}: ${draft.files.map(f => f.name).join(', ')}`));
@@ -467,17 +467,17 @@ function sendToBroadcast(m: { id: string; text: string }) {
   const send = el('button', { type: 'button', class: 't boxed' }, 'Senden');
   const cancel = el('button', { type: 'button', class: 't' }, 'Abbrechen');
   body.append(el('div', { class: 'ask-row' }, cancel, send));
-  const d = dialog('Auf broadcast.veerka.mp senden', body);
+  const d = dialog('Auf funk.veerka.mp senden', body);
   cancel.addEventListener('click', () => d.close());
   send.addEventListener('click', async () => {
     send.disabled = true;
     send.textContent = 'Wird gesendet …';
     try {
-      const res = await fetch(`/api/me/memos/${encodeURIComponent(m.id)}/broadcast`, { method: 'POST' });
+      const res = await fetch(`/api/me/memos/${encodeURIComponent(m.id)}/funk`, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Senden ging nicht.');
       d.close();
-      linkToast('Auf Sendung.', 'Ansehen', 'https://broadcast.veerka.mp');
+      linkToast('Auf Sendung.', 'Ansehen', 'https://funk.veerka.mp');
     } catch (err) {
       send.disabled = false;
       send.textContent = 'Senden';

@@ -45,7 +45,7 @@
 // Memos sind pro Konto privat: Es gibt keinen Zugriff darauf über Admin,
 // API-Schlüssel oder die Übersicht. Inhalte und Koordinaten stehen nie in
 // Adressen (die landen in den Logs).
-//   POST   /api/me/memos/<id>/broadcast  Memo auf broadcast.veerka.mp senden (nur Admin-Konto)
+//   POST   /api/me/memos/<id>/funk       Memo auf funk.veerka.mp senden (nur Admin-Konto)
 //   POST   /api/me/memos/<id>/doc    Memo als md-Dokument (verknüpft), liefert { doc, url }
 //   GET    /m/<datei>                Anhang, nur fürs eigene Konto
 //
@@ -53,7 +53,7 @@
 
 import manifest from '../generated/manifest.json';
 import { render, escapeHtml } from '../shared/render';
-import { toBroadcast } from '../shared/broadcast';
+import { toFunk } from '../shared/funk';
 import { titleOf } from '../shared/title';
 import { tagsOf } from '../shared/tags';
 import { randomId, randomToken, signToken, verifyTotp, verifyToken, timingSafeEqual } from './crypto';
@@ -698,7 +698,7 @@ async function memos(req: Request, env: Env, user: User, acc: ReturnType<typeof 
   }
 
   const id = parts[0];
-  if (parts.length === 2 && parts[1] === 'broadcast' && req.method === 'POST' && MEMO_ID.test(id)) return broadcastMemo(env, user, acc, id);
+  if (parts.length === 2 && parts[1] === 'funk' && req.method === 'POST' && MEMO_ID.test(id)) return funkMemo(env, user, acc, id);
   if (parts.length === 2 && parts[1] === 'doc' && req.method === 'POST' && MEMO_ID.test(id)) return memoToDoc(env, user, acc, id, ctx);
   if (parts.length !== 1 || !MEMO_ID.test(id)) return fail(404, 'Unbekannt.');
   if (req.method === 'PUT') {
@@ -724,16 +724,16 @@ async function memos(req: Request, env: Env, user: User, acc: ReturnType<typeof 
 }
 
 /**
- * Memo öffentlich auf broadcast.veerka.mp stellen: ersetzt die Nachricht, die
+ * Memo öffentlich auf funk.veerka.mp stellen: ersetzt die Nachricht, die
  * dort steht, und verschwindet dort nach 7 Tagen. Nur das Admin-Konto.
- * Text als schlichter Text (shared/broadcast.ts), Anhänge als Datenstrom.
+ * Text als schlichter Text (shared/funk.ts), Anhänge als Datenstrom.
  */
-async function broadcastMemo(env: Env, user: User, acc: ReturnType<typeof accountStub>, id: string): Promise<Response> {
+async function funkMemo(env: Env, user: User, acc: ReturnType<typeof accountStub>, id: string): Promise<Response> {
   if (!isAdminUser(user, env)) return fail(403, 'Nur für das Admin-Konto.');
-  if (!env.BROADCAST) return fail(503, 'broadcast ist nicht verbunden.');
+  if (!env.FUNK) return fail(503, 'funk ist nicht verbunden.');
   const memo = await acc.getMemo(id);
   if (!memo) return fail(404, 'Memo nicht gefunden.');
-  const draft = toBroadcast(memo.text);
+  const draft = toFunk(memo.text);
   const files: { name: string; type: string; size: number; body: ReadableStream }[] = [];
   for (const f of draft.files.slice(0, 20)) {
     const obj = await env.IMAGES.get(memoFileKey(env, user.sub, f.file));
@@ -742,11 +742,11 @@ async function broadcastMemo(env: Env, user: User, acc: ReturnType<typeof accoun
   }
   if (!draft.text && !files.length) return fail(400, 'Nichts zu senden.');
   try {
-    const r = await env.BROADCAST.publish({ text: draft.text, files });
+    const r = await env.FUNK.publish({ text: draft.text, files });
     return json(r);
   } catch (err) {
-    console.error('broadcast', err);
-    return fail(502, (err as Error)?.message || 'broadcast hat nicht angenommen.');
+    console.error('funk', err);
+    return fail(502, (err as Error)?.message || 'funk hat nicht angenommen.');
   }
 }
 
