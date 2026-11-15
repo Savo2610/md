@@ -597,6 +597,9 @@ function evaluate(src: string, vars: Map<string, Q>, strict: boolean): { q: Q; t
 
 /** Wert einer Zeile ohne = für Summen: die letzte Zahl samt Einheit („Brot 2,50 €“). */
 function lineValue(src: string, vars: Map<string, Q>): Q | null {
+  // „3 * 150 € = 450 €“: zählt der Wert hinter dem letzten =.
+  const eq = src.lastIndexOf('=');
+  if (eq >= 0 && src.slice(eq + 1).trim()) src = src.slice(eq + 1);
   const toks = lex(src, vars).filter(t => t.t !== 'word' && t.t !== 'other');
   const explicit = toks.some((t, k) => t.t === 'op' && /^[+\-*/]$/.test(t.v) && k > 0 && valueEnd(toks[k - 1]));
   if (explicit) return evaluate(src, vars, false)?.q || null;

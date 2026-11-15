@@ -4,7 +4,7 @@
 
 import { EditorView, keymap, MatchDecorator, Decoration, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import type { CompletionContext } from '@codemirror/autocomplete';
-import { EditorSelection, StateEffect, RangeSetBuilder } from '@codemirror/state';
+import { EditorSelection, StateEffect, StateField, RangeSetBuilder, type EditorState, type Extension, type Text } from '@codemirror/state';
 import { calc, calcNeedsRates } from '../shared/calc';
 import { loadRates } from './rates';
 import { insertNewlineContinueMarkup } from '@codemirror/lang-markdown';
@@ -162,26 +162,41 @@ class CalcResult extends WidgetType {
 
 const recalc = StateEffect.define<null>();
 
-/** Zeilen auf = zeigen ihr Ergebnis, ohne dass es im Text steht. */
-export const calcResults = ViewPlugin.fromClass(class {
-  decorations: DecorationSet;
-  constructor(view: EditorView) { this.decorations = this.build(view); }
-  update(u: ViewUpdate) {
-    if (u.docChanged || u.transactions.some(tr => tr.effects.some(e => e.is(recalc)))) this.decorations = this.build(u.view);
-  }
-  build(view: EditorView): DecorationSet {
-    const doc = view.state.doc;
-    const hits = calc(doc.toString());
-    if (calcNeedsRates()) loadRates().then(got => { if (got) view.dispatch({ effects: recalc.of(null) }); });
+/** Ergebnisse nach Stelle im Dokument (hinter dem =). */
+const calcField = StateField.define<Map<number, string>>({
+  create: state => results(state.doc),
+  update: (v, tr) => tr.docChanged || tr.effects.some(e => e.is(recalc)) ? results(tr.state.doc) : v,
+  provide: f => EditorView.decorations.from(f, m => {
     const b = new RangeSetBuilder<Decoration>();
-    for (const h of hits.sort((x, y) => x.line - y.line || x.at - y.at)) {
-      if (h.line + 1 > doc.lines) continue;
-      const line = doc.line(h.line + 1);
-      b.add(line.from + h.at, line.from + h.at, Decoration.widget({ widget: new CalcResult(h.text), side: 1 }));
-    }
+    for (const [pos, text] of m) b.add(pos, pos, Decoration.widget({ widget: new CalcResult(text), side: 1 }));
     return b.finish();
+  }),
+});
+
+function results(doc: Text): Map<number, string> {
+  const m = new Map<number, string>();
+  const hits = calc(doc.toString()).sort((x, y) => x.line - y.line || x.at - y.at);
+  for (const h of hits) if (h.line < doc.lines) m.set(doc.line(h.line + 1).from + h.at, h.text);
+  return m;
+}
+
+/** Ergebnis, das hinter pos steht (für die Spaltenbreiten im Tabellenraster). */
+export const calcAt = (state: EditorState, pos: number) => state.field(calcField, false)?.get(pos);
+
+/** Ergebnisse haben sich geändert (auch ohne Textänderung, z. B. Kurse geladen). */
+export const calcChanged = (u: ViewUpdate) => u.startState.field(calcField, false) !== u.state.field(calcField, false);
+
+/** Lädt die Wechselkurse, sobald eine Rechnung sie braucht, und rechnet dann neu. */
+const ratesLoader = ViewPlugin.fromClass(class {
+  constructor(view: EditorView) { this.check(view); }
+  update(u: ViewUpdate) { if (u.docChanged) this.check(u.view); }
+  check(view: EditorView) {
+    if (calcNeedsRates()) loadRates().then(got => { if (got && view.dom.isConnected) view.dispatch({ effects: recalc.of(null) }); });
   }
-}, { decorations: v => v.decorations });
+});
+
+/** Zeilen auf = zeigen ihr Ergebnis, ohne dass es im Text steht. */
+export const calcResults: Extension = [calcField, ratesLoader];
 
 export function cycleHeading(view: EditorView): boolean {
   const line = view.state.doc.lineAt(view.state.selection.main.head);

@@ -22,6 +22,7 @@ import {
   findTable, cellAt, insertRow, deleteRow, insertCol, deleteCol, moveRow, moveCol, alignCol, current,
   sortBy, sortState, emptyTable, edit, notePointer, cellSlot, type Align, type Table, type Cell,
 } from './table';
+import { calcAt, calcChanged } from './cmkit';
 
 // ── Breiten ─────────────────────────────────────────────────────────────────
 
@@ -115,7 +116,7 @@ export function tableGrid(folds: (view: EditorView) => DecorationSet | undefined
     }
     update(u: ViewUpdate) {
       if (u.docChanged || u.selectionSet || u.viewportChanged || u.focusChanged || syntaxTree(u.startState) !== syntaxTree(u.state)
-        || u.transactions.some(tr => tr.effects.some(e => e.is(remeasure)))) {
+        || calcChanged(u) || u.transactions.some(tr => tr.effects.some(e => e.is(remeasure)))) {
         this.decorations = this.build(u.view);
         this.check();
       }
@@ -206,6 +207,9 @@ export function tableGrid(folds: (view: EditorView) => DecorationSet | undefined
                   const key = (bold ? 'b' : 'r') + v.text;
                   w = textWidth(v.text, bold);
                   if ((v.fold || MARKUP.test(v.text)) && !measured.has(key) && ce >= view.viewport.from && cs <= view.viewport.to) this.checks.push({ cs, ce, key, w });
+                  // Rechenergebnis hinter dem = (cmkit), Abstand wie .cm-calc.
+                  const res = calcAt(state, ce);
+                  if (res) w += 0.35 + textWidth(res, false);
                 }
                 s.push({ from, to, cs, ce, w });
               };
