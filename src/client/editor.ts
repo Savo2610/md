@@ -20,7 +20,7 @@ import { highlight, formatKeys, wrap, link, linePrefix, cycleHeading, continueLi
 import { render } from '../shared/render';
 import { enhance } from './enhance';
 import { tableKeys, tableCursor, tableFromClipboard, convertible, convertSelection } from './table';
-import { tableGrid, tableBar, pickTableSize, insertTable } from './table-ui';
+import { tableGrid, tableBar, tablePointer, pickTableSize, insertTable } from './table-ui';
 import { isTextFile, fileToMarkdown, looksRich } from './importer';
 
 export { render };
@@ -807,6 +807,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         tableGrid(v => v.plugin(linkFolding)?.decorations),
         tableBar(),
         tableCursor,
+        tablePointer,
         yCollab(ytext, awareness, { undoManager }),
         selectionToolbar(),
         EditorView.domEventHandlers({

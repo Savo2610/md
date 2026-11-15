@@ -243,10 +243,17 @@ body[data-mode="split"] { --measure: 34rem; }
   font-size: max(11px, min(.8em, max(calc(var(--tbl-t) / var(--tbl-n)), min(.68em, calc(var(--tbl-a) / var(--tbl-n))))));
   width: clamp(100%, calc(var(--tbl-w) + 1ch), var(--tbl-a));
 }
-/* Waagrechte Linien laufen von Mitte bis Mitte der äußeren | (je ½ Zeichen eingerückt). */
-.cm-tbl-head, .cm-tbl-row, .cm-tbl-delim { --tbl-line: .5ch var(--tbl-y) / calc(var(--tbl-w) - 1ch) 1px no-repeat; }
-.cm-tbl-head { font-weight: 700; --tbl-y: top; background: linear-gradient(var(--line), var(--line)) var(--tbl-line); }
-.cm-tbl-row { --tbl-y: bottom; background: linear-gradient(var(--line), var(--line)) var(--tbl-line); }
+/* Waagrechte Linien laufen von Mitte bis Mitte der äußeren | (je ½ Zeichen
+   eingerückt). Die Kopfzeile trägt oben den Rahmen und unten die kräftigere
+   Linie, damit ihr Text mittig sitzt; die Trennzeile selbst ist unsichtbar. */
+.cm-tbl-head, .cm-tbl-row { --tbl-pos: .5ch; --tbl-size: calc(var(--tbl-w) - 1ch) 1px; }
+.cm-tbl-head {
+  font-weight: 700;
+  background:
+    linear-gradient(var(--line), var(--line)) var(--tbl-pos) top / var(--tbl-size) no-repeat,
+    linear-gradient(var(--fg-soft), var(--fg-soft)) var(--tbl-pos) bottom / var(--tbl-size) no-repeat;
+}
+.cm-tbl-row { background: linear-gradient(var(--line), var(--line)) var(--tbl-pos) bottom / var(--tbl-size) no-repeat; }
 .cm-tbl-pipe {
   display: inline-block; width: 1ch; height: 1.7em; vertical-align: top; color: transparent;
   background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat;
@@ -255,14 +262,9 @@ body[data-mode="split"] { --measure: 34rem; }
 .cm-tbl-gap { display: inline-block; }
 .cm-tbl-missing .cm-tbl-pipe { opacity: .5; }
 .cm-tbl .cm-linkfold { display: inline-block; width: 1ch; padding: 0; font-size: 1em; text-align: center; }
-/* Trennzeile: schmale Linie unter der Kopfzeile, die senkrechten Linien laufen durch. */
-.cm-line.cm-tbl-delim {
-  color: transparent; line-height: 1; --tbl-y: center;
-  background: linear-gradient(var(--fg-soft), var(--fg-soft)) var(--tbl-line);
-}
+.cm-line.cm-tbl-delim { height: 0; line-height: 0; overflow: hidden; color: transparent; }
 .cm-tbl-delim * { color: transparent !important; }
-.cm-tbl-delim .cm-tbl-pipe { height: 1em; }
-.cm-tbl-delim .cm-widgetBuffer { vertical-align: top; }
+.cm-tbl-delim .cm-tbl-pipe, .cm-tbl-delim .cm-widgetBuffer { height: 0; }
 
 /* Tabellen-Leiste */
 .tablebar {

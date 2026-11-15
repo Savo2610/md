@@ -16,7 +16,7 @@ import type { Extension, Range } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import {
   findTable, cellAt, insertRow, deleteRow, insertCol, deleteCol, moveRow, moveCol, alignCol, current,
-  sortBy, sortState, emptyTable, edit, type Align, type Table, type Cell,
+  sortBy, sortState, emptyTable, edit, notePointer, type Align, type Table, type Cell,
 } from './table';
 
 // ── Raster ──────────────────────────────────────────────────────────────────
@@ -114,7 +114,8 @@ export function tableGrid(folds: (view: EditorView) => DecorationSet | undefined
                 const empty = !text.trim();
                 const cs = empty ? from + Math.min(1, text.length) : from + lead;
                 const ce = empty ? cs : to - trail;
-                const w = visible(cs, ce) + (cs > from ? 1 : 0) + (to > ce ? 1 : 0);
+                // Immer ein Zeichen Luft links und rechts, auch wenn im Text keins steht.
+                const w = visible(cs, ce) + 2;
                 s.push({ from, to, cs, ce, w });
               };
               for (let i = 0; i + 1 < l.pipes.length; i++) add(l.pipes[i] + 1, l.pipes[i + 1]);
@@ -150,9 +151,9 @@ export function tableGrid(folds: (view: EditorView) => DecorationSet | undefined
                 const a = aligns[j] ?? '';
                 const leadGap = a === 'right' ? gap : a === 'center' ? Math.floor(gap / 2) : 0;
                 const lead = Math.min(seg.from + 1, seg.cs);
-                fill(lead, seg.cs, leadGap, 1);
+                fill(lead, seg.cs, leadGap + (seg.cs > seg.from ? 0 : 1), 1);
                 const trail = Math.min(seg.ce + 1, seg.to);
-                fill(trail, seg.to, gap - leadGap, -1);
+                fill(trail, seg.to, gap - leadGap + (seg.to > seg.ce ? 0 : 1), -1);
               });
               if (open || s.length < cols) {
                 out.push(Decoration.widget({ widget: new Missing(open, widths.slice(s.length)), side: 1 }).range(l.to));
@@ -166,6 +167,24 @@ export function tableGrid(folds: (view: EditorView) => DecorationSet | undefined
     }
   }, { decorations: v => v.decorations });
 }
+
+/** Beim Klick in eine Tabellenzeile: Spalte aus der Lage der | merken (siehe tableCursor). */
+export const tablePointer = EditorView.domEventHandlers({
+  pointerdown(e, view) {
+    if (e.button !== 0 || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return false;
+    const lineEl = (e.target as Element | null)?.closest?.('.cm-line.cm-tbl');
+    if (!lineEl || !view.contentDOM.contains(lineEl)) return false;
+    const line = view.state.doc.lineAt(view.posAtDOM(lineEl, 0));
+    const xs = [...lineEl.querySelectorAll('.cm-tbl-pipe')]
+      .map(p => p.getBoundingClientRect())
+      .filter(r => e.clientY >= r.top - 1 && e.clientY <= r.bottom + 1)
+      .map(r => (r.left + r.right) / 2);
+    if (xs.length < 2) return false;
+    const col = Math.max(0, xs.filter(x => x < e.clientX).length - 1);
+    notePointer(line.number, col, e.pointerType === 'touch');
+    return false;
+  },
+});
 
 // ── Neue Tabelle ────────────────────────────────────────────────────────────
 

@@ -437,10 +437,22 @@ function arrow(view: EditorView, dir: Dir): boolean {
   return true;
 }
 
+let pointer: { line: number; col: number; touch: boolean; at: number } | null = null;
+
+/**
+ * Zeile und Spalte, in die gerade geklickt/getippt wurde, ermittelt aus der
+ * Lage der | im Raster (table-ui.ts). CodeMirror ordnet Klicks auf
+ * ausgeblendete Füllung sonst gern der Nachbarzelle zu.
+ */
+export function notePointer(line: number, col: number, touch: boolean) {
+  pointer = { line, col, touch, at: Date.now() };
+}
+
 /**
  * Klicks und Cursorbewegungen in einer Tabelle: Landet der Cursor in der
  * Füllung, an einem | oder in der Trennzeile, rückt er in den Inhalt der
- * Zelle (leere Zelle: links). Tippen bleibt unberührt.
+ * Zelle (leere Zelle: links). Nach einem Klick ist es die angeklickte Zelle.
+ * Tippen bleibt unberührt.
  */
 export const tableCursor = EditorState.transactionFilter.of((tr: Transaction): Transaction | readonly (Transaction | TransactionSpec)[] => {
   if (tr.docChanged || !tr.selection || !tr.isUserEvent('select')) return tr;
@@ -448,22 +460,32 @@ export const tableCursor = EditorState.transactionFilter.of((tr: Transaction): T
   if (sel.ranges.length > 1 || !sel.main.empty) return tr;
   const state = tr.state;
   const head = sel.main.head;
-  const t = findTable(state, head);
+  const p = pointer && Date.now() - pointer.at < 1000 && pointer.line <= state.doc.lines
+    && (tr.isUserEvent('select.pointer') || pointer.touch) ? pointer : null;
+  pointer = null;
+  const t = findTable(state, p ? state.doc.line(p.line).from : head);
   if (!t) return tr;
-  let line = state.doc.lineAt(head);
-  let k: number | null = null;
+  let line = p ? state.doc.line(p.line) : state.doc.lineAt(head);
+  if (line.number < t.firstLine || line.number > state.doc.lineAt(t.to).number) return tr;
+  let k: number | null = p ? p.col : null;
+  let jumped = false;
   if (line.number - t.firstLine === 1) {
     // Trennzeile: von unten kommend in die Kopfzeile, sonst in die erste Zeile darunter.
-    k = slotAt(slots(line.text, line.from), head);
+    k ??= slotAt(slots(line.text, line.from), head);
     const old = tr.startState.selection.main.head;
     const row = old > line.to || t.rows.length < 2 ? 0 : 1;
     line = state.doc.line(lineOf(t, row));
+    jumped = true;
   }
   const s = slots(line.text, line.from);
   if (!s.length) return tr;
-  const i = k ?? slotAt(s, head);
-  const slot = s[Math.min(i, s.length - 1)];
-  const to = k !== null ? slot.cs : clampTo(slot, head);
+  const slot = s[Math.min(k ?? slotAt(s, head), s.length - 1)];
+  let to: number;
+  if (jumped) to = slot.cs;
+  else if (head < line.from || head > line.to) to = slot.ce; // in einer anderen Zeile gelandet
+  else if (head < slot.from) to = slot.cs;
+  else if (head > slot.to) to = slot.ce;
+  else to = clampTo(slot, head);
   if (to === head) return tr;
   return [tr, { selection: { anchor: to }, sequential: true }];
 });
