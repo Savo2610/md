@@ -19,7 +19,8 @@ import { uploadImage } from './images';
 import { highlight, formatKeys, wrap, link, linePrefix, cycleHeading, continueListsOnInput, tagHighlight, tagCompletion } from './cmkit';
 import { render } from '../shared/render';
 import { enhance } from './enhance';
-import { tableKeys, tableFromClipboard } from './table';
+import { tableKeys, tableFromClipboard, convertible, convertSelection } from './table';
+import { tableGrid, tableBar, pickTableSize, insertTable } from './table-ui';
 import { isTextFile, fileToMarkdown, looksRich } from './importer';
 
 export { render };
@@ -240,7 +241,7 @@ function slashItems(pickImage: () => void, extra: EditorOptions['commands'] = []
     { name: 'Aufgabe', key: 'aufgabe todo checkbox task check', hint: '- [ ]', snippet: '- [ ] ‸' },
     { name: 'Zitat', key: 'zitat quote citation', hint: '>', snippet: '> ‸' },
     { name: 'Link', key: 'link url verweis', hint: '[](…)', snippet: '[‸](https://)', inline: true },
-    { name: 'Tabelle', key: 'tabelle table', hint: '| |', snippet: '| Spalte | Spalte |\n| ------ | ------ |\n| ‸ | |' },
+    { name: 'Tabelle', key: 'tabelle table', hint: '| |', run: pickTableSize },
     { name: 'Codeblock', key: 'code codeblock snippet programm', hint: '```', snippet: fence('') },
     { name: 'Info', key: 'info box hinweis note callout', hint: ':::info', snippet: ':::info\n‸\n:::' },
     { name: 'Achtung', key: 'achtung warnung warning caution', hint: ':::warning', snippet: ':::warning\n‸\n:::' },
@@ -306,7 +307,7 @@ function slashSource(items: Slash[]) {
     const line = ctx.state.doc.lineAt(ctx.pos);
     const before = line.text.slice(0, ctx.pos - line.from);
     // Am Zeilenanfang (auch nach "- " oder "> ") oder nach einem Leerzeichen.
-    const m = /(^|\s)\/([\p{L}\d+#-]*)$/u.exec(before);
+    const m = /(^|\s)\/([\p{L}\d+#×*-]*)$/u.exec(before);
     if (!m) return null;
     const from = line.from + m.index + m[1].length;
     const midLine = before.slice(0, from - line.from).replace(/^\s*(?:[-*+] |> )?/, '').trim() !== '';
@@ -320,6 +321,19 @@ function slashSource(items: Slash[]) {
       if (!it.hidden && (fold(it.key).includes(q) || fold(it.name).includes(q))) return 1;
       return -1;
     };
+    // /3x4 oder /tabelle3x4: Tabelle mit 3 Spalten und 4 Zeilen.
+    const size = /^(?:tabelle|table|tab|t)?(\d{1,2})[x×*](\d{1,2})$/.exec(q);
+    if (size) {
+      const cols = Math.max(1, Number(size[1])), rows = Math.max(2, Number(size[2]));
+      return {
+        from,
+        filter: false,
+        options: [{ label: `Tabelle ${cols} × ${rows}`, detail: '| |', apply: (view: EditorView, _c: Completion, f: number, to: number) => {
+          view.dispatch({ changes: { from: f, to }, userEvent: 'input' });
+          insertTable(view, cols, rows);
+        } }],
+      };
+    }
     const ranked = items
       .map((it, i) => ({ it, i, s: score(it) }))
       .filter(x => x.s >= 0 && (!x.it.hidden || q.length >= 1))
@@ -452,6 +466,7 @@ function inCodeOrUrl(state: EditorState, pos: number): boolean {
 function selectionToolbar(): Extension {
   return ViewPlugin.fromClass(class {
     el: HTMLDivElement;
+    table: HTMLButtonElement;
     pointerDown = false;
     frame = 0;
     constructor(readonly view: EditorView) {
@@ -477,6 +492,15 @@ function selectionToolbar(): Extension {
         b.addEventListener('click', () => run(this.view));
         this.el.append(b);
       }
+      // Nur bei markierten Zeilen mit Tab, ; oder , dazwischen.
+      this.table = document.createElement('button');
+      this.table.type = 'button';
+      this.table.textContent = 'Tabelle';
+      this.table.title = 'In Tabelle umwandeln';
+      this.table.className = 'sel-table';
+      this.table.addEventListener('mousedown', e => e.preventDefault());
+      this.table.addEventListener('click', () => convertSelection(this.view));
+      this.el.append(this.table);
       document.body.append(this.el);
       view.contentDOM.addEventListener('pointerdown', this.down);
       document.addEventListener('pointerup', this.up);
@@ -498,6 +522,7 @@ function selectionToolbar(): Extension {
       const start = view.coordsAtPos(sel.from);
       const end = view.coordsAtPos(sel.to);
       if (!start || !end) return this.hide();
+      this.table.hidden = !convertible(view.state);
       const rect = this.el.getBoundingClientRect();
       const left = Math.max(8, Math.min(window.innerWidth - rect.width - 8, (start.left + (start.top === end.top ? end.left : start.left)) / 2 - rect.width / 2));
       let top = start.top - rect.height - 8;
@@ -779,6 +804,8 @@ export function mountEditor(o: EditorOptions): EditorHandle {
         spellComp.of(spellAttrs(o.spellcheck)),
         spellExclusions,
         linkFolding,
+        tableGrid(v => v.plugin(linkFolding)?.decorations),
+        tableBar(),
         yCollab(ytext, awareness, { undoManager }),
         selectionToolbar(),
         EditorView.domEventHandlers({

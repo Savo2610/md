@@ -229,6 +229,79 @@ body[data-mode="split"] { --measure: 34rem; }
 }
 .mobiletools button:active { background: var(--soft); }
 
+/* Tabellen im Editor: Mono-Raster (table-ui.ts). --tbl-ch ist die Breite der
+   Tabelle in Zeichen (Mono: 1ch = .6em). Passt sie nicht in die Textspalte
+   (--tbl-t), wird sie bis .68em kleiner, dann darf sie nach rechts in den
+   freien Rand (--tbl-a) und wird erst danach weiter verkleinert (min. 11px). */
+.pane-editor .cm-scroller { container-type: inline-size; }
+.cm-line.cm-tbl {
+  --tbl-w: calc(var(--tbl-ch) * 1ch);
+  --tbl-t: calc(min(var(--measure), 100cqw) - 2 * var(--gutter));
+  --tbl-a: calc((100cqw + min(var(--measure), 100cqw)) / 2 - 2 * var(--gutter));
+  font-family: var(--mono); line-height: 1.7;
+  --tbl-n: calc((var(--tbl-ch) + 1) * .6); /* ein Zeichen Luft gegen Rundung */
+  font-size: max(11px, min(.8em, max(calc(var(--tbl-t) / var(--tbl-n)), min(.68em, calc(var(--tbl-a) / var(--tbl-n))))));
+  width: clamp(100%, calc(var(--tbl-w) + 1ch), var(--tbl-a));
+}
+.cm-tbl-head { font-weight: 700; }
+.cm-tbl-row { background: linear-gradient(var(--line), var(--line)) left bottom / var(--tbl-w) 1px no-repeat; }
+.cm-tbl-pipe {
+  display: inline-block; width: 1ch; height: 1.7em; vertical-align: top; color: transparent;
+  background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat;
+}
+.cm-tbl-pipe * { color: transparent !important; }
+.cm-tbl-gap { display: inline-block; }
+.cm-tbl-missing .cm-tbl-pipe { opacity: .5; }
+.cm-tbl .cm-linkfold { display: inline-block; width: 1ch; padding: 0; font-size: 1em; text-align: center; }
+/* Trennzeile: als Linie unter der Kopfzeile; Doppelpunkte zeigen die Ausrichtung. */
+.cm-tbl-delim:not(.cm-tbl-raw) {
+  color: transparent; line-height: .7;
+  background: linear-gradient(var(--fg-soft), var(--fg-soft)) left center / var(--tbl-w) 1px no-repeat;
+}
+.cm-tbl-delim:not(.cm-tbl-raw) * { color: transparent !important; }
+.cm-tbl-delim:not(.cm-tbl-raw) .cm-tbl-pipe { height: .7em; background: none; }
+.cm-tbl-raw { color: var(--markup); }
+
+/* Tabellen-Leiste */
+.tablebar {
+  position: fixed; left: 0; top: 0; z-index: 29;
+  display: flex; align-items: center; padding: 3px; gap: 1px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 5px; box-shadow: var(--shadow);
+  opacity: 0; pointer-events: none; transition: opacity .12s ease;
+}
+.tablebar.show { opacity: 1; pointer-events: auto; }
+.tablebar button {
+  appearance: none; border: 0; background: none; cursor: pointer; border-radius: 3px;
+  min-width: 28px; height: 28px; padding: 0 6px; font-size: 15px; color: var(--fg-soft);
+}
+.tablebar button:hover:not(:disabled) { background: var(--soft); color: var(--fg); }
+.tablebar button:disabled { color: var(--faint); cursor: default; }
+.tablebar button.on { color: var(--accent); }
+.tablebar svg { display: block; width: 16px; height: 16px; margin: auto; }
+.tablebar .tb-group { padding: 0 3px 0 7px; font-size: 12.5px; color: var(--muted); }
+.tablebar .tb-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--line); }
+/* Handy: unten über der Tastatur, statt der normalen Leiste */
+.tablebar.mobile {
+  top: auto; right: 0; bottom: 0; border-radius: 0; border-width: 1px 0 0; box-shadow: none;
+  overflow-x: auto; scrollbar-width: none; transition: none; display: none;
+  padding: 4px max(6px, env(safe-area-inset-left)) calc(4px + env(safe-area-inset-bottom));
+}
+.tablebar.mobile.show { display: flex; }
+.tablebar.mobile button { flex: none; min-width: 38px; height: 38px; font-size: 16px; }
+body.in-table .mobiletools { display: none !important; }
+
+/* Größe einer neuen Tabelle */
+.tablepick {
+  position: fixed; left: 0; top: 0; z-index: 31; padding: 10px 10px 6px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 5px; box-shadow: var(--shadow);
+}
+.tp-grid { display: grid; gap: 3px; cursor: pointer; touch-action: none; }
+.tp-grid span { width: 16px; height: 16px; border: 1px solid var(--line); border-radius: 2px; }
+.tp-grid span.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.tp-grid span.on.head { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.tp-size { margin-top: 6px; font: 12px/1.4 var(--mono); color: var(--muted); text-align: center; }
+@media (pointer: coarse) { .tp-grid span { width: 32px; height: 32px; } }
+
 /* ── Dokument (Ansicht und Vorschau) ────────────────────────────────────── */
 
 .doc {
@@ -436,7 +509,7 @@ table.docs th .pick { cursor: pointer; }
 
 @media print {
   @page { margin: 18mm 16mm; }
-  #bar, .seltools, .mobiletools, #toast, .turnstile, dialog, .workspace { display: none !important; }
+  #bar, .seltools, .mobiletools, .tablebar, .tablepick, #toast, .turnstile, dialog, .workspace { display: none !important; }
   /* Gedruckt wird immer die Ansicht, auch aus dem Bearbeiten-Modus. */
   body[data-mode] #view { display: block !important; }
   .doc { padding: 0; max-width: none; }
