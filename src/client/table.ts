@@ -8,8 +8,8 @@
 //  - Enter springt in die erste Zelle der nächsten Zeile (am Ende: neue
 //    Zeile). Enter in einer leeren letzten Zeile verlässt die Tabelle.
 //    Enter hinter „Name | Alter | Ort“ macht daraus die Kopfzeile.
-//  - Bei Tab/Enter und beim Verlassen der Tabelle werden die Spalten im
-//    Text ausgerichtet; reine Zahlenspalten werden rechtsbündig.
+//  - Wechselt der Cursor die Zelle (Tab/Enter, Pfeiltasten, Klick) oder
+//    verlässt er die Tabelle, werden die Spalten im Text ausgerichtet; reine Zahlenspalten werden rechtsbündig.
 //  - Ein Klick in die Füllung einer Zelle setzt den Cursor an den Inhalt
 //    (leere Zelle: links).
 //  - ⌥↑/⌥↓ verschieben die Zeile, ⌘↵ / ⌘⇧↵ fügen darunter/darüber eine ein,
@@ -305,11 +305,19 @@ function slots(text: string, from: number): Slot[] {
   return out;
 }
 
+/** Zeile und Spalte einer Position, um Zellwechsel zu erkennen. */
+function spotOf(state: EditorState, pos: number): string {
+  const line = state.doc.lineAt(pos);
+  return line.number + ':' + columnAt(line.text, pos - line.from);
+}
+
 /**
  * Klicks und Tabellen-Ausrichtung:
  *  - Ein Klick in die Füllung einer Zelle setzt den Cursor an den Inhalt
  *    (davor: Anfang, dahinter: Ende, leere Zelle: links).
- *  - Verlässt der Cursor eine Tabelle, wird sie im Text ausgerichtet.
+ *  - Wechselt der Cursor die Zelle (Pfeiltasten, Klick) oder verlässt er die
+ *    Tabelle, wird sie im Text ausgerichtet; der Cursor bleibt an derselben
+ *    Stelle im Zellinhalt.
  */
 export const tableCursor = EditorState.transactionFilter.of((tr: Transaction): Transaction | readonly (Transaction | TransactionSpec)[] => {
   if (tr.docChanged || !tr.selection || !tr.isUserEvent('select')) return tr;
@@ -325,14 +333,30 @@ export const tableCursor = EditorState.transactionFilter.of((tr: Transaction): T
     }
     return tr;
   }
-  if (!sel.main.empty || !tr.isUserEvent('select.pointer')) return tr;
+  if (!sel.main.empty) return tr;
   const t = findTable(tr.state, head);
   if (!t) return tr;
   const line = tr.state.doc.lineAt(head);
-  const s = slots(line.text, line.from).find(x => head >= x.from && head <= x.to);
-  if (!s) return tr;
-  const to = head < s.cs ? s.cs : head > s.ce ? s.ce : head;
-  return to === head ? tr : [tr, { selection: { anchor: to }, sequential: true }];
+  const all = slots(line.text, line.from);
+  const s = all.find(x => head >= x.from && head <= x.to);
+  // Klick in die Füllung: an den Inhalt.
+  const at = s && tr.isUserEvent('select.pointer') ? (head < s.cs ? s.cs : head > s.ce ? s.ce : head) : head;
+  const moved = at === head ? tr : [tr, { selection: { anchor: at }, sequential: true }];
+  if (was && spotOf(tr.startState, before) === spotOf(tr.state, head)) return moved;
+  const { text, spots } = formatTable(t.rows, t.aligns);
+  if (text === tr.state.sliceDoc(t.from, t.to)) return moved;
+  // Cursor in der ausgerichteten Tabelle an dieselbe Stelle im Zellinhalt.
+  const idx = line.number - t.firstLine;
+  let pos: number;
+  const spot = s && idx !== 1 ? spots[idx === 0 ? 0 : idx - 1]?.[Math.min(all.indexOf(s), t.cols - 1)] : undefined;
+  if (s && spot) {
+    pos =t.from + spot.from + Math.max(0, Math.min(at - s.cs, s.ce - s.cs));
+  } else {
+    const lines = text.split('\n');
+    const start = lines.slice(0, idx).reduce((n, l) => n + l.length + 1, 0);
+    pos = t.from + start + Math.min(at - line.from, lines[idx].length);
+  }
+  return [tr, { changes: { from: t.from, to: t.to, insert: text }, selection: { anchor: pos }, sequential: true }];
 });
 
 /** Nächste Zelle (Handy-Leiste, dort gibt es kein Tab). */

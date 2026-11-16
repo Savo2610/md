@@ -27,8 +27,8 @@ Durable Object pro Dokument, Bilder in R2.
   Tab/`;`/`,` → „Tabelle“ in der Auswahl-Leiste, oder Zellen aus
   Excel/Numbers/Sheets einfügen. Tab/Shift-Tab springen zwischen Zellen
   (Handy: ⇥ in der Leiste), Enter in die erste Zelle der nächsten Zeile
-  (leere letzte Zeile: raus). Ausgerichtet wird bei Tab/Enter und beim
-  Verlassen der Tabelle; reine Zahlenspalten werden rechtsbündig. Ein Klick
+  (leere letzte Zeile: raus). Ausgerichtet wird, sobald der Cursor die
+  Zelle wechselt (Tab/Enter, Pfeiltasten, Klick) oder die Tabelle verlässt; reine Zahlenspalten werden rechtsbündig. Ein Klick
   in die Füllung setzt den Cursor an den Zellinhalt (leer: links). ⌥↑/⌥↓
   verschieben Zeilen, ⌘↵/⌘⇧↵ fügen ein, ⌘⇧K oder ⌫ in leerer Zeile löschen.
 - Tags: `#tag` im Text (ohne Leerzeichen; `# Titel` mit Leerzeichen bleibt
