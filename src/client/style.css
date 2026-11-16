@@ -232,64 +232,8 @@ body[data-mode="split"] { --measure: 34rem; }
 }
 .mobiletools button:active { background: var(--soft); }
 
-/* Tabellen im Editor: Raster in der Textschrift (table-ui.ts). --tbl-n ist
-   die Breite der Tabelle in em, --tbl-p die Zahl der | (je 1px). Passt sie
-   nicht in die Textspalte (--tbl-t), wird sie bis .78em kleiner, dann darf
-   sie nach rechts in den freien Rand (--tbl-a) und wird erst danach weiter
-   verkleinert (min. 11px). */
-.pane-editor .cm-scroller { container-type: inline-size; }
-.cm-line.cm-tbl {
-  --tbl-w: calc(var(--tbl-n) * 1em + var(--tbl-p) * 1px);
-  --tbl-t: calc(min(var(--measure), 100cqw) - 2 * var(--gutter));
-  --tbl-a: calc((100cqw + min(var(--measure), 100cqw)) / 2 - 2 * var(--gutter));
-  --tbl-k: calc(var(--tbl-n) + 1); /* etwas Luft für die Striche */
-  line-height: 1.7;
-  font-size: max(11px, min(.9em, max(calc(var(--tbl-t) / var(--tbl-k)), min(.78em, calc(var(--tbl-a) / var(--tbl-k))))));
-  width: clamp(100%, calc(var(--tbl-w) + 1em), var(--tbl-a));
-}
-/* Die Kopfzeile trägt oben den Rahmen und unten die kräftigere Linie, damit
-   ihr Text mittig sitzt; die Trennzeile selbst ist unsichtbar. */
-.cm-tbl-head {
-  font-weight: 700;
-  background:
-    linear-gradient(var(--line), var(--line)) left top / var(--tbl-w) 1px no-repeat,
-    linear-gradient(var(--fg-soft), var(--fg-soft)) left bottom / var(--tbl-w) 1px no-repeat;
-}
-.cm-tbl-row { background: linear-gradient(var(--line), var(--line)) left bottom / var(--tbl-w) 1px no-repeat; }
-.cm-tbl-pipe {
-  display: inline-block; width: 1px; height: 1.7em; vertical-align: top; overflow: hidden;
-  color: transparent; background: var(--line);
-}
-.cm-tbl-pipe * { color: transparent !important; }
-.cm-tbl-gap { display: inline-block; }
-.cm-tbl-missing .cm-tbl-pipe { opacity: .5; }
-.cm-line.cm-tbl-delim { height: 0; line-height: 0; overflow: hidden; }
-
-/* Tabellen-Leiste: in der Kopfleiste, solange der Cursor in einer Tabelle steht */
-.tablebar { display: none; align-items: center; gap: 1px; min-width: 0; }
-.tablebar.show { display: flex; }
-.tablebar button {
-  appearance: none; border: 0; background: none; cursor: pointer; border-radius: 3px;
-  min-width: 28px; height: 28px; padding: 0 6px; font-size: 15px; line-height: 1; color: var(--fg-soft);
-}
-.tablebar button:hover:not(:disabled) { background: var(--soft); color: var(--fg); }
-.tablebar button:disabled { color: var(--faint); cursor: default; }
-.tablebar button.on { color: var(--accent); }
-.tablebar svg { display: block; width: 16px; height: 16px; margin: auto; }
-.tablebar .tb-group { padding: 0 3px 0 7px; font-size: 13px; color: var(--muted); }
-.tablebar .tb-sep { width: 1px; height: 16px; margin: 0 5px; background: var(--line); }
-/* Schmales Fenster: rechts nur noch die Tabelle */
-@media (max-width: 1080px) { #bar:has(.tablebar.show) .bar-right { display: none; } }
-/* Handy: unten über der Tastatur, statt der normalen Leiste */
-.tablebar.mobile {
-  position: fixed; left: 0; z-index: 29; background: var(--bg); border: 1px solid var(--line);
-  top: auto; right: 0; bottom: 0; border-radius: 0; border-width: 1px 0 0; box-shadow: none;
-  overflow-x: auto; scrollbar-width: none; transition: none; display: none;
-  padding: 4px max(6px, env(safe-area-inset-left)) calc(4px + env(safe-area-inset-bottom));
-}
-.tablebar.mobile.show { display: flex; }
-.tablebar.mobile button { flex: none; min-width: 38px; height: 38px; font-size: 16px; }
-body.in-table .mobiletools { display: none !important; }
+/* Tabellen im Editor: Zeilen in der Festbreitenschrift, damit die | untereinander stehen (table-ui.ts). */
+.cm-line.cm-tbl { font-family: var(--mono); font-size: .84em; }
 
 /* Größe einer neuen Tabelle */
 .tablepick {
@@ -510,7 +454,7 @@ table.docs th .pick { cursor: pointer; }
 
 @media print {
   @page { margin: 18mm 16mm; }
-  #bar, .seltools, .mobiletools, .tablebar, .tablepick, #toast, .turnstile, dialog, .workspace { display: none !important; }
+  #bar, .seltools, .mobiletools, .tablepick, #toast, .turnstile, dialog, .workspace { display: none !important; }
   /* Gedruckt wird immer die Ansicht, auch aus dem Bearbeiten-Modus. */
   body[data-mode] #view { display: block !important; }
   .doc { padding: 0; max-width: none; }
