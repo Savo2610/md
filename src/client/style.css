@@ -608,6 +608,7 @@ button.t.avatar-btn { padding: 4px; border-radius: 50%; }
 /* Rechnen im Text: Ergebnis hinter dem = (Editor und Ansicht) */
 .cm-calc, .calc-result { color: var(--calc); font-variant-numeric: tabular-nums; }
 .cm-calc { margin-left: .35em; }
+.cm-tbl .cm-calc { margin-left: 1ch; } /* genau ein Zeichen, die Tabelle rechnet damit (table.ts) */
 @media print { .calc-result { color: inherit; font-weight: 700; } }
 .memo .memo-text p.tag-line { display: block; }
 body.tags-visible .doc .doc-tag { display: inline; color: var(--accent); cursor: pointer; }
