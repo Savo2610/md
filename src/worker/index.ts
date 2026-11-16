@@ -915,6 +915,11 @@ export default {
     if (url.hostname === 'memos.veerka.mp') {
       return new Response(null, { status: 301, headers: { location: 'https://md.veerka.mp/memos' } });
     }
+    // Abkürzungen fürs Whiteboard: board.veerka.mp öffnet ein neues Board,
+    // board.veerka.mp/retro das Board „retro“ (bzw. legt es als Board an).
+    if (url.hostname === 'board.veerka.mp' || url.hostname === 'wb.veerka.mp') {
+      return new Response(null, { status: 302, headers: { location: `https://md.veerka.mp${path}#board` } });
+    }
 
     if (/^\/(assets|fonts|icons)\//.test(path) || STATIC_FILES.has(path)) {
       return env.ASSETS.fetch(req);

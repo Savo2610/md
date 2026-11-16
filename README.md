@@ -54,7 +54,9 @@ Durable Object pro Dokument, Bilder in R2.
   gespeichert, nichts auf dem Server).
 - Mehrere Leute können gleichzeitig schreiben (Yjs über WebSockets).
 - Whiteboards (`src/client/board.ts`, Datenmodell und Markdown in
-  `src/shared/board.ts`): „Neues Board“ im „md“-Menü bzw. `/#board`. Ein Board
+  `src/shared/board.ts`): „Neues Board“ im „md“-Menü bzw. `/#board`, oder
+  `board.veerka.mp` / `wb.veerka.mp` (leiten auf `md.veerka.mp/<pfad>#board`
+  weiter). Ein Board
   ist ein Dokument mit `kind = board` (gleiche Links, Rechte, Papierkorb,
   Umbenennen). Notizen, Bereiche, Formen, Pfeile (hängen an Elementen), Text,
   Stift, Bilder (R2 wie im Editor). Doppelklick auf die Fläche: neue Notiz;

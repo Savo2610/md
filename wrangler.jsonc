@@ -17,10 +17,13 @@
   },
 
   // Custom Domain legt den DNS-Eintrag selbst an und hält ihn.
-  // memos.veerka.mp leitet nur auf md.veerka.mp/memos weiter.
+  // memos.veerka.mp leitet nur auf md.veerka.mp/memos weiter,
+  // board.veerka.mp und wb.veerka.mp auf ein (neues) Board.
   "routes": [
     { "pattern": "md.veerka.mp", "custom_domain": true },
-    { "pattern": "memos.veerka.mp", "custom_domain": true }
+    { "pattern": "memos.veerka.mp", "custom_domain": true },
+    { "pattern": "board.veerka.mp", "custom_domain": true },
+    { "pattern": "wb.veerka.mp", "custom_domain": true }
   ],
 
   // Doc: ein Objekt pro Dokument (Text als Yjs-Updates in SQLite, WebSockets
