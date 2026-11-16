@@ -7,9 +7,10 @@ import { EditorView, keymap, placeholder, drawSelection } from '@codemirror/view
 import { EditorState, Prec } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting, indentUnit } from '@codemirror/language';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
-import { highlight, formatKeys, linePrefix, continueListsOnInput, tagHighlight, tagCompletion, calcResults } from './cmkit';
+import { highlight, formatKeys,
+        tabKeys, completionTab, linePrefix, continueListsOnInput, tagHighlight, tagCompletion, calcResults } from './cmkit';
 import { prepareImage } from './images';
 import { el, toast } from './ui';
 
@@ -113,9 +114,11 @@ export function memoEditor(parent: HTMLElement, o: MemoEditorOptions): MemoEdito
           { key: 'Mod-Enter', run: () => { submit(); return true; } },
           { key: 'Escape', run: () => { if (!o.onCancel) return false; o.onCancel(); return true; } },
         ])),
+        completionTab,
         keymap.of(completionKeymap),
         formatKeys,
-        keymap.of([...historyKeymap, indentWithTab, ...defaultKeymap]),
+        tabKeys,
+        keymap.of([...historyKeymap, ...defaultKeymap]),
         history(),
         drawSelection(),
         EditorView.lineWrapping,

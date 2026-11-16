@@ -6,7 +6,7 @@ import { EditorState, EditorSelection, Compartment, RangeSetBuilder, type Extens
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { syntaxHighlighting, indentUnit, syntaxTree } from '@codemirror/language';
-import { defaultKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap } from '@codemirror/commands';
 import { search, searchKeymap } from '@codemirror/search';
 import { autocompletion, completionKeymap, startCompletion, type CompletionContext, type Completion } from '@codemirror/autocomplete';
 import { tags as t } from '@lezer/highlight';
@@ -16,7 +16,8 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { Provider, type Status } from './provider';
 import { uploadImage } from './images';
-import { highlight, formatKeys, wrap, link, linePrefix, cycleHeading, continueListsOnInput, tagHighlight, tagCompletion, calcResults } from './cmkit';
+import { highlight, formatKeys,
+        tabKeys, completionTab, wrap, link, linePrefix, cycleHeading, continueListsOnInput, tagHighlight, tagCompletion, calcResults } from './cmkit';
 import { render } from '../shared/render';
 import { enhance } from './enhance';
 import { tableKeys, tableCursor, tableFromClipboard, convertible, convertSelection, findTable, nextCell } from './table';
@@ -790,10 +791,12 @@ export function mountEditor(o: EditorOptions): EditorHandle {
     state: EditorState.create({
       doc: ytext.toString(),
       extensions: [
+        completionTab,
         keymap.of([...completionKeymap]),
         keymap.of(tableKeys),
         formatKeys,
-        keymap.of([...yUndoManagerKeymap, ...searchKeymap, indentWithTab, ...defaultKeymap]),
+        tabKeys,
+        keymap.of([...yUndoManagerKeymap, ...searchKeymap, ...defaultKeymap]),
         drawSelection(),
         dropCursor(),
         EditorView.lineWrapping,

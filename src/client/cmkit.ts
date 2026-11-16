@@ -3,7 +3,8 @@
 // die Tastenkürzel zum Formatieren.
 
 import { EditorView, keymap, MatchDecorator, Decoration, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
-import type { CompletionContext } from '@codemirror/autocomplete';
+import { acceptCompletion, type CompletionContext } from '@codemirror/autocomplete';
+import { indentMore, indentLess } from '@codemirror/commands';
 import { EditorSelection, StateEffect, StateField, RangeSetBuilder, type EditorState, type Extension, type Text } from '@codemirror/state';
 import { calc, calcNeedsRates } from '../shared/calc';
 import { loadRates } from './rates';
@@ -226,3 +227,29 @@ export const formatKeys = keymap.of([
 export function setHeading(view: EditorView, level: number): boolean {
   return linePrefix(view, '#'.repeat(level) + ' ');
 }
+
+const listStart = /^\s*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?|>\s*)?/;
+
+/**
+ * Tab wie in einem Texteditor: fügt an der Schreibmarke ein Tab ein. Steht sie
+ * am Zeilenanfang oder direkt hinter einem Listenzeichen, rückt die Zeile ein
+ * (Liste verschachteln), über mehrere Zeilen markiert ebenso.
+ */
+function tab(view: EditorView): boolean {
+  const { state } = view;
+  const indent = state.selection.ranges.every(r => {
+    const line = state.doc.lineAt(r.from);
+    if (!r.empty) return state.doc.lineAt(r.to).number !== line.number;
+    return r.head - line.from <= listStart.exec(line.text)![0].length;
+  });
+  if (indent) return indentMore(view);
+  view.dispatch(state.replaceSelection('\t'), { scrollIntoView: true, userEvent: 'input' });
+  return true;
+}
+
+/** Tab übernimmt einen offenen Vorschlag, sonst wie oben. */
+export const completionTab = keymap.of([{ key: 'Tab', run: acceptCompletion }]);
+export const tabKeys = keymap.of([
+  { key: 'Tab', run: tab },
+  { key: 'Shift-Tab', run: indentLess },
+]);
