@@ -1,5 +1,5 @@
 // Einstieg im Browser. Die Ansicht kommt fertig gerendert vom Server; hier
-// kommen Kopfleiste, Modi (Ansicht / Bearbeiten / Geteilt), Teilen,
+// kommen Kopfleiste, Modi (Ansicht / Bearbeiten / Beides), Teilen,
 // Umbenennen und Freischalten dazu. Der Editor wird erst beim Bearbeiten
 // nachgeladen.
 
@@ -175,7 +175,7 @@ function startDoc(boot: Boot) {
       const modes: [Mode, string, string][] = [
         ['view', 'Ansicht', 'Ansicht (⌘E)'],
         ['edit', 'Bearbeiten', 'Bearbeiten (⌘E)'],
-        ['split', 'Geteilt', 'Editor und Vorschau nebeneinander'],
+        ['split', 'Beides', 'Editor und Vorschau nebeneinander'],
       ];
       for (const [m, label, title] of modes) {
         const b = el('button', { type: 'button', role: 'tab', title, 'aria-selected': String(mode === m), class: m === 'split' ? 'wide-only' : '' }, label);

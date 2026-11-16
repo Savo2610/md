@@ -35,7 +35,7 @@ export const spellcheckOn = () => store.get('md:spellcheck') !== '0';
 type OpenMode = 'last' | 'view' | 'edit';
 const openPref = (): OpenMode => { const v = store.get('md:open'); return v === 'view' || v === 'edit' ? v : 'last'; };
 
-/** Zuletzt benutzter Modus (Ansicht, Bearbeiten, Geteilt), für „Beim Öffnen: Zuletzt“. */
+/** Zuletzt benutzter Modus (Ansicht, Bearbeiten, Beides), für „Beim Öffnen: Zuletzt“. */
 export const rememberMode = (m: string) => store.set('md:last-mode', m);
 
 /**
