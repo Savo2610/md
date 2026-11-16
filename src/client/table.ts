@@ -34,11 +34,15 @@ export interface Table {
   rows: string[][]; // ohne Trennzeile, alle gleich lang
   aligns: Align[];
   cols: number;
-  extra: Extra;
 }
 
-/** Zusätzliche Breite einer Zelle: angezeigtes Rechenergebnis hinter einem „=“. */
-export type Extra = (col: number, text: string) => number;
+/**
+ * Breite der angezeigten Rechenergebnisse hinter einem „=“ je Zeile und
+ * Spalte. Sie stehen nicht im Text, brauchen aber Platz in der Spalte.
+ * Hängt am Zeilen-Array, damit es beim Einfügen und Verschieben mitwandert.
+ */
+const results = new WeakMap<string[], number[]>();
+const extra = (row: string[], col: number) => results.get(row)?.[col] ?? 0;
 
 /** Zelle: row 0 ist die Kopfzeile. */
 export interface Cell { row: number; col: number }
@@ -85,20 +89,15 @@ export function findTable(state: EditorState, pos: number): Table | null {
   const raw = [lines[0], ...lines.slice(2)].map(cells);
   const cols = Math.max(1, ...raw.map(r => r.length), aligns.length);
   const rows = raw.map(r => Array.from({ length: cols }, (_, i) => r[i] ?? ''));
-  // Rechenergebnisse stehen nicht im Text, brauchen aber Platz in der Spalte.
-  const results = new Map<string, number>();
   for (let n = first.number + 2; n <= last.number; n++) {
     const line = doc.line(n);
-    slots(line.text, line.from).forEach((s, c) => {
+    const w = slots(line.text, line.from).map(s => {
       const r = s.ce > s.cs && doc.sliceString(s.ce - 1, s.ce) === '=' ? calcAt(state, s.ce) : undefined;
-      if (r) {
-        const key = c + '\0' + doc.sliceString(s.cs, s.ce);
-        results.set(key, Math.max(results.get(key) ?? 0, width(r) + 1));
-      }
+      return r ? width(r) + 1 : 0;
     });
+    if (w.some(Boolean)) results.set(rows[n - first.number - 1], w);
   }
-  const extra: Extra = (c, text) => results.get(c + '\0' + text) ?? 0;
-  return { from: first.from, to: last.to, firstLine: first.number, rows, aligns: Array.from({ length: cols }, (_, i) => aligns[i] ?? ''), cols, extra };
+  return { from: first.from, to: last.to, firstLine: first.number, rows, aligns: Array.from({ length: cols }, (_, i) => aligns[i] ?? ''), cols };
 }
 
 /** Zelle an der Position (Trennzeile zählt wie die Kopfzeile). */
@@ -161,11 +160,11 @@ function autoAlign(rows: string[][], aligns: Align[]): Align[] {
  * Tabelle als ausgerichteter Text. Gibt außerdem für jede Zeile (ohne
  * Trennzeile) die Positionen der Zellinhalte zurück, um den Cursor zu setzen.
  */
-export function formatTable(rows: string[][], aligns: Align[] = [], extra: Extra = () => 0): { text: string; spots: { from: number; to: number }[][] } {
+export function formatTable(rows: string[][], aligns: Align[] = []): { text: string; spots: { from: number; to: number }[][] } {
   const cols = Math.max(1, ...rows.map(r => r.length), aligns.length);
   const full = rows.map(r => Array.from({ length: cols }, (_, i) => r[i] ?? ''));
   const al = autoAlign(full, Array.from({ length: cols }, (_, i) => aligns[i] ?? ''));
-  const widths = al.map((a, i) => Math.max(a === 'center' ? 5 : 3, ...full.map((r, k) => width(r[i]) + (k ? extra(i, r[i]) : 0))));
+  const widths = al.map((a, i) => Math.max(a === 'center' ? 5 : 3, ...full.map((r, k) => width(r[i]) + (k ? extra(rows[k], i) : 0))));
   const delim = '| ' + widths.map((w, i) => {
     const a = al[i];
     if (a === 'center') return ':' + '-'.repeat(w - 2) + ':';
@@ -177,11 +176,11 @@ export function formatTable(rows: string[][], aligns: Align[] = [], extra: Extra
   const out: string[] = [];
   const spots: { from: number; to: number }[][] = [];
   let offset = 0;
-  const pushRow = (r: string[], head = false) => {
+  const pushRow = (r: string[], src: string[], head = false) => {
     const rowSpots: { from: number; to: number }[] = [];
     let line = '|';
     r.forEach((c, i) => {
-      const ex = head ? 0 : extra(i, c);
+      const ex = head ? 0 : extra(src, i);
       const padded = pad(c, widths[i] - ex, al[i]); // das Ergebnis füllt den Rest
       const lead = padded.length - padded.trimStart().length;
       const start = offset + line.length + 1 + (c ? lead : 0);
@@ -192,10 +191,10 @@ export function formatTable(rows: string[][], aligns: Align[] = [], extra: Extra
     out.push(line);
     offset += line.length + 1;
   };
-  pushRow(full[0], true);
+  pushRow(full[0], rows[0], true);
   out.push(delim);
   offset += delim.length + 1;
-  for (const r of full.slice(1)) pushRow(r);
+  full.forEach((r, k) => { if (k) pushRow(r, rows[k]); });
   return { text: out.join('\n'), spots };
 }
 
@@ -210,7 +209,7 @@ interface Result { rows: string[][]; aligns: Align[]; cell: Cell; atStart?: bool
 
 /** Tabelle neu schreiben und den Cursor in die Zelle setzen. */
 function commit(view: EditorView, t: Table, r: Result) {
-  const { text, spots } = formatTable(r.rows, r.aligns, t.extra);
+  const { text, spots } = formatTable(r.rows, r.aligns);
   const row = Math.max(0, Math.min(r.cell.row, spots.length - 1));
   const spot = spots[row][Math.max(0, Math.min(r.cell.col, spots[row].length - 1))];
   const at = t.from + (r.atStart ? spot.from : spot.to);
@@ -233,7 +232,10 @@ export function edit(view: EditorView, fn: (t: Table, c: Cell) => Result | null 
 }
 
 const blank = (n: number) => Array.from({ length: n }, () => '');
-const copy = (t: Table) => ({ rows: t.rows.map(r => [...r]), aligns: [...t.aligns] });
+const copy = (t: Table) => ({
+  rows: t.rows.map(r => { const c = [...r]; const w = results.get(r); if (w) results.set(c, w); return c; }),
+  aligns: [...t.aligns],
+});
 
 type Move = 'next' | 'prev' | 'down';
 
@@ -255,7 +257,7 @@ function move(view: EditorView, dir: Move): boolean {
     const last = row === rows.length - 1;
     if (last && row > 0 && rows[row].every(c => !c)) {
       rows.pop();
-      const insert = formatTable(rows, aligns, t.extra).text + '\n\n';
+      const insert = formatTable(rows, aligns).text + '\n\n';
       view.dispatch({ changes: { from: t.from, to: t.to, insert }, selection: { anchor: t.from + insert.length }, scrollIntoView: true, userEvent: 'input' });
       return true;
     }
@@ -346,7 +348,7 @@ export const tableCursor = EditorState.transactionFilter.of((tr: Transaction): T
   const before = tr.startState.selection.main.head;
   const was = findTable(tr.startState, before);
   if (was && !(head >= was.from && head <= was.to)) {
-    const { text } = formatTable(was.rows, was.aligns, was.extra);
+    const { text } = formatTable(was.rows, was.aligns);
     if (text !== tr.startState.sliceDoc(was.from, was.to)) {
       return [tr, { changes: { from: was.from, to: was.to, insert: text }, sequential: true }];
     }
@@ -362,7 +364,7 @@ export const tableCursor = EditorState.transactionFilter.of((tr: Transaction): T
   const at = s && tr.isUserEvent('select.pointer') ? (head < s.cs ? s.cs : head > s.ce ? s.ce : head) : head;
   const moved = at === head ? tr : [tr, { selection: { anchor: at }, sequential: true }];
   if (was && spotOf(tr.startState, before) === spotOf(tr.state, head)) return moved;
-  const { text, spots } = formatTable(t.rows, t.aligns, t.extra);
+  const { text, spots } = formatTable(t.rows, t.aligns);
   if (text === tr.state.sliceDoc(t.from, t.to)) return moved;
   // Cursor in der ausgerichteten Tabelle an dieselbe Stelle im Zellinhalt.
   const idx = line.number - t.firstLine;
