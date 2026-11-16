@@ -47,7 +47,7 @@ function precacheList(metafile) {
     wanted.add(file);
     for (const imp of outputs[file].imports) {
       if (imp.kind === 'import-statement') visit(imp.path);
-      else if (imp.kind === 'dynamic-import' && /\/(editor|admin|home|html2md|memos|qr)-/.test(imp.path)) visit(imp.path);
+      else if (imp.kind === 'dynamic-import' && /\/(editor|board|admin|home|html2md|memos|qr)-/.test(imp.path)) visit(imp.path);
     }
   };
   for (const [file, info] of Object.entries(outputs)) {

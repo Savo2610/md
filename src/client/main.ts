@@ -5,6 +5,7 @@
 
 import { enhance } from './enhance';
 import type { EditorHandle, EditorStatus } from './editor';
+import type { BoardHandle } from './board';
 import { titleOf, slugify } from '../shared/title';
 import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, unlock, recent, ago, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, docTags, type MenuItem } from './ui';
 import { tagsOf } from '../shared/tags';
@@ -16,6 +17,7 @@ interface Boot {
   page: 'doc' | 'admin' | 'home' | 'memos';
   build?: string;
   id?: string;
+  kind?: 'board';
   exists?: boolean;
   siteKey?: string;
   katexCss?: string;
@@ -72,15 +74,21 @@ function startDoc(boot: Boot) {
   let editKey = store.get(keyName);
   const canEdit = () => !exists || !!editKey;
 
+  // Whiteboard: vom Server (kind) oder neu über /#board.
+  const isBoard = boot.kind === 'board' || (!exists && location.hash === '#board');
+  if (location.hash === '#board') history.replaceState(null, '', location.pathname + location.search);
+  if (isBoard) document.body.classList.add('is-board');
+
   const app = $('#app')!;
-  const article: HTMLElement = $<HTMLElement>('#view') ?? app.appendChild(el('article', { class: 'doc', id: 'view' }));
+  const article: HTMLElement = $<HTMLElement>('#view') ?? (isBoard ? el('article', { class: 'doc', id: 'view' }) : app.appendChild(el('article', { class: 'doc', id: 'view' })));
   const workspace = el('div', { class: 'workspace' });
   const editorPane = el('div', { class: 'pane-editor' });
   const previewPane = el('div', { class: 'pane-preview' });
   const preview = el('article', { class: 'doc' });
   previewPane.append(preview);
   workspace.append(editorPane, previewPane);
-  app.append(workspace);
+  const boardHost = el('div', { class: 'board-host' });
+  app.append(isBoard ? boardHost : workspace);
 
   /** #tags in der gerenderten Ansicht (vom Server). */
   const viewTags = () => [...article.querySelectorAll<HTMLElement>('.doc-tag')].map(s => s.dataset.tag || '').filter(Boolean)
@@ -115,12 +123,15 @@ function startDoc(boot: Boot) {
   document.body.prepend(bar);
 
   // Darf man bearbeiten: zuletzt benutzter Modus bzw. wie in den Einstellungen.
-  let mode: Mode = !exists || startInEdit ? 'edit' : editKey ? startMode() : 'view';
+  let mode: Mode = isBoard ? (canEdit() ? 'edit' : 'view') : !exists || startInEdit ? 'edit' : editKey ? startMode() : 'view';
   let spellcheck = spellcheckOn();
   // Umgeschaltet in den Einstellungen.
   addEventListener('md:spellcheck', e => { spellcheck = (e as CustomEvent<boolean>).detail; editor?.setSpellcheck(spellcheck); });
-  addEventListener('md:name', () => editor?.setName(writerName()));
+  addEventListener('md:name', () => { editor?.setName(writerName()); board?.setName(writerName()); });
   let editor: EditorHandle | null = null;
+  let board: BoardHandle | null = null;
+  /** Titel für Umbenennen, Papierkorb und „Zuletzt geöffnet“. */
+  const currentTitle = () => (board ? board.title() : editor ? titleOf(editor.text()) : document.title);
   let editorLoading: Promise<EditorHandle> | null = null;
   let lastStatus: EditorStatus | null = null;
 
@@ -137,6 +148,16 @@ function startDoc(boot: Boot) {
 
   function renderBar() {
     right.replaceChildren();
+    if (isBoard) {
+      if (board) {
+        if (!board.titleInput.isConnected) status.before(board.titleInput);
+        right.append(board.controls);
+      }
+      if (!compactQuery.matches) right.append(el('span', { class: 'sep', 'aria-hidden': 'true' }), button('Teilen', 'Links zum Teilen', share));
+      right.append(button('⋯', 'Mehr', more, 't more'));
+      renderStatus();
+      return;
+    }
     if (compactQuery.matches) {
       // Handy: ein Knopf wie in Notizen-Apps, alles andere im Menü.
       if (canEdit()) {
@@ -183,10 +204,13 @@ function startDoc(boot: Boot) {
     status.dataset.state = state;
 
     peers.replaceChildren();
-    const list = mode !== 'view' && s?.status === 'online' ? s.peers : [];
+    const list = (mode !== 'view' || isBoard) && s?.status === 'online' ? s.peers : [];
     for (const p of list.slice(0, 5)) {
-      const dot = el('span', { class: 'peer', title: `${p.name} bearbeitet gerade` });
+      const dot = isBoard && board && p.id !== undefined
+        ? el('button', { type: 'button', class: 'peer', title: `${p.name} folgen`, 'aria-label': `${p.name} folgen` })
+        : el('span', { class: 'peer', title: `${p.name} bearbeitet gerade` });
       dot.style.background = p.color;
+      if (dot instanceof HTMLButtonElement) dot.addEventListener('click', () => board!.follow(p.id!));
       peers.append(dot);
     }
     if (list.length > 5) peers.append(el('span', { class: 'peer-more' }, `+${list.length - 5}`));
@@ -240,8 +264,53 @@ function startDoc(boot: Boot) {
     return editor;
   }
 
+  async function loadBoard(): Promise<BoardHandle> {
+    const m = await import('./board');
+    board = m.mountBoard({
+      id,
+      parent: boardHost,
+      exists,
+      editable: mode !== 'view',
+      name: writerName(),
+      wsUrl: () => {
+        const u = new URL(`/api/docs/${encodeURIComponent(id)}/ws`, location.href);
+        u.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        if (editKey) u.searchParams.set('key', editKey);
+        return u.toString();
+      },
+      auth: (): Record<string, string> => (editKey ? { 'x-edit-key': editKey } : {}),
+      ensureCreated: create,
+      onStatus: s => { lastStatus = s; renderStatus(); },
+      onTitle: t => { document.title = t || 'Board'; },
+      onNotice: n => {
+        if (n.type === 'hello' && n.edit === false && mode !== 'view') {
+          store.del(keyName);
+          editKey = null;
+          toast('Keine Berechtigung zum Bearbeiten. Mit dem Bearbeiten-Link oder dem Code freischalten.');
+          setMode('view', false);
+        } else if (n.type === 'limit') {
+          toast('Das Board hat die Maximalgröße erreicht.');
+        } else if (n.type === 'moved' && n.to) {
+          followMove(n.to);
+        } else if (n.type === 'trashed' && !trashedHere) {
+          location.reload();
+        }
+      },
+      toast,
+    });
+    renderBar();
+    return board;
+  }
+
   async function setMode(next: Mode, remember = true) {
     if (next !== 'view' && !canEdit()) return;
+    if (isBoard) {
+      mode = next === 'view' ? 'view' : 'edit';
+      document.body.dataset.mode = mode;
+      board?.setEditable(mode !== 'view');
+      renderBar();
+      return;
+    }
     if (remember && exists) rememberMode(next);
     if (next === 'split' && matchMedia('(max-width: 520px)').matches) next = 'edit';
     const prev = mode;
@@ -277,7 +346,7 @@ function startDoc(boot: Boot) {
     const res = await fetch(`/api/docs/${encodeURIComponent(id)}/create`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token }),
+      body: JSON.stringify(isBoard ? { token, kind: 'board' } : { token }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -337,8 +406,8 @@ function startDoc(boot: Boot) {
   function renameForm(cancel: () => void): HTMLElement {
     const isRandom = /^[a-z0-9]{10}$/.test(id) && /\d/.test(id) && /[a-z]/.test(id);
     // Vorschlag: aus dem Titel (erste Überschrift bzw. erste Zeile) des Dokuments.
-    const title = editor ? titleOf(editor.text()) : document.title;
-    const full = title === id || title === 'Neues Dokument' ? '' : slugify(title);
+    const title = currentTitle();
+    const full = title === id || title === 'Neues Dokument' || title === 'Board' ? '' : slugify(title);
     const suggestion = full.length <= 60 ? full : full.slice(0, 60).replace(/-[^-]*$/, '');
     const input = el('input', { type: 'text', value: isRandom && suggestion ? suggestion : id, placeholder: 'meine-anleitung', spellcheck: 'false', autocapitalize: 'off', 'aria-label': 'Neue Adresse' }) as HTMLInputElement;
     const save = el('button', { type: 'submit', class: 't boxed' }, 'Ändern');
@@ -416,7 +485,7 @@ function startDoc(boot: Boot) {
       line.append(copy);
       body.append(row);
     });
-    if (!exists) body.append(el('p', { class: 'hint' }, 'Das Dokument wird angelegt, sobald du etwas schreibst.'));
+    if (!exists) body.append(el('p', { class: 'hint' }, isBoard ? 'Das Board wird angelegt, sobald du etwas daraufsetzt.' : 'Das Dokument wird angelegt, sobald du etwas schreibst.'));
     dialog('Teilen', body);
   }
 
@@ -450,7 +519,7 @@ function startDoc(boot: Boot) {
   // ── Menüs ─────────────────────────────────────────────────────────────────
 
   function openRecent() {
-    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')], ['Datei öffnen …', () => openAsNew()], ['Alle Dokumente', () => (location.href = '/home')], ['Memos', () => (location.href = '/memos')]];
+    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')], ['Neues Board', () => (location.href = '/#board')], ['Datei öffnen …', () => openAsNew()], ['Alle Dokumente', () => (location.href = '/home')], ['Memos', () => (location.href = '/memos')]];
     const list = recent.list().filter(r => r.id !== id && !r.trashed);
     if (list.length) items.push(el('div', { class: 'menu-label' }, 'Zuletzt geöffnet'));
     for (const r of list.slice(0, 5)) {
@@ -472,15 +541,22 @@ function startDoc(boot: Boot) {
       items.push(['Teilen', share]);
       items.push(['Neues Dokument', () => { if (navigator.onLine) location.href = '/'; else toast('Offline: Neue Dokumente gehen nur mit Verbindung.'); }]);
     }
+    if (isBoard && board && mode !== 'view' && board.peerCount()) items.push(['Alle zu mir holen', () => board!.summon()]);
     items.push(['Markdown kopieren', copyMarkdown]);
-    items.push(['Herunterladen (.md)', () => { if (exists) location.href = `/${encodeURIComponent(id)}.md?download=1`; else toast('Noch leer.'); }]);
-    items.push(['Drucken (.pdf)', printDoc]);
+    if (isBoard) {
+      items.push(['Als Dokument öffnen', () => { if (board) openAsNew(new File([board.markdown()], `${board.title() || 'Board'}.md`, { type: 'text/markdown' })); }]);
+      items.push(['Drucken (.pdf)', () => board?.print()]);
+    } else {
+      items.push(['Herunterladen (.md)', () => { if (exists) location.href = `/${encodeURIComponent(id)}.md?download=1`; else toast('Noch leer.'); }]);
+      items.push(['Drucken (.pdf)', printDoc]);
+    }
     const unlocked = (key: string | null) => {
       if (!key) return;
       editKey = key;
       store.set(keyName, key);
       recent.touch(id, document.title, true);
       enableTasks();
+      if (isBoard) { setMode('edit', false); board?.reconnect(); }
       renderBar();
       toast('Freigeschaltet. Du kannst dieses Dokument jetzt bearbeiten.');
     };
@@ -510,7 +586,7 @@ function startDoc(boot: Boot) {
   }
 
   async function copyMarkdown() {
-    const local = editor?.text() ?? fetchedMd ?? undefined;
+    const local = editor?.text() ?? board?.markdown() ?? fetchedMd ?? undefined;
     if (!exists && !local) { toast('Noch leer.'); return; }
     try {
       if (local !== undefined) {
@@ -581,7 +657,7 @@ function startDoc(boot: Boot) {
     const res = await fetch(`/api/docs/${encodeURIComponent(id)}/trash`, { method: 'POST', headers: { ...ownerHeaders(id), ...adminHeaders() } });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { trashedHere = false; toast(data.error || 'Löschen fehlgeschlagen.'); return; }
-    recent.markTrashed(id, data.trashed, editor ? titleOf(editor.text()) : document.title);
+    recent.markTrashed(id, data.trashed, currentTitle());
     // Gleich weiterschreiben: neues, leeres Dokument (ohne Zurück zum gelöschten).
     location.replace('/');
   }
@@ -589,6 +665,7 @@ function startDoc(boot: Boot) {
   // ── Tastatur, Leiste beim Schreiben ausblenden ────────────────────────────
 
   addEventListener('keydown', e => {
+    if (isBoard) return;
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === 'e') {
       e.preventDefault();
@@ -618,6 +695,7 @@ function startDoc(boot: Boot) {
   // Titel in „Zuletzt geöffnet“ aktuell halten.
   addEventListener('pagehide', () => {
     if (editor && exists && !trashedHere) recent.touch(id, titleOf(editor.text()), true, tagsOf(editor.text()));
+    if (board && exists && !trashedHere) recent.touch(id, board.title() || 'Board', !!editKey, tagsOf(board.markdown()));
   });
 
   // Aufgaben in der Ansicht abhaken, wenn man bearbeiten darf.
@@ -661,19 +739,21 @@ function startDoc(boot: Boot) {
   document.body.dataset.mode = mode;
   renderBar();
   account.sync();
-  if (exists) {
+  if (isBoard) {
+    loadBoard();
+  } else if (exists) {
     enableTasks();
     enhance(article, boot.katexCss);
     if (editKey && !navigator.onLine) showLocalCopy();
   }
-  if (mode !== 'view') {
+  if (mode !== 'view' && !isBoard) {
     const target = mode;
     mode = 'view';
     setMode(target, false);
   }
 
   // „Datei öffnen …“: Inhalt landet im neuen, leeren Dokument (legt es dabei an).
-  const imported = exists ? null : takePending();
+  const imported = exists || isBoard ? null : takePending();
   if (imported) {
     loadEditor().then(async ed => {
       await ed.whenLocal();
@@ -688,7 +768,7 @@ function startDoc(boot: Boot) {
   dropZone(file => {
     if (mode !== 'view' && editor) fileToMarkdown(file).then(md => editor!.insertBlock(md), () => toast('Die Datei ließ sich nicht lesen.'));
     else openAsNew(file);
-  });
+  }, () => !isBoard);
 }
 
 // ── Gelöschtes Dokument (Papierkorb) ────────────────────────────────────────

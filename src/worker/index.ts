@@ -1,7 +1,8 @@
 // md.veerka.mp – Markdown-Dokumente ohne Login.
 //
 // Adressen:
-//   /                    neues Dokument mit zufälliger ID (Weiterleitung)
+//   /                    neues Dokument mit zufälliger ID (Weiterleitung;
+//                        /#board → neues Whiteboard, der Browser behält das #board)
 //   /<id>                Dokument ansehen; gibt es das noch nicht, öffnet
 //                        sich der Editor und legt es beim ersten Tippen an
 //   /<id>.md             reines Markdown (für Agenten, ?download=1 zum Speichern)
@@ -16,7 +17,7 @@
 //   DELETE /api/docs/<id>            endgültig löschen (Admin; Ersteller nur aus dem Papierkorb)
 //   POST   /api/docs/<id>/trash      in den Papierkorb (X-Owner-Key oder Admin)
 //   POST   /api/docs/<id>/restore    aus dem Papierkorb holen (X-Owner-Key oder Admin)
-//   POST   /api/docs/<id>/create     Browser legt Dokument an (Turnstile)
+//   POST   /api/docs/<id>/create     Browser legt Dokument an (Turnstile; { kind: 'board' } für ein Whiteboard)
 //   POST   /api/docs/<id>/images     Bild hochladen (X-Edit-Key)
 //   POST   /api/docs/<id>/pin        behalten ja/nein (Admin)
 //   POST   /api/docs/<id>/rename     neue Adresse (X-Edit-Key); die alte leitet weiter
@@ -161,6 +162,8 @@ const CSP = [
 interface Boot {
   page: 'doc' | 'admin' | 'home' | 'memos';
   id?: string;
+  /** Whiteboard statt Markdown. */
+  kind?: 'board';
   exists?: boolean;
   siteKey?: string;
   katexCss?: string;
@@ -283,9 +286,12 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
     // Für alle weg. Der Ersteller holt sich den Inhalt im Browser mit seinem Schlüssel.
     return page(req, 'Gelöscht', '<main id="app"></main>', { ...common, exists: true, trashed: info.trashed, ownerKey }, 410);
   }
+  const title = info.title || id;
+  if (info.kind === 'board') {
+    return page(req, title, '<main id="app"></main>', { ...common, exists: true, kind: 'board', editKey, ownerKey });
+  }
   await ratesFor([info.markdown]);
   const { html } = render(info.markdown);
-  const title = info.title || id;
   return page(req, title, `<main id="app"><article class="doc" id="view">${html}</article></main>`, { ...common, exists: true, editKey, ownerKey });
 }
 
@@ -407,6 +413,7 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
       if (!(await canEdit(req, env, id))) return fail(401, 'Keine Berechtigung.');
       const { markdown } = await readMarkdownBody(req);
       if (markdown.length > MAX_CHARS) return fail(413, 'Text zu lang.');
+      if ((await stub.info()).kind === 'board') return fail(409, 'Boards lassen sich nicht als Markdown ersetzen.');
       if (!(await stub.replace(markdown))) return fail(404, 'Dokument nicht gefunden.');
       return json({ id, url: docUrl(req, id) });
     }
@@ -426,13 +433,13 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
   if (action === 'create' && method === 'POST') {
     const admin = await isAdmin(req, env);
     const user = await currentUser(req, env);
+    const body = await req.json<{ token?: string; kind?: string }>().catch(() => ({} as { token?: string; kind?: string }));
     if (!admin) {
       const { success } = await env.CREATE_LIMIT.limit({ key: user ? `u:${user.sub}` : ip(req) });
       if (!success) return fail(429, 'Zu viele neue Dokumente. Bitte kurz warten.');
-      const body = await req.json<{ token?: string }>().catch(() => ({} as { token?: string }));
       if (!user && !(await turnstileOk(env, body.token, ip(req)))) return fail(403, 'Spam-Schutz nicht bestanden. Bitte Seite neu laden.');
     }
-    const editKey = await stub.create(id);
+    const editKey = await stub.create(id, '', undefined, body.kind === 'board' ? 'board' : 'md');
     if (!editKey) return fail(409, 'Dieses Dokument wurde gerade von jemand anderem angelegt.');
     const ownerKey = await stub.ownerKey();
     if (user) await accountStub(env, user.sub).upsert([{ id, editKey, ownerKey, opened: Date.now() }]);

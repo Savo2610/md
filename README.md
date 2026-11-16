@@ -54,6 +54,19 @@ Durable Object pro Dokument, Bilder in R2.
 - Klick auf „md“: neues Dokument und die zuletzt geöffneten (nur im Browser
   gespeichert, nichts auf dem Server).
 - Mehrere Leute können gleichzeitig schreiben (Yjs über WebSockets).
+- Whiteboards (`src/client/board.ts`, Datenmodell und Markdown in
+  `src/shared/board.ts`): „Neues Board“ im „md“-Menü bzw. `/#board`. Ein Board
+  ist ein Dokument mit `kind = board` (gleiche Links, Rechte, Papierkorb,
+  Umbenennen). Notizen, Bereiche, Formen, Pfeile (hängen an Elementen), Text,
+  Stift, Bilder (R2 wie im Editor). Doppelklick auf die Fläche: neue Notiz;
+  Tab beim Schreiben: nächste Notiz daneben (Shift: darunter). Eingefügter
+  Text wird zu einer Notiz pro Zeile. Kopfleiste: Titel, Timer für alle,
+  Abstimmen mit Punkten (verdeckt bis „Abstimmung beenden“), farbige Punkte
+  der anderen antippen = folgen, ⋯ → „Alle zu mir holen“. `/<id>.md` liefert
+  das Board als Markdown (Bereiche → Überschriften, Notizen → Liste, nach
+  Stimmen sortiert, Pfeile als „A → B“); ⋯ → „Als Dokument öffnen“ macht daraus
+  ein md-Dokument. Kürzel: V H N F R A T P I, ⌘D, ⌘Z, ⇧1 (alles zeigen),
+  Leertaste halten zum Verschieben.
 - Als App installierbar (PWA): Start auf `/home` mit den zuletzt geöffneten
   Dokumenten, kompakte Leiste mit „Bearbeiten/Fertig“, Menüs als Blatt von
   unten. Offline: Seiten und Editor kommen aus dem Service Worker
@@ -175,6 +188,8 @@ Live-Test ohne 2FA-Teil:
 | `src/shared/render.ts` | Markdown → HTML (Server und Browser), HackMD-Erweiterungen |
 | `src/client/main.ts` | Kopfleiste, Modi, Teilen, Umbenennen, Zuletzt geöffnet, Freischalten |
 | `src/client/editor.ts` | CodeMirror + Yjs, Slash-Menü, Auswahl-Leiste, Handy-Leiste, Bilder |
+| `src/client/board.ts` | Whiteboard: Fläche, Werkzeuge, Abstimmen, Timer, Folgen |
+| `src/shared/board.ts` | Board-Datenmodell, Board → Markdown (Server und Browser) |
 | `src/client/table.ts` | Tabellen: Tab/Enter, Ausrichten, Einfügen aus Tabellenprogrammen |
 | `src/client/settings.ts` | Einstellungen (Darstellung, Öffnen, Name, Rechtschreibung) |
 | `src/client/home.ts` | Übersicht (`/home`): Liste, Suche, Tag-Filter, Konto |

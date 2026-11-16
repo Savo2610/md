@@ -47,7 +47,8 @@ export interface EditorOptions {
   commands?: { name: string; key: string; run: () => void }[];
 }
 
-export interface Peer { name: string; color: string }
+/** id: Awareness-Client (Boards: zum Folgen). */
+export interface Peer { name: string; color: string; id?: number }
 
 export interface EditorStatus { status: Status; pending: boolean; synced: boolean; peers: Peer[] }
 

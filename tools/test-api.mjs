@@ -185,6 +185,24 @@ r = await fetch(`${BASE}/api/admin/docs`, { headers: { authorization: `Bearer ${
 ok(!(await j(r)).docs.some(x => x.id === id2), 'Und aus der Übersicht verschwunden');
 await fetch(`${BASE}/api/docs/${id}`, { method: 'DELETE', headers: API });
 
+// ── Whiteboard ──────────────────────────────────────────────────────────────
+const board = `${id}-board`;
+r = await fetch(`${BASE}/api/docs/${board}/create`, { method: 'POST', headers: { ...API, 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'board' }) });
+d = await j(r);
+const boardKey = d.editKey;
+ok(r.status === 201 && boardKey, 'Board anlegen');
+r = await fetch(`${BASE}/${board}`);
+ok(/"kind":"board"/.test(await r.text()), 'Seite startet als Board');
+r = await fetch(`${BASE}/${board}.md`);
+ok((await r.text()) === '# Board\n', 'Leeres Board als Markdown');
+r = await fetch(`${BASE}/api/docs/${board}`, { method: 'PUT', headers: { 'x-edit-key': boardKey, 'content-type': 'text/markdown' }, body: '# Text' });
+ok(r.status === 409, 'Board lässt sich nicht mit Markdown überschreiben');
+r = await fetch(`${BASE}/api/docs/${board}/rename`, { method: 'POST', headers: { 'x-edit-key': boardKey, 'content-type': 'application/json' }, body: JSON.stringify({ to: `${board}-neu` }) });
+ok(r.ok, 'Board umbenennen');
+r = await fetch(`${BASE}/${board}-neu`);
+ok(/"kind":"board"/.test(await r.text()), 'Bleibt nach dem Umbenennen ein Board');
+await fetch(`${BASE}/api/docs/${board}-neu`, { method: 'DELETE', headers: API });
+
 // ── Sonstiges ───────────────────────────────────────────────────────────────
 r = await fetch(`${BASE}/Gro%C3%9Fe%20K%C3%BCche`, { redirect: 'manual' });
 ok(r.status === 301 && r.headers.get('location') === `/${encodeURIComponent('große-küche')}`, 'Adresse wird normalisiert (Kleinbuchstaben, Bindestriche)');

@@ -3,7 +3,12 @@
 // Speicher (SQLite im Objekt):
 //   meta     Schlüssel/Wert: id, created, updated, accessed, editKey, ownerKey,
 //            pinned, imageBytes, markdown (letzter Stand als Text), title,
-//            flushedSeq, trashed (Zeitpunkt, wenn im Papierkorb)
+//            flushedSeq, trashed (Zeitpunkt, wenn im Papierkorb),
+//            kind ('board' für Whiteboards, sonst leer: Markdown)
+//
+// Whiteboards (src/shared/board.ts) liegen im selben Objekt, nur mit anderen
+// Yjs-Typen. Der Schnappschuss `markdown` ist dann aus dem Board erzeugt,
+// damit Titel, Übersicht und /<id>.md wie bei Dokumenten funktionieren.
 //
 // Papierkorb: Wer das Dokument angelegt hat (ownerKey), kann es löschen. Es
 // ist dann sofort für alle weg, bleibt aber TRASH_DAYS lang erhalten und
@@ -25,6 +30,7 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import * as syncProtocol from 'y-protocols/sync';
 import { titleOf } from '../shared/render';
+import { boardMarkdown, MAX_ITEMS } from '../shared/board';
 import { isRandomId, randomToken, timingSafeEqual } from './crypto';
 import { registry, type Env } from './env';
 
@@ -50,8 +56,11 @@ interface Attachment {
   aw: Record<string, number>;
 }
 
+export type DocKind = 'md' | 'board';
+
 export interface DocInfo {
   exists: boolean;
+  kind?: DocKind;
   markdown: string;
   title: string;
   updated: number;
@@ -69,6 +78,9 @@ export interface MoveData {
   pinned: boolean;
   imageBytes: number;
   imgPrefix: string;
+  kind?: DocKind;
+  /** Boards: kompletter Yjs-Stand (Markdown wäre verlustbehaftet). */
+  state?: Uint8Array;
 }
 
 const bytes = (u: Uint8Array) => u.slice().buffer;
@@ -122,9 +134,18 @@ export class Doc extends DurableObject<Env> {
     return this.load().getText('md');
   }
 
+  private kind(): DocKind {
+    return this.get('kind') === 'board' ? 'board' : 'md';
+  }
+
+  /** Text bzw. aus dem Board erzeugtes Markdown. */
+  private current(doc: Y.Doc): string {
+    return this.kind() === 'board' ? boardMarkdown(doc) : doc.getText('md').toString();
+  }
+
   /** Aktueller Text, ohne das Yjs-Dokument zu laden, wenn der Schnappschuss aktuell ist. */
   private markdown(): string {
-    if (this.ydoc || this.maxSeq() !== this.num('flushedSeq')) return this.text().toString();
+    if (this.ydoc || this.maxSeq() !== this.num('flushedSeq')) return this.current(this.load());
     return this.get('markdown') || '';
   }
 
@@ -156,6 +177,7 @@ export class Doc extends DurableObject<Env> {
     const markdown = this.markdown();
     return {
       exists: true,
+      kind: this.kind(),
       markdown,
       title: titleOf(markdown),
       updated: this.num('updated'),
@@ -167,7 +189,7 @@ export class Doc extends DurableObject<Env> {
    * Legt das Dokument an. `from` übernimmt Schlüssel, Bilder und Metadaten
    * eines umbenannten Dokuments.
    */
-  async create(id: string, initial = '', from?: MoveData): Promise<string | null> {
+  async create(id: string, initial = '', from?: MoveData, kind: DocKind = 'md'): Promise<string | null> {
     if (this.exists()) return null;
     this.sql.exec(`
       CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT);
@@ -180,9 +202,11 @@ export class Doc extends DurableObject<Env> {
       id, created: from?.created ?? now, updated: now, accessed: now, editKey, ...(ownerKey ? { ownerKey } : {}),
       pinned: from?.pinned ? 1 : 0, imageBytes: from?.imageBytes ?? 0, imgPrefix: from?.imgPrefix ?? id,
       flushedSeq: 0, markdown: '',
+      ...((from?.kind ?? kind) === 'board' ? { kind: 'board' } : {}),
     };
     for (const [k, v] of Object.entries(meta)) this.set(k, v);
-    if (from?.markdown || initial) this.text().insert(0, (from?.markdown ?? initial).slice(0, MAX_CHARS));
+    if (from?.state) Y.applyUpdate(this.load(), from.state);
+    else if (this.kind() === 'md' && (from?.markdown || initial)) this.text().insert(0, (from?.markdown ?? initial).slice(0, MAX_CHARS));
     await this.flush(true);
     await this.scheduleAlarm();
     return editKey;
@@ -257,7 +281,7 @@ export class Doc extends DurableObject<Env> {
   }
 
   async replace(markdown: string): Promise<boolean> {
-    if (!this.live()) return false;
+    if (!this.live() || this.kind() === 'board') return false;
     const t = this.text();
     this.load().transact(() => {
       t.delete(0, t.length);
@@ -290,6 +314,8 @@ export class Doc extends DurableObject<Env> {
       pinned: this.get('pinned') === '1',
       imageBytes: this.num('imageBytes'),
       imgPrefix: this.imagePrefix(),
+      kind: this.kind(),
+      ...(this.kind() === 'board' ? { state: Y.encodeStateAsUpdate(this.load()) } : {}),
     };
   }
 
@@ -368,7 +394,7 @@ export class Doc extends DurableObject<Env> {
     if (!force && seq === this.num('flushedSeq') && !this.flushPending) return;
     this.flushPending = false;
     const doc = this.load();
-    const markdown = doc.getText('md').toString();
+    const markdown = this.current(doc);
     let flushed = seq;
     const count = this.sql.exec('SELECT COUNT(*) AS n FROM updates').one().n as number;
     if (count > COMPACT_AFTER) {
@@ -488,7 +514,7 @@ export class Doc extends DurableObject<Env> {
       } else {
         const update = decoding.readVarUint8Array(dec);
         if (!att.edit) { ws.send(notice({ type: 'readonly' })); return; }
-        if (this.text().length > MAX_CHARS) { ws.send(notice({ type: 'limit' })); return; }
+        if (this.full()) { ws.send(notice({ type: 'limit' })); return; }
         Y.applyUpdate(this.load(), update, ws);
       }
       return;
@@ -513,6 +539,12 @@ export class Doc extends DurableObject<Env> {
     }
 
     if (type === MSG_QUERY_AWARENESS) this.broadcast(data, ws);
+  }
+
+  /** Maximalgröße erreicht: Text zu lang bzw. zu viele Elemente auf dem Board. */
+  private full(): boolean {
+    if (this.kind() === 'board') return this.load().getMap('items').size > MAX_ITEMS;
+    return this.text().length > MAX_CHARS;
   }
 
   async webSocketClose(ws: WebSocket, code: number) {
