@@ -6,6 +6,7 @@
 import { enhance } from './enhance';
 import type { EditorHandle, EditorStatus } from './editor';
 import type { BoardHandle } from './board';
+import type { PackHandle } from './pack';
 import { titleOf, slugify } from '../shared/title';
 import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, unlock, recent, ago, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, docTags, type MenuItem } from './ui';
 import { tagsOf } from '../shared/tags';
@@ -17,7 +18,7 @@ interface Boot {
   page: 'doc' | 'admin' | 'home' | 'memos';
   build?: string;
   id?: string;
-  kind?: 'board';
+  kind?: 'board' | 'pack';
   exists?: boolean;
   siteKey?: string;
   katexCss?: string;
@@ -78,9 +79,15 @@ function startDoc(boot: Boot) {
   const isBoard = boot.kind === 'board' || (!exists && location.hash === '#board');
   if (location.hash === '#board') history.replaceState(null, '', location.pathname + location.search);
   if (isBoard) document.body.classList.add('is-board');
+  // Packliste: vom Server (kind) oder neu über /#pack.
+  const isPack = !isBoard && (boot.kind === 'pack' || (!exists && location.hash === '#pack'));
+  if (location.hash === '#pack') history.replaceState(null, '', location.pathname + location.search);
+  if (isPack) document.body.classList.add('is-pack');
+  /** Board oder Packliste: eigene Oberfläche statt Editor und Ansicht. */
+  const isApp = isBoard || isPack;
 
   const app = $('#app')!;
-  const article: HTMLElement = $<HTMLElement>('#view') ?? (isBoard ? el('article', { class: 'doc', id: 'view' }) : app.appendChild(el('article', { class: 'doc', id: 'view' })));
+  const article: HTMLElement = $<HTMLElement>('#view') ?? (isApp ? el('article', { class: 'doc', id: 'view' }) : app.appendChild(el('article', { class: 'doc', id: 'view' })));
   const workspace = el('div', { class: 'workspace' });
   const editorPane = el('div', { class: 'pane-editor' });
   const previewPane = el('div', { class: 'pane-preview' });
@@ -88,7 +95,8 @@ function startDoc(boot: Boot) {
   previewPane.append(preview);
   workspace.append(editorPane, previewPane);
   const boardHost = el('div', { class: 'board-host' });
-  app.append(isBoard ? boardHost : workspace);
+  const packHost = el('div', { class: 'pack-host' });
+  app.append(isBoard ? boardHost : isPack ? packHost : workspace);
 
   /** #tags in der gerenderten Ansicht (vom Server). */
   const viewTags = () => [...article.querySelectorAll<HTMLElement>('.doc-tag')].map(s => s.dataset.tag || '').filter(Boolean)
@@ -123,15 +131,16 @@ function startDoc(boot: Boot) {
   document.body.prepend(bar);
 
   // Darf man bearbeiten: zuletzt benutzter Modus bzw. wie in den Einstellungen.
-  let mode: Mode = isBoard ? (canEdit() ? 'edit' : 'view') : !exists || startInEdit ? 'edit' : editKey ? startMode() : 'view';
+  let mode: Mode = isApp ? (canEdit() ? 'edit' : 'view') : !exists || startInEdit ? 'edit' : editKey ? startMode() : 'view';
   let spellcheck = spellcheckOn();
   // Umgeschaltet in den Einstellungen.
   addEventListener('md:spellcheck', e => { spellcheck = (e as CustomEvent<boolean>).detail; editor?.setSpellcheck(spellcheck); });
-  addEventListener('md:name', () => { editor?.setName(writerName()); board?.setName(writerName()); });
+  addEventListener('md:name', () => { editor?.setName(writerName()); board?.setName(writerName()); pack?.setName(writerName()); });
   let editor: EditorHandle | null = null;
   let board: BoardHandle | null = null;
+  let pack: PackHandle | null = null;
   /** Titel für Umbenennen, Papierkorb und „Zuletzt geöffnet“. */
-  const currentTitle = () => (board ? board.title() : editor ? titleOf(editor.text()) : document.title);
+  const currentTitle = () => (board ? board.title() : pack ? pack.title() : editor ? titleOf(editor.text()) : document.title);
   let editorLoading: Promise<EditorHandle> | null = null;
   let lastStatus: EditorStatus | null = null;
 
@@ -154,6 +163,12 @@ function startDoc(boot: Boot) {
         right.append(board.controls);
       }
       if (!compactQuery.matches) right.append(el('span', { class: 'sep', 'aria-hidden': 'true' }), button('Teilen', 'Links zum Teilen', share));
+      right.append(button('⋯', 'Mehr', more, 't more'));
+      renderStatus();
+      return;
+    }
+    if (isPack) {
+      if (!compactQuery.matches) right.append(button('Teilen', 'Links zum Teilen', share));
       right.append(button('⋯', 'Mehr', more, 't more'));
       renderStatus();
       return;
@@ -204,7 +219,7 @@ function startDoc(boot: Boot) {
     status.dataset.state = state;
 
     peers.replaceChildren();
-    const list = (mode !== 'view' || isBoard) && s?.status === 'online' ? s.peers : [];
+    const list = (mode !== 'view' || isApp) && s?.status === 'online' ? s.peers : [];
     for (const p of list.slice(0, 5)) {
       const dot = isBoard && board && p.id !== undefined
         ? el('button', { type: 'button', class: 'peer', title: `${p.name} folgen`, 'aria-label': `${p.name} folgen` })
@@ -302,12 +317,51 @@ function startDoc(boot: Boot) {
     return board;
   }
 
+  async function loadPack(): Promise<PackHandle> {
+    const m = await import('./pack');
+    pack = m.mountPack({
+      id,
+      parent: packHost,
+      exists,
+      editable: mode !== 'view',
+      name: writerName(),
+      wsUrl: () => {
+        const u = new URL(`/api/docs/${encodeURIComponent(id)}/ws`, location.href);
+        u.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        if (editKey) u.searchParams.set('key', editKey);
+        return u.toString();
+      },
+      auth: (): Record<string, string> => (editKey ? { 'x-edit-key': editKey } : {}),
+      ensureCreated: create,
+      onStatus: s => { lastStatus = s; renderStatus(); },
+      onTitle: t => { document.title = t || 'Packliste'; },
+      onNotice: n => {
+        if (n.type === 'hello' && n.edit === false && mode !== 'view') {
+          store.del(keyName);
+          editKey = null;
+          toast('Keine Berechtigung zum Bearbeiten. Mit dem Bearbeiten-Link oder dem Code freischalten.');
+          setMode('view', false);
+        } else if (n.type === 'limit') {
+          toast('Die Packliste hat die Maximalgröße erreicht.');
+        } else if (n.type === 'moved' && n.to) {
+          followMove(n.to);
+        } else if (n.type === 'trashed' && !trashedHere) {
+          location.reload();
+        }
+      },
+      toast,
+    });
+    renderBar();
+    return pack;
+  }
+
   async function setMode(next: Mode, remember = true) {
     if (next !== 'view' && !canEdit()) return;
-    if (isBoard) {
+    if (isApp) {
       mode = next === 'view' ? 'view' : 'edit';
       document.body.dataset.mode = mode;
       board?.setEditable(mode !== 'view');
+      pack?.setEditable(mode !== 'view');
       renderBar();
       return;
     }
@@ -346,7 +400,7 @@ function startDoc(boot: Boot) {
     const res = await fetch(`/api/docs/${encodeURIComponent(id)}/create`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(isBoard ? { token, kind: 'board' } : { token }),
+      body: JSON.stringify(isBoard ? { token, kind: 'board' } : isPack ? { token, kind: 'pack' } : { token }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -407,7 +461,7 @@ function startDoc(boot: Boot) {
     const isRandom = /^[a-z0-9]{10}$/.test(id) && /\d/.test(id) && /[a-z]/.test(id);
     // Vorschlag: aus dem Titel (erste Überschrift bzw. erste Zeile) des Dokuments.
     const title = currentTitle();
-    const full = title === id || title === 'Neues Dokument' || title === 'Board' ? '' : slugify(title);
+    const full = title === id || title === 'Neues Dokument' || title === 'Board' || title === 'Packliste' ? '' : slugify(title);
     const suggestion = full.length <= 60 ? full : full.slice(0, 60).replace(/-[^-]*$/, '');
     const input = el('input', { type: 'text', value: isRandom && suggestion ? suggestion : id, placeholder: 'meine-anleitung', spellcheck: 'false', autocapitalize: 'off', 'aria-label': 'Neue Adresse' }) as HTMLInputElement;
     const save = el('button', { type: 'submit', class: 't boxed' }, 'Ändern');
@@ -485,7 +539,7 @@ function startDoc(boot: Boot) {
       line.append(copy);
       body.append(row);
     });
-    if (!exists) body.append(el('p', { class: 'hint' }, isBoard ? 'Das Board wird angelegt, sobald du etwas daraufsetzt.' : 'Das Dokument wird angelegt, sobald du etwas schreibst.'));
+    if (!exists) body.append(el('p', { class: 'hint' }, isBoard ? 'Das Board wird angelegt, sobald du etwas daraufsetzt.' : isPack ? 'Die Packliste wird angelegt, sobald du etwas einträgst.' : 'Das Dokument wird angelegt, sobald du etwas schreibst.'));
     dialog('Teilen', body);
   }
 
@@ -519,7 +573,7 @@ function startDoc(boot: Boot) {
   // ── Menüs ─────────────────────────────────────────────────────────────────
 
   function openRecent() {
-    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')], ['Neues Board', () => (location.href = '/#board')], ['Datei öffnen …', () => openAsNew()], ['Alle Dokumente', () => (location.href = '/home')], ['Memos', () => (location.href = '/memos')]];
+    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')], ['Neues Board', () => (location.href = '/#board')], ['Neue Packliste', () => (location.href = '/#pack')], ['Datei öffnen …', () => openAsNew()], ['Alle Dokumente', () => (location.href = '/home')], ['Memos', () => (location.href = '/memos')]];
     const list = recent.list().filter(r => r.id !== id && !r.trashed);
     if (list.length) items.push(el('div', { class: 'menu-label' }, 'Zuletzt geöffnet'));
     for (const r of list.slice(0, 5)) {
@@ -542,8 +596,11 @@ function startDoc(boot: Boot) {
       items.push(['Neues Dokument', () => { if (navigator.onLine) location.href = '/'; else toast('Offline: Neue Dokumente gehen nur mit Verbindung.'); }]);
     }
     if (isBoard && board && mode !== 'view' && board.peerCount()) items.push(['Alle zu mir holen', () => board!.summon()]);
+    if (pack) items.push(...pack.menuItems());
     items.push(['Markdown kopieren', copyMarkdown]);
-    if (isBoard) {
+    if (isPack) {
+      // Kein Herunterladen/Drucken: „Als Text teilen“ und /<id>.md reichen.
+    } else if (isBoard) {
       items.push(['Als Dokument öffnen', () => { if (board) openAsNew(new File([board.markdown()], `${board.title() || 'Board'}.md`, { type: 'text/markdown' })); }]);
       items.push(['Drucken (.pdf)', () => board?.print()]);
     } else {
@@ -556,7 +613,7 @@ function startDoc(boot: Boot) {
       store.set(keyName, key);
       recent.touch(id, document.title, true);
       enableTasks();
-      if (isBoard) { setMode('edit', false); board?.reconnect(); }
+      if (isApp) { setMode('edit', false); board?.reconnect(); pack?.reconnect(); }
       renderBar();
       toast('Freigeschaltet. Du kannst dieses Dokument jetzt bearbeiten.');
     };
@@ -586,7 +643,7 @@ function startDoc(boot: Boot) {
   }
 
   async function copyMarkdown() {
-    const local = editor?.text() ?? board?.markdown() ?? fetchedMd ?? undefined;
+    const local = editor?.text() ?? board?.markdown() ?? pack?.markdown() ?? fetchedMd ?? undefined;
     if (!exists && !local) { toast('Noch leer.'); return; }
     try {
       if (local !== undefined) {
@@ -665,7 +722,7 @@ function startDoc(boot: Boot) {
   // ── Tastatur, Leiste beim Schreiben ausblenden ────────────────────────────
 
   addEventListener('keydown', e => {
-    if (isBoard) return;
+    if (isApp) return;
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === 'e') {
       e.preventDefault();
@@ -696,6 +753,7 @@ function startDoc(boot: Boot) {
   addEventListener('pagehide', () => {
     if (editor && exists && !trashedHere) recent.touch(id, titleOf(editor.text()), true, tagsOf(editor.text()));
     if (board && exists && !trashedHere) recent.touch(id, board.title() || 'Board', !!editKey, tagsOf(board.markdown()));
+    if (pack && exists && !trashedHere) recent.touch(id, pack.title() || 'Packliste', !!editKey);
   });
 
   // Aufgaben in der Ansicht abhaken, wenn man bearbeiten darf.
@@ -741,19 +799,21 @@ function startDoc(boot: Boot) {
   account.sync();
   if (isBoard) {
     loadBoard();
+  } else if (isPack) {
+    loadPack();
   } else if (exists) {
     enableTasks();
     enhance(article, boot.katexCss);
     if (editKey && !navigator.onLine) showLocalCopy();
   }
-  if (mode !== 'view' && !isBoard) {
+  if (mode !== 'view' && !isApp) {
     const target = mode;
     mode = 'view';
     setMode(target, false);
   }
 
   // „Datei öffnen …“: Inhalt landet im neuen, leeren Dokument (legt es dabei an).
-  const imported = exists || isBoard ? null : takePending();
+  const imported = exists || isApp ? null : takePending();
   if (imported) {
     loadEditor().then(async ed => {
       await ed.whenLocal();
@@ -768,7 +828,7 @@ function startDoc(boot: Boot) {
   dropZone(file => {
     if (mode !== 'view' && editor) fileToMarkdown(file).then(md => editor!.insertBlock(md), () => toast('Die Datei ließ sich nicht lesen.'));
     else openAsNew(file);
-  }, () => !isBoard);
+  }, () => !isApp);
 }
 
 // ── Gelöschtes Dokument (Papierkorb) ────────────────────────────────────────

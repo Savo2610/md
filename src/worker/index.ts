@@ -2,7 +2,8 @@
 //
 // Adressen:
 //   /                    neues Dokument mit zufälliger ID (Weiterleitung;
-//                        /#board → neues Whiteboard, der Browser behält das #board)
+//                        /#board → neues Whiteboard, /#pack → neue Packliste;
+//                        der Browser behält das #…)
 //   /<id>                Dokument ansehen; gibt es das noch nicht, öffnet
 //                        sich der Editor und legt es beim ersten Tippen an
 //   /<id>.md             reines Markdown (für Agenten, ?download=1 zum Speichern)
@@ -17,7 +18,7 @@
 //   DELETE /api/docs/<id>            endgültig löschen (Admin; Ersteller nur aus dem Papierkorb)
 //   POST   /api/docs/<id>/trash      in den Papierkorb (X-Owner-Key oder Admin)
 //   POST   /api/docs/<id>/restore    aus dem Papierkorb holen (X-Owner-Key oder Admin)
-//   POST   /api/docs/<id>/create     Browser legt Dokument an (Turnstile; { kind: 'board' } für ein Whiteboard)
+//   POST   /api/docs/<id>/create     Browser legt Dokument an (Turnstile; { kind: 'board' | 'pack' })
 //   POST   /api/docs/<id>/images     Bild hochladen (X-Edit-Key)
 //   POST   /api/docs/<id>/pin        behalten ja/nein (Admin)
 //   POST   /api/docs/<id>/rename     neue Adresse (X-Edit-Key); die alte leitet weiter
@@ -60,7 +61,7 @@ import { titleOf } from '../shared/title';
 import { tagsOf } from '../shared/tags';
 import { fxRates, ratesFor } from './fx';
 import { randomId, randomToken, signToken, verifyTotp, verifyToken, timingSafeEqual } from './crypto';
-import { MAX_CHARS } from './doc';
+import { MAX_CHARS, docKind } from './doc';
 import { accountStub, docStub, registry, type Env } from './env';
 import { auth, clearSessionCookie, currentUser, type User } from './auth';
 import { FILE_NAME, MAX_FILE, MAX_MEMO, MEMO_ID, type AccountDoc, type Memo } from './account';
@@ -162,8 +163,8 @@ const CSP = [
 interface Boot {
   page: 'doc' | 'admin' | 'home' | 'memos';
   id?: string;
-  /** Whiteboard statt Markdown. */
-  kind?: 'board';
+  /** Whiteboard bzw. Packliste statt Markdown. */
+  kind?: 'board' | 'pack';
   exists?: boolean;
   siteKey?: string;
   katexCss?: string;
@@ -287,8 +288,8 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
     return page(req, 'Gelöscht', '<main id="app"></main>', { ...common, exists: true, trashed: info.trashed, ownerKey }, 410);
   }
   const title = info.title || id;
-  if (info.kind === 'board') {
-    return page(req, title, '<main id="app"></main>', { ...common, exists: true, kind: 'board', editKey, ownerKey });
+  if (info.kind === 'board' || info.kind === 'pack') {
+    return page(req, title, '<main id="app"></main>', { ...common, exists: true, kind: info.kind, editKey, ownerKey });
   }
   await ratesFor([info.markdown]);
   const { html } = render(info.markdown);
@@ -413,7 +414,8 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
       if (!(await canEdit(req, env, id))) return fail(401, 'Keine Berechtigung.');
       const { markdown } = await readMarkdownBody(req);
       if (markdown.length > MAX_CHARS) return fail(413, 'Text zu lang.');
-      if ((await stub.info()).kind === 'board') return fail(409, 'Boards lassen sich nicht als Markdown ersetzen.');
+      const kind = (await stub.info()).kind;
+      if (kind && kind !== 'md') return fail(409, kind === 'pack' ? 'Packlisten lassen sich nicht als Markdown ersetzen.' : 'Boards lassen sich nicht als Markdown ersetzen.');
       if (!(await stub.replace(markdown))) return fail(404, 'Dokument nicht gefunden.');
       return json({ id, url: docUrl(req, id) });
     }
@@ -439,7 +441,7 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
       if (!success) return fail(429, 'Zu viele neue Dokumente. Bitte kurz warten.');
       if (!user && !(await turnstileOk(env, body.token, ip(req)))) return fail(403, 'Spam-Schutz nicht bestanden. Bitte Seite neu laden.');
     }
-    const editKey = await stub.create(id, '', undefined, body.kind === 'board' ? 'board' : 'md');
+    const editKey = await stub.create(id, '', undefined, docKind(body.kind));
     if (!editKey) return fail(409, 'Dieses Dokument wurde gerade von jemand anderem angelegt.');
     const ownerKey = await stub.ownerKey();
     if (user) await accountStub(env, user.sub).upsert([{ id, editKey, ownerKey, opened: Date.now() }]);
@@ -919,6 +921,10 @@ export default {
     // board.veerka.mp/retro das Board „retro“ (bzw. legt es als Board an).
     if (url.hostname === 'board.veerka.mp' || url.hostname === 'wb.veerka.mp') {
       return new Response(null, { status: 302, headers: { location: `https://md.veerka.mp${path}#board` } });
+    }
+    // Dasselbe für Packlisten: pack.veerka.mp bzw. pack.veerka.mp/festival.
+    if (url.hostname === 'pack.veerka.mp') {
+      return new Response(null, { status: 302, headers: { location: `https://md.veerka.mp${path}#pack` } });
     }
 
     if (/^\/(assets|fonts|icons)\//.test(path) || STATIC_FILES.has(path)) {

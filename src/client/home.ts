@@ -21,7 +21,7 @@ export function start() {
   const right = el('nav', { class: 'bar-right' });
   // „md“ oben links: Einstellungen und Datenschutz, klein wie auf den Dokumentseiten.
   const brand = el('button', { type: 'button', class: 'brand', title: 'Menü', 'aria-haspopup': 'dialog' }, 'md');
-  brand.addEventListener('click', () => menu('left', [['Neues Dokument', () => (location.href = '/')], ['Neues Board', () => (location.href = '/#board')], ['Datei öffnen …', () => openAsNew()], ['Memos', () => (location.href = '/memos')], fineRow()]));
+  brand.addEventListener('click', () => menu('left', [['Neues Dokument', () => (location.href = '/')], ['Neues Board', () => (location.href = '/#board')], ['Neue Packliste', () => (location.href = '/#pack')], ['Datei öffnen …', () => openAsNew()], ['Memos', () => (location.href = '/memos')], fineRow()]));
   dropZone(file => openAsNew(file));
   const bar = el('header', { id: 'bar' },
     el('div', { class: 'bar-left' }, brand),

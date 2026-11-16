@@ -68,6 +68,20 @@ Durable Object pro Dokument, Bilder in R2.
   Stimmen sortiert, Pfeile als „A → B“); ⋯ → „Als Dokument öffnen“ macht daraus
   ein md-Dokument. Kürzel: V H N F R A T P I, ⌘D, ⌘Z, ⇧1 (alles zeigen),
   Leertaste halten zum Verschieben.
+- Packlisten (`src/client/pack.ts`, Datenmodell, Kategorien und Markdown in
+  `src/shared/pack.ts`, übernommen aus packliste.veerka.mp): „Neue Packliste“
+  im „md“-Menü bzw. `/#pack`, oder `pack.veerka.mp` (leitet auf
+  `md.veerka.mp/<pfad>#pack` weiter). Ein Dokument mit `kind = pack` (gleiche
+  Links, Rechte, Papierkorb, Umbenennen). Artikel landen per Wörterbuch in einer
+  von sieben Kategorien, „3x Isomatte“ setzt die Menge. Abhaken = „ich habe es
+  eingepackt“, mit 1 s Bedenkzeit, danach unter „Eingepackt“. Pro Artikel
+  „Jede Person“ (erledigt, sobald ich es habe) oder „Einmal für alle“ (erledigt,
+  wenn die Summe reicht; ＋ übernimmt eins). Wer den Bearbeiten-Link hat, packt
+  mit; Name aus den Einstellungen bzw. „Wer bringt was“. Zurücksetzen nur für
+  sich oder für alle, mit Rückgängig. Gerätewissen im Browser: geänderte
+  Kategorie/Packmodus je Name (`md:pack:learned`) und der Stand der eigenen
+  Listen (`md:pack:lists`) für Vorschläge und „Aus Liste übernehmen“.
+  `/<id>.md` liefert die Liste als Aufgabenliste.
 - Als App installierbar (PWA): Start auf `/home` mit den zuletzt geöffneten
   Dokumenten, kompakte Leiste mit „Bearbeiten/Fertig“, Menüs als Blatt von
   unten. Offline: Seiten und Editor kommen aus dem Service Worker
