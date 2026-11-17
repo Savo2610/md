@@ -1291,3 +1291,14 @@ body.pk-paged #bar { border-bottom: 0; }
   .pack { padding-bottom: calc(30vh + 80px); }
 }
 @media (max-width: 600px) { body.is-pack #toast, body.is-pack .undo-toast { bottom: calc(88px + env(safe-area-inset-bottom)); } }
+
+/* Umzug fertig: neue App, alte löschen */
+.umzug-steps { margin: 18px 0 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 14px; }
+.umzug-steps li { padding-left: 4px; }
+.umzug-steps li > span { display: inline; }
+.umzug-steps .t.boxed { margin-top: 2px; }
+.umzug-steps .umzug-open { display: table; margin: 10px 0 0; text-decoration: none; font-size: 14px; line-height: 1; }
+.umzug-key { display: inline-block; min-width: 1.4em; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; text-align: center; font-size: 14px; }
+.umzug-foot a.t.boxed { display: inline-block; text-decoration: none; font-size: 14px; line-height: 1; }
+.umzug a.t.boxed { border: 1px solid var(--line); border-radius: 4px; padding: 8px 11px; color: var(--fg); }
+.umzug a.t.boxed:hover { background: var(--soft); }
