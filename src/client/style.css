@@ -1223,3 +1223,15 @@ body.pk-paged #bar { border-bottom: 0; }
 .pk-on[aria-pressed="true"] { background: var(--soft); color: var(--fg); border-color: var(--faint); }
 .pk-on[aria-pressed="true"] svg { opacity: 1; }
 .pk-on.busy { opacity: .6; }
+
+/* Umzug aus der alten Packliste */
+.umzug { max-width: var(--measure); margin: 0 auto; padding: calc(var(--bar) + 44px) var(--gutter) 80px; font-size: 16px; line-height: 1.5; }
+.umzug h1 { font-size: 1.75em; line-height: 1.25; margin: 0 0 14px; letter-spacing: -.005em; }
+.umzug-meta { color: var(--muted); font-size: 14px; }
+.umzug-body > .umzug-meta { margin: 0 0 18px; }
+.umzug-lists { list-style: none; margin: 8px 0 0; padding: 0; }
+.umzug-lists li { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.umzug-title { min-width: 0; overflow-wrap: anywhere; }
+.umzug-lists .umzug-meta { white-space: nowrap; font-size: 13px; }
+.umzug-foot { margin-top: 22px; }
+@media (max-width: 600px) { .umzug { padding-top: calc(var(--bar) + 24px); } }

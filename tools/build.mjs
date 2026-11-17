@@ -47,7 +47,7 @@ function precacheList(metafile) {
     wanted.add(file);
     for (const imp of outputs[file].imports) {
       if (imp.kind === 'import-statement') visit(imp.path);
-      else if (imp.kind === 'dynamic-import' && /\/(editor|board|pack|admin|home|html2md|memos|qr)-/.test(imp.path)) visit(imp.path);
+      else if (imp.kind === 'dynamic-import' && /\/(editor|board|pack|umzug|admin|home|html2md|memos|qr)-/.test(imp.path)) visit(imp.path);
     }
   };
   for (const [file, info] of Object.entries(outputs)) {
@@ -57,7 +57,7 @@ function precacheList(metafile) {
   for (const dir of ['fonts', 'icons']) {
     for (const f of readdirSync(`public/${dir}`)) if (/\.(woff2|png|svg)$/.test(f)) files.push(`/${dir}/${f}`);
   }
-  return files.concat(['/favicon.svg', '/manifest.webmanifest', '/memos.webmanifest', '/apple-touch-icon.png', '/memos-touch-icon.png']);
+  return files.concat(['/favicon.svg', '/manifest.webmanifest', '/memos.webmanifest', '/pack.webmanifest', '/apple-touch-icon.png', '/memos-touch-icon.png', '/pack-touch-icon.png']);
 }
 
 const options = {

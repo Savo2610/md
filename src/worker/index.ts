@@ -62,6 +62,8 @@ import { tagsOf } from '../shared/tags';
 import { fxRates, ratesFor } from './fx';
 import { randomId, randomToken, signToken, verifyTotp, verifyToken, timingSafeEqual } from './crypto';
 import { MAX_CHARS, docKind } from './doc';
+import { oldLists, packIdFor, packState, packlisteEnabled } from './packliste';
+import { guessCategory } from '../shared/pack';
 import { accountStub, docStub, registry, type Env } from './env';
 import { auth, clearSessionCookie, currentUser, type User } from './auth';
 import { FILE_NAME, MAX_FILE, MAX_MEMO, MEMO_ID, type AccountDoc, type Memo } from './account';
@@ -72,9 +74,9 @@ export { Account } from './account';
 
 const ADMIN_TTL = 12 * 3600;
 const MAX_IMAGE = 6 * 1024 * 1024;
-const RESERVED = new Set(['api', 'auth', 'admin', 'home', 'memos', 'datenschutz', 'i', 'assets', 'fonts', 'icons', 'new', 'robots.txt', 'favicon.svg', 'favicon.ico', 'sw.js', 'manifest.webmanifest', 'apple-touch-icon.png']);
+const RESERVED = new Set(['api', 'auth', 'admin', 'home', 'memos', 'pack', 'pack.webmanifest', 'pack-touch-icon.png', 'datenschutz', 'i', 'assets', 'fonts', 'icons', 'new', 'robots.txt', 'favicon.svg', 'favicon.ico', 'sw.js', 'manifest.webmanifest', 'apple-touch-icon.png']);
 /** Statische Dateien, die direkt aus public/ kommen. */
-const STATIC_FILES = new Set(['/favicon.svg', '/sw.js', '/manifest.webmanifest', '/memos.webmanifest', '/apple-touch-icon.png', '/memos-touch-icon.png']);
+const STATIC_FILES = new Set(['/favicon.svg', '/sw.js', '/manifest.webmanifest', '/memos.webmanifest', '/pack.webmanifest', '/apple-touch-icon.png', '/memos-touch-icon.png', '/pack-touch-icon.png']);
 const IMAGE_TYPES: Record<string, string> = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/avif': 'avif' };
 
 // ── Hilfen ──────────────────────────────────────────────────────────────────
@@ -161,7 +163,7 @@ const CSP = [
 ].join('; ');
 
 interface Boot {
-  page: 'doc' | 'admin' | 'home' | 'memos';
+  page: 'doc' | 'admin' | 'home' | 'memos' | 'packstart' | 'umzug';
   id?: string;
   /** Whiteboard bzw. Packliste statt Markdown. */
   kind?: 'board' | 'pack';
@@ -191,6 +193,7 @@ const memoOut = (m: Memo): MemoOut => ({ ...m, html: render(m.text).html });
 interface AppHead { manifest: string; title: string; icon: string }
 const MD_APP: AppHead = { manifest: '/manifest.webmanifest', title: 'md', icon: '/apple-touch-icon.png' };
 const MEMOS_APP: AppHead = { manifest: '/memos.webmanifest', title: 'Memos', icon: '/memos-touch-icon.png' };
+const PACK_APP: AppHead = { manifest: '/pack.webmanifest', title: 'Packliste', icon: '/pack-touch-icon.png' };
 
 const loginEnabled = (env: Env) => !!env.GOOGLE_CLIENT_ID || env.DEV_LOGIN === '1';
 const publicUser = (u: User | null) => (u ? { name: u.name, email: u.email, picture: u.picture } : null);
@@ -291,7 +294,7 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
   }
   const title = info.title || id;
   if (info.kind === 'board' || info.kind === 'pack') {
-    return page(req, title, '<main id="app"></main>', { ...common, exists: true, kind: info.kind, editKey, ownerKey });
+    return page(req, title, '<main id="app"></main>', { ...common, exists: true, kind: info.kind, editKey, ownerKey }, 200, info.kind === 'pack' ? PACK_APP : MD_APP);
   }
   await ratesFor([info.markdown]);
   const { html } = render(info.markdown);
@@ -320,6 +323,66 @@ async function linkedMemos(env: Env, acc: ReturnType<typeof accountStub>, list: 
     const text = info.markdown.trim() ? info.markdown : m.text;
     return { ...m, doc, text, html: render(text).html, docTitle: info.title || doc };
   }));
+}
+
+/**
+ * Umzug aus der alten Packliste (Firebase). GET zeigt, was es gibt; POST legt
+ * die Listen an bzw. findet schon umgezogene wieder (feste Adresse je alter
+ * Liste) und trägt sie ins Konto ein. Body: { only?: string[] } (md-Adressen).
+ */
+async function packUmzug(req: Request, env: Env): Promise<Response> {
+  const user = await currentUser(req, env);
+  if (!user) return fail(401, 'Bitte mit Google anmelden.');
+  if (!packlisteEnabled(env.FIREBASE_SERVICE_ACCOUNT)) return fail(503, 'Der Umzug ist noch nicht eingerichtet.');
+  if (req.method !== 'GET' && req.method !== 'POST') return fail(405, 'Methode nicht erlaubt.');
+  let lists;
+  try {
+    lists = await oldLists(env.FIREBASE_SERVICE_ACCOUNT, user.sub, user.email);
+  } catch (err) {
+    console.error(err);
+    return fail(502, 'Die alte Packliste ist gerade nicht erreichbar.');
+  }
+  if (!lists) return json({ found: false, lists: [] });
+  const withIds = await Promise.all(lists.map(async l => ({ ...l, id: await packIdFor(l.key) })));
+
+  if (req.method === 'GET') {
+    const out = [];
+    for (const l of withIds) {
+      const info = await docStub(env, l.id).info();
+      out.push({ id: l.id, title: l.title, count: l.items.length, shared: l.shared, moved: info.exists || !!info.movedTo });
+    }
+    return json({ found: true, lists: out });
+  }
+
+  const { success } = await env.CREATE_LIMIT.limit({ key: `u:${user.sub}` });
+  if (!success) return fail(429, 'Zu viele Versuche. Bitte kurz warten.');
+  const body = await req.json<{ only?: unknown }>().catch(() => ({} as { only?: unknown }));
+  const only = Array.isArray(body.only) ? new Set(body.only.map(String)) : null;
+  const results: { id: string; editKey: string; ownerKey: string | null; title: string; created: boolean; items: { name: string; qty: number; mode: string; cat: string }[] }[] = [];
+  for (const l of withIds) {
+    if (only && !only.has(l.id)) continue;
+    let id = l.id;
+    let stub = docStub(env, id);
+    let info = await stub.info();
+    if (info.movedTo) { id = info.movedTo; stub = docStub(env, id); info = await stub.info(); }
+    if (info.trashed) continue;
+    let editKey: string | null = null;
+    let ownerKey: string | null = null;
+    let created = false;
+    if (!info.exists) {
+      editKey = await stub.create(id, '', undefined, 'pack', packState(l));
+      if (editKey) { ownerKey = await stub.ownerKey(); created = true; }
+    }
+    editKey ??= await stub.getEditKey();
+    if (!editKey) continue;
+    results.push({
+      id, editKey, ownerKey, created,
+      title: created ? l.title : info.title || l.title,
+      items: created ? l.items.map(i => ({ ...i, cat: guessCategory(i.name) })) : [],
+    });
+  }
+  if (results.length) await accountStub(env, user.sub).upsert(results.map(r => ({ id: r.id, editKey: r.editKey, ownerKey: r.ownerKey, opened: Date.now(), kind: 'pack', title: r.title })));
+  return json({ lists: results });
 }
 
 async function memosPage(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -365,6 +428,7 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
     return new Response(JSON.stringify({ rates }), { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' } });
   }
   if (parts[0] === 'me') return me(req, env, parts.slice(1), url, ctx);
+  if (parts[0] === 'pack' && parts[1] === 'umzug' && !parts[2]) return packUmzug(req, env);
 
   if (parts[0] === 'admin' && parts[1] === 'docs' && method === 'GET') {
     if (!(await isAdmin(req, env))) return fail(401, 'Nicht freigeschaltet.');
@@ -925,8 +989,9 @@ export default {
       return new Response(null, { status: 302, headers: { location: `https://md.veerka.mp${path}#board` } });
     }
     // Dasselbe für Packlisten: pack.veerka.mp bzw. pack.veerka.mp/festival.
+    // Ohne Pfad: zuletzt benutzte Packliste (/pack), mit Pfad: diese Liste.
     if (url.hostname === 'pack.veerka.mp') {
-      return new Response(null, { status: 302, headers: { location: `https://md.veerka.mp${path}#pack` } });
+      return new Response(null, { status: 302, headers: { location: path === '/' ? 'https://md.veerka.mp/pack' : `https://md.veerka.mp${path}#pack` } });
     }
 
     if (/^\/(assets|fonts|icons)\//.test(path) || STATIC_FILES.has(path)) {
@@ -969,6 +1034,10 @@ export default {
       return page(req, 'Übersicht', '<main id="app"></main>', { page: 'admin', admin: isAdminUser(user, env) });
     }
     if (path === '/memos') return memosPage(req, env, ctx);
+    if (path === '/pack' || path === '/pack/umzug') {
+      const user = await currentUser(req, env);
+      return page(req, 'Packliste', '<main id="app"></main>', { page: path === '/pack' ? 'packstart' : 'umzug', user: publicUser(user), login: loginEnabled(env), admin: isAdminUser(user, env) }, 200, PACK_APP);
+    }
     if (path.startsWith('/m/')) return memoFile(req, env, path.slice(3));
     if (path === '/datenschutz') return privacyPage(req);
     if (path.startsWith('/i/')) {

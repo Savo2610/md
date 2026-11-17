@@ -194,7 +194,7 @@ export class Doc extends DurableObject<Env> {
    * Legt das Dokument an. `from` übernimmt Schlüssel, Bilder und Metadaten
    * eines umbenannten Dokuments.
    */
-  async create(id: string, initial = '', from?: MoveData, kind: DocKind = 'md'): Promise<string | null> {
+  async create(id: string, initial = '', from?: MoveData, kind: DocKind = 'md', state?: Uint8Array): Promise<string | null> {
     if (this.exists()) return null;
     this.sql.exec(`
       CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT);
@@ -211,6 +211,7 @@ export class Doc extends DurableObject<Env> {
     };
     for (const [k, v] of Object.entries(meta)) this.set(k, v);
     if (from?.state) Y.applyUpdate(this.load(), from.state);
+    else if (state) Y.applyUpdate(this.load(), state);
     else if (this.kind() === 'md' && (from?.markdown || initial)) this.text().insert(0, (from?.markdown ?? initial).slice(0, MAX_CHARS));
     await this.flush(true);
     await this.scheduleAlarm();

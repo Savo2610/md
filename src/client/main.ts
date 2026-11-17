@@ -16,7 +16,7 @@ import { fineRow, spellcheckOn, startMode, rememberMode, writerName } from './se
 import { openAsNew, takePending, dropZone, fileToMarkdown } from './importer';
 
 export interface Boot {
-  page: 'doc' | 'admin' | 'home' | 'memos';
+  page: 'doc' | 'admin' | 'home' | 'memos' | 'packstart' | 'umzug';
   build?: string;
   id?: string;
   kind?: 'board' | 'pack';
@@ -959,6 +959,10 @@ if (boot.page === 'admin') {
   import('./home').then(m => m.start());
 } else if (boot.page === 'memos') {
   import('./memos').then(m => m.start(boot));
+} else if (boot.page === 'packstart') {
+  import('./umzug').then(m => m.startPackStart());
+} else if (boot.page === 'umzug') {
+  import('./umzug').then(m => m.startUmzug(boot));
 } else if (boot.trashed) {
   startTrashed(boot);
 } else if (boot.kind === 'pack' || (!boot.exists && location.hash === '#pack')) {
