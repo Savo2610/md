@@ -16,7 +16,7 @@ import { Provider } from './provider';
 import { $, el, store, dialog, recent, type MenuItem } from './ui';
 import { account } from './account';
 import {
-  CATEGORIES, DICTIONARY, MAX_PACK_ITEMS, MAX_QTY, categoryLabel, claimKey, claimsByItem, guessCategory, guessMode,
+  CATEGORIES, DICTIONARY, PACK_EMOJIS, guessEmoji, joinTitle, splitTitle, MAX_PACK_ITEMS, MAX_QTY, categoryLabel, claimKey, claimsByItem, guessCategory, guessMode,
   itemState, memberNames, normalize, packItems, packMarkdown, parseQuantity, validCategory,
   type ItemState, type PackItem, type PackMode,
 } from '../shared/pack';
@@ -251,19 +251,50 @@ export function mountPack(o: PackOptions): PackHandle {
   const addForm = el('form', { class: 'pk-add' }, addInput, suggestBox);
   const listBox = el('div', { class: 'pk-lists' });
   const empty = el('div', { class: 'pk-empty', hidden: '' });
-  root.append(el('header', { class: 'pk-head' }, titleInput, summary), addForm, empty, listBox);
+  const emojiBtn = el('button', { type: 'button', class: 'pk-emoji', title: 'Symbol wählen', 'aria-label': 'Symbol wählen' });
+  // Handy: + unten rechts springt ins Hinzufügen-Feld.
+  const fab = el('button', { type: 'button', class: 'pk-fab', title: 'Hinzufügen', 'aria-label': 'Artikel hinzufügen' });
+  fab.innerHTML = ICON.plus;
+  fab.addEventListener('click', () => { addInput.focus(); addInput.scrollIntoView({ block: 'nearest' }); });
+  root.append(el('header', { class: 'pk-head' }, el('div', { class: 'pk-title-row' }, emojiBtn, titleInput), summary), addForm, empty, listBox, fab);
   o.parent.append(root);
 
   // Titel
   const title = () => String(meta.get('title') || '').trim();
   function syncTitle() {
     const t = String(meta.get('title') || '');
-    if (document.activeElement !== titleInput && titleInput.value !== t) titleInput.value = t;
+    const { emoji, text } = splitTitle(t);
+    if (document.activeElement !== titleInput && titleInput.value !== text) titleInput.value = text;
+    // Ohne gewähltes Emoji: Vorschlag zum Titel, blass (wird beim Verlassen des Titels übernommen).
+    emojiBtn.textContent = emoji || guessEmoji(document.activeElement === titleInput ? titleInput.value : text);
+    emojiBtn.classList.toggle('auto', !emoji);
     o.onTitle(t.trim());
     announce();
     if (loaded) saveSnapshot();
   }
-  titleInput.addEventListener('input', () => tx(() => meta.set('title', titleInput.value.slice(0, 120))));
+  const currentEmoji = () => splitTitle(String(meta.get('title') || '')).emoji;
+  titleInput.addEventListener('input', () => {
+    tx(() => meta.set('title', joinTitle(currentEmoji(), titleInput.value).slice(0, 120)));
+    if (!currentEmoji()) emojiBtn.textContent = guessEmoji(titleInput.value);
+  });
+  // Titel fertig, kein Emoji gewählt: das vorgeschlagene übernehmen.
+  titleInput.addEventListener('change', () => {
+    if (canEdit && !currentEmoji() && titleInput.value.trim()) tx(() => meta.set('title', joinTitle(guessEmoji(titleInput.value), titleInput.value).slice(0, 120)));
+  });
+  emojiBtn.addEventListener('click', () => {
+    if (!canEdit) return;
+    const grid = el('div', { class: 'pk-emoji-grid' });
+    const d = dialog('', grid);
+    d.classList.add('pk-dialog', 'pk-emoji-dlg');
+    for (const e of PACK_EMOJIS) {
+      const b = el('button', { type: 'button', class: `pk-emoji-pick${e === currentEmoji() ? ' on' : ''}`, 'aria-label': e }, e);
+      b.addEventListener('click', () => {
+        d.close();
+        tx(() => meta.set('title', joinTitle(e, splitTitle(String(meta.get('title') || '')).text).slice(0, 120)));
+      });
+      grid.append(b);
+    }
+  });
   titleInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addInput.focus(); } });
   meta.observe(syncTitle);
 
@@ -543,8 +574,8 @@ export function mountPack(o: PackOptions): PackHandle {
     else submitTyped();
   });
   addInput.addEventListener('input', () => { active = parseQuantity(addInput.value).name.trim() ? 0 : -1; renderSuggestions(); });
-  addInput.addEventListener('focus', renderSuggestions);
-  addInput.addEventListener('blur', () => { suggestBox.hidden = true; });
+  addInput.addEventListener('focus', () => { root.classList.add('adding'); renderSuggestions(); });
+  addInput.addEventListener('blur', () => { root.classList.remove('adding'); suggestBox.hidden = true; });
   addInput.addEventListener('keydown', e => {
     const count = suggestBox.querySelectorAll('.pk-sug').length;
     if (e.key === 'ArrowDown' && count) { e.preventDefault(); active = (active + 1) % count; renderSuggestions(); }
@@ -914,19 +945,6 @@ export function mountPack(o: PackOptions): PackHandle {
     requestAnimationFrame(() => { titleInput.focus(); titleInput.select(); });
   }
 
-  // ── Als Text teilen ───────────────────────────────────────────────────────
-
-  async function shareText() {
-    const text = packMarkdown(ydoc);
-    try {
-      if (navigator.share) { await navigator.share({ title: title() || 'Packliste', text }); return; }
-    } catch (e) {
-      if ((e as DOMException)?.name === 'AbortError') return;
-    }
-    try { await navigator.clipboard.writeText(text); o.toast('Liste kopiert.'); }
-    catch { o.toast('Kopieren ging nicht.'); }
-  }
-
   // ── Änderungen ────────────────────────────────────────────────────────────
 
   let frame = 0;
@@ -942,6 +960,7 @@ export function mountPack(o: PackOptions): PackHandle {
   function setEditable(on: boolean) {
     canEdit = on;
     titleInput.readOnly = !on;
+    emojiBtn.disabled = !on;
     addForm.hidden = !on;
     render();
     join();
@@ -973,7 +992,6 @@ export function mountPack(o: PackOptions): PackHandle {
       if (canEdit && otherLists().length) out.push(['Aus Liste übernehmen …', copyFromList]);
       if (items.size) out.push(['Duplizieren', duplicate]);
       if (canEdit && claims.size) out.push(['Zurücksetzen', () => resetList()]);
-      if (items.size) out.push(['Als Text teilen', shareText]);
       return out;
     },
     destroy() {

@@ -7,7 +7,7 @@
 import { $, el, recent, ago, toast, store, menu, isAdmin, ask, adminHeaders, ownerHeaders, trashDaysLeft, docTags, type MenuItem, type Recent } from './ui';
 import { account, accountItems, avatar } from './account';
 import { tagChips, tagDialog } from './tags';
-import { fineRow } from './settings';
+import { toolMenu } from './nav';
 import { openAsNew, dropZone } from './importer';
 
 const TAG_FILTER = 'md:tag';
@@ -21,7 +21,7 @@ export function start() {
   const right = el('nav', { class: 'bar-right' });
   // „md“ oben links: Einstellungen und Datenschutz, klein wie auf den Dokumentseiten.
   const brand = el('button', { type: 'button', class: 'brand', title: 'Menü', 'aria-haspopup': 'dialog' }, 'md');
-  brand.addEventListener('click', () => menu('left', [['Neues Dokument', () => (location.href = '/')], ['Neues Board', () => (location.href = '/#board')], ['Neue Packliste', () => (location.href = '/#pack')], ['Datei öffnen …', () => openAsNew()], ['Memos', () => (location.href = '/memos')], fineRow()]));
+  brand.addEventListener('click', () => menu('left', toolMenu('home')));
   dropZone(file => openAsNew(file));
   const bar = el('header', { id: 'bar' },
     el('div', { class: 'bar-left' }, brand),
@@ -32,18 +32,37 @@ export function start() {
   const main = el('div', { class: 'home' });
   app.append(main);
 
-  const create = el('a', { href: '/', class: 'home-new' }, 'Neues Dokument');
-  create.addEventListener('click', e => {
-    if (!navigator.onLine) {
-      e.preventDefault();
-      toast('Offline: Neue Dokumente gehen nur mit Verbindung. Vorhandene kannst du weiter bearbeiten.');
-    }
-  });
+  // Neu anlegen: alle drei Arten direkt hier (Startseite der App).
+  const create = el('div', { class: 'home-new-row' });
+  for (const [label, href] of [['Dokument', '/'], ['Board', '/#board'], ['Packliste', '/#pack']]) {
+    const a = el('a', { href, class: 'home-new' }, label);
+    a.addEventListener('click', e => {
+      if (!navigator.onLine) {
+        e.preventDefault();
+        toast('Offline: Neues geht nur mit Verbindung. Vorhandenes kannst du weiter bearbeiten.');
+      }
+    });
+    create.append(a);
+  }
+
+  // Nach Art filtern (?art=md|board|pack), z. B. „Alle Boards“ aus dem Menü.
+  type Art = '' | 'md' | 'board' | 'pack';
+  const ARTS: [Art, string][] = [['', 'Alle'], ['md', 'Dokumente'], ['board', 'Boards'], ['pack', 'Packlisten']];
+  const fromUrl = new URLSearchParams(location.search).get('art');
+  let art: Art = ARTS.some(([a]) => a === fromUrl) ? fromUrl as Art : '';
+  const artBar = el('nav', { class: 'art-bar', role: 'tablist', 'aria-label': 'Art' });
+  const setArt = (a: Art) => {
+    art = a;
+    const u = new URL(location.href);
+    if (a) u.searchParams.set('art', a); else u.searchParams.delete('art');
+    history.replaceState(null, '', u);
+    render();
+  };
 
   const search = el('input', { type: 'search', class: 'search', placeholder: 'Suchen …', 'aria-label': 'Suchen' }) as HTMLInputElement;
   const tagBar = el('div', { class: 'tag-bar', role: 'toolbar', 'aria-label': 'Nach Tag filtern' });
   const list = el('ul', { class: 'notes' });
-  main.append(create, search, tagBar, list);
+  main.append(create, artBar, search, tagBar, list);
 
   let filter = store.get(TAG_FILTER) || '';
   const setFilter = (t: string) => {
@@ -104,12 +123,23 @@ export function start() {
       || r.id.includes(q)
       || docTags(r).some(t => t.toLowerCase().includes(q));
     const inFilter = (r: Recent) => !filter || (filter === UNTAGGED ? !docTags(r).length : docTags(r).some(t => t.toLowerCase() === filter.toLowerCase()));
-    const items = inTrash ? trashed.filter(matches) : all.filter(r => matches(r) && inFilter(r));
+    // Art: nur anbieten, wenn es mehr als eine gibt.
+    const kinds = new Set(all.map(r => r.kind || 'md'));
+    artBar.replaceChildren();
+    artBar.hidden = kinds.size < 2 && !art;
+    for (const [a, label] of ARTS) {
+      if (a && !kinds.has(a) && art !== a) continue;
+      const b = el('button', { type: 'button', role: 'tab', class: 'art', 'aria-selected': String(art === a) }, label);
+      b.addEventListener('click', () => setArt(a));
+      artBar.append(b);
+    }
+    const inArt = (r: Recent) => !art || (r.kind || 'md') === art;
+    const items = inTrash ? trashed.filter(matches) : all.filter(r => matches(r) && inFilter(r) && inArt(r));
     search.hidden = all.length < 6;
 
     list.replaceChildren();
     if (!items.length) {
-      list.append(el('li', { class: 'notes-empty' }, q || filter ? 'Nichts gefunden.' : 'Noch keine Dokumente.'));
+      list.append(el('li', { class: 'notes-empty' }, q || filter ? 'Nichts gefunden.' : art === 'board' ? 'Noch keine Boards.' : art === 'pack' ? 'Noch keine Packlisten.' : 'Noch keine Dokumente.'));
     }
     for (const r of items) {
       if (inTrash) { list.append(trashRow(r)); continue; }
