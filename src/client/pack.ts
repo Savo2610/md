@@ -3,15 +3,17 @@
 // Yjs/WebSocket wie Dokumente und Boards (Datenmodell in src/shared/pack.ts).
 //
 // Gerätewissen (nur im Browser, nie in der Liste):
-//   md:pack:lists    Stand der eigenen Listen (Titel, Artikel) – daraus kommen
-//                    Vorschläge beim Hinzufügen und „Aus Liste übernehmen“
+//   md:pack:lists    Stand der eigenen Listen (Titel, Artikel, was ich schon
+//                    habe) – für Vorschläge, „Aus Liste übernehmen“, die
+//                    Reiter oben und die Vorschau beim Wischen
+//   md:pack:copy     (sessionStorage) Inhalt für eine gerade duplizierte Liste
 //   md:pack:learned  selbst geänderte Kategorie bzw. Packmodus je Artikelname
 
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { Provider } from './provider';
-import { $, el, store, dialog, type MenuItem } from './ui';
+import { $, el, store, dialog, recent, type MenuItem } from './ui';
 import { account } from './account';
 import {
   CATEGORIES, DICTIONARY, MAX_PACK_ITEMS, MAX_QTY, categoryLabel, claimKey, claimsByItem, guessCategory, guessMode,
@@ -43,6 +45,8 @@ export interface PackHandle {
   reconnect(): void;
   /** Einträge für das ⋯-Menü (Wer bringt was, Zurücksetzen …). */
   menuItems(): MenuItem[];
+  /** Verbindung trennen und aufräumen (Wechsel zu einer anderen Liste). */
+  destroy(): void;
 }
 
 const LOCAL = 'pack-local';
@@ -62,13 +66,81 @@ const ICON = {
 
 // ── Gerätewissen ────────────────────────────────────────────────────────────
 
-interface Snapshot { title: string; at: number; items: { name: string; qty: number; mode: PackMode; cat: string }[] }
+export interface SnapItem { name: string; qty: number; mode: PackMode; cat: string; done?: boolean }
+export interface Snapshot { title: string; at: number; open?: number; items: SnapItem[] }
 interface Learned { cat: Record<string, string>; mode: Record<string, string> }
 
 function readJson<T>(key: string, fallback: T): T {
   try { return { ...fallback, ...JSON.parse(store.get(key) || 'null') }; } catch { return fallback; }
 }
-const snapshots = () => readJson<Record<string, Snapshot>>(LISTS_KEY, {});
+export const snapshots = () => readJson<Record<string, Snapshot>>(LISTS_KEY, {});
+function saveSnapshotOf(id: string, snap: Snapshot) {
+  const all = snapshots();
+  all[id] = snap;
+  // Höchstens 60 Listen merken, die ältesten fallen raus.
+  const keep = Object.entries(all).sort((a, b) => b[1].at - a[1].at).slice(0, 60);
+  store.set(LISTS_KEY, JSON.stringify(Object.fromEntries(keep)));
+}
+/** Stand einer Liste aus meiner Sicht (für Vorschau, Reiter, Vorschläge). */
+function snapshotOf(doc: Y.Doc, me: string): Snapshot {
+  const list = packItems(doc);
+  const byItem = claimsByItem(doc);
+  const names = memberNames(doc);
+  const items = list.map(i => ({ name: i.name, qty: i.qty, mode: i.mode, cat: i.cat, done: itemState(i, byItem.get(i.id), names, me).done }));
+  return { title: String(doc.getMap('meta').get('title') || '').trim(), at: Date.now(), open: items.filter(i => !i.done).length, items };
+}
+
+/** Zufällige Adresse wie vom Server (10 Zeichen, Buchstaben und Ziffern gemischt). */
+export function randomDocId(): string {
+  const abc = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  for (;;) {
+    const bytes = crypto.getRandomValues(new Uint8Array(10));
+    const id = [...bytes].map(b => abc[b % 36]).join('');
+    if (/\d/.test(id) && /[a-z]/.test(id)) return id;
+  }
+}
+
+/** Eigene Packlisten (aus „Zuletzt geöffnet“), die man bearbeiten darf. */
+export function myPackLists(except = ''): { id: string; title: string }[] {
+  const snaps = snapshots();
+  return recent.list()
+    .filter(r => r.kind === 'pack' && !r.trashed && r.id !== except && store.get(`md:key:${r.id}`))
+    .map(r => ({ id: r.id, title: r.title || snaps[r.id]?.title || 'Packliste' }));
+}
+
+/**
+ * Eine andere Packliste kurz öffnen, ändern und wieder schließen (Artikel
+ * auf eine andere Liste setzen). Offline bleibt die Änderung im Browser und
+ * geht beim nächsten Öffnen dieser Liste raus.
+ */
+async function changeOther(id: string, me: string, fn: (doc: Y.Doc) => void): Promise<boolean> {
+  const key = store.get(`md:key:${id}`);
+  if (!key) return false;
+  const doc = new Y.Doc();
+  const idb = new IndexeddbPersistence(`md:${id}`, doc);
+  await idb.whenSynced;
+  const aw = new Awareness(doc);
+  aw.setLocalState(null);
+  let done: (ok: boolean) => void = () => {};
+  const synced = new Promise<boolean>(r => (done = r));
+  const provider = new Provider(doc, aw, () => {
+    const u = new URL(`/api/docs/${encodeURIComponent(id)}/ws`, location.href);
+    u.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    u.searchParams.set('key', key);
+    return u.toString();
+  }, { status: st => { if (st === 'offline' || st === 'gone') done(false); }, synced: () => done(true), notice: () => {}, pending: () => {} });
+  provider.connect();
+  const online = await Promise.race([synced, new Promise<boolean>(r => setTimeout(() => r(false), 6000))]);
+  doc.transact(() => fn(doc), 'other');
+  const snap = { ...snapshotOf(doc, me), title: String(doc.getMap('meta').get('title') || '').trim() || snapshots()[id]?.title || '' };
+  saveSnapshotOf(id, snap);
+  dispatchEvent(new CustomEvent('md:pack', { detail: { id, title: snap.title, open: snap.open } }));
+  provider.disconnect();
+  aw.destroy();
+  await idb.destroy();
+  doc.destroy();
+  return online;
+}
 const learned = (): Learned => {
   const l = readJson<Learned>(LEARNED_KEY, { cat: {}, mode: {} });
   return { cat: l.cat || {}, mode: l.mode || {} };
@@ -188,6 +260,8 @@ export function mountPack(o: PackOptions): PackHandle {
     const t = String(meta.get('title') || '');
     if (document.activeElement !== titleInput && titleInput.value !== t) titleInput.value = t;
     o.onTitle(t.trim());
+    announce();
+    if (loaded) saveSnapshot();
   }
   titleInput.addEventListener('input', () => tx(() => meta.set('title', titleInput.value.slice(0, 120))));
   titleInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addInput.focus(); } });
@@ -199,6 +273,11 @@ export function mountPack(o: PackOptions): PackHandle {
   const grace = new Map<string, { phase: 'grace' | 'leaving'; timer: ReturnType<typeof setTimeout> }>();
   let flashId: string | null = null;
   let doneOpen = store.get(`md:pack:done:${o.id}`) !== '0';
+  /** Lokaler Stand geladen (vorher ist die Liste nur scheinbar leer). */
+  let loaded = false;
+  let lastOpen = 0;
+  /** Titel und offene Artikel für die Reiter oben. */
+  const announce = () => { if (loaded) dispatchEvent(new CustomEvent('md:pack', { detail: { id: o.id, title: title(), open: lastOpen } })); };
 
   function snapshot(): { list: PackItem[]; states: Map<string, ItemState>; names: Map<string, string> } {
     const list = packItems(ydoc);
@@ -266,6 +345,8 @@ export function mountPack(o: PackOptions): PackHandle {
     }
     root.classList.toggle('is-readonly', !canEdit);
     saveSnapshot();
+    lastOpen = list.length - doneCount;
+    announce();
   }
 
   function row(it: PackItem, st: ItemState, group: boolean, names: Map<string, string>): HTMLElement {
@@ -567,6 +648,44 @@ export function mountPack(o: PackOptions): PackHandle {
       learn(it()?.name || start.name, 'cat', cat.value);
     });
 
+    // Auf meinen anderen Listen an- und abhaken (öffnet die jeweilige Liste kurz im Hintergrund).
+    const others = myPackLists(o.id);
+    const elsewhere = el('div', { class: 'pk-elsewhere' });
+    const snaps = snapshots();
+    for (const l of others) {
+      const has = () => !!snapshots()[l.id]?.items.some(i => normalize(i.name) === normalize(it()?.name || start.name));
+      const b = el('button', { type: 'button', class: 'pk-on', 'aria-pressed': String(has()) });
+      b.innerHTML = ICON.check;
+      b.append(el('span', {}, l.title || snaps[l.id]?.title || 'Packliste'));
+      b.addEventListener('click', async () => {
+        const cur = it();
+        if (!cur || b.classList.contains('busy')) return;
+        const on = b.getAttribute('aria-pressed') !== 'true';
+        b.classList.add('busy');
+        b.setAttribute('aria-pressed', String(on));
+        const k = normalize(cur.name);
+        const online = await changeOther(l.id, me, doc => {
+          const its = doc.getMap<Y.Map<unknown>>('items');
+          const found = packItems(doc).filter(i => normalize(i.name) === k);
+          if (on && !found.length) {
+            const m = new Y.Map<unknown>();
+            m.set('name', cur.name); m.set('qty', cur.qty); m.set('mode', cur.mode); m.set('cat', cur.cat); m.set('at', Date.now());
+            its.set(rid(), m);
+          } else if (!on) {
+            const cl = doc.getMap<number>('claims');
+            for (const f of found) {
+              its.delete(f.id);
+              cl.forEach((_n, key) => { if (key.startsWith(`${f.id}|`)) cl.delete(key); });
+            }
+          }
+        }).catch(() => null);
+        b.classList.remove('busy');
+        if (online === null) { b.setAttribute('aria-pressed', String(!on)); o.toast('Ging nicht.'); }
+        else if (!online) o.toast('Offline: wird nachgereicht, sobald die Liste wieder offen ist.');
+      });
+      elsewhere.append(b);
+    }
+
     const remove = el('button', { type: 'button', class: 't danger-boxed boxed' }, 'Von der Liste nehmen');
     const done = el('button', { type: 'button', class: 't boxed' }, 'Fertig');
 
@@ -575,6 +694,7 @@ export function mountPack(o: PackOptions): PackHandle {
       el('div', { class: 'pk-edit-row' }, el('span', {}, 'Menge'), el('div', { class: 'pk-stepper' }, minus, qtyOut, plus)),
       el('div', { class: 'pk-edit-row' }, el('span', {}, 'Braucht'), modeSeg),
       el('label', { class: 'pk-edit-row' }, el('span', {}, 'Kategorie'), cat),
+      ...(others.length ? [el('div', { class: 'pk-edit-row pk-edit-top' }, el('span', {}, 'Auch auf'), elsewhere)] : []),
       el('div', { class: 'ask-row pk-edit-foot' }, remove, done),
     );
     const d = dialog('', body);
@@ -679,15 +799,13 @@ export function mountPack(o: PackOptions): PackHandle {
   function saveSnapshot() {
     if (!created || !canEdit) return;
     if (snapTimer) clearTimeout(snapTimer);
-    snapTimer = setTimeout(() => {
-      const all = snapshots();
-      const list = packItems(ydoc);
-      if (!list.length && !all[o.id]) return;
-      all[o.id] = { title: title(), at: Date.now(), items: list.map(i => ({ name: i.name, qty: i.qty, mode: i.mode, cat: i.cat })) };
-      // Höchstens 60 Listen merken, die ältesten fallen raus.
-      const keep = Object.entries(all).sort((a, b) => b[1].at - a[1].at).slice(0, 60);
-      store.set(LISTS_KEY, JSON.stringify(Object.fromEntries(keep)));
-    }, 600);
+    snapTimer = setTimeout(flushSnapshot, 600);
+  }
+  function flushSnapshot() {
+    if (snapTimer) { clearTimeout(snapTimer); snapTimer = null; }
+    if (!created) return;
+    if (!items.size && !snapshots()[o.id]) return;
+    saveSnapshotOf(o.id, snapshotOf(ydoc, me));
   }
 
   const otherLists = () => Object.entries(snapshots()).filter(([id, s]) => id !== o.id && s.items?.length).sort((a, b) => b[1].at - a[1].at);
@@ -702,26 +820,98 @@ export function mountPack(o: PackOptions): PackHandle {
       const onList = new Set(packItems(ydoc).map(i => normalize(i.name)));
       const fresh = s.items.filter(i => !onList.has(normalize(i.name)));
       const b = el('button', { type: 'button', class: 'pk-pick' },
-        el('span', { class: 'recent-title' }, s.title || id),
+        el('span', { class: 'recent-title' }, s.title || 'Packliste'),
         el('span', { class: 'recent-meta' }, fresh.length ? `${fresh.length} neu von ${s.items.length}` : 'alles schon drauf'));
       if (!fresh.length) b.disabled = true;
-      b.addEventListener('click', () => {
-        d.close();
-        const before = new Set(items.keys());
-        tx(() => {
-          let at = Date.now();
-          for (const i of fresh) {
-            if (items.size >= MAX_PACK_ITEMS) break;
-            const m = new Y.Map<unknown>();
-            m.set('name', i.name); m.set('qty', i.qty || 1); m.set('mode', i.mode); m.set('cat', validCategory(i.cat)); m.set('at', at++);
-            items.set(rid(), m);
-          }
-        });
-        const added = [...items.keys()].filter(k => !before.has(k));
-        undoToast(`${added.length} übernommen.`, () => tx(() => { for (const k of added) items.delete(k); }));
-      });
+      b.addEventListener('click', () => { d.close(); pickItems(s.title || 'Packliste', fresh); });
       box.append(b);
     }
+  }
+
+  /** Zweiter Schritt: Artikel abwählen, die man diesmal nicht braucht. */
+  function pickItems(from: string, fresh: SnapItem[]) {
+    const chosen = new Set(fresh.map((_, i) => i));
+    const go = el('button', { type: 'button', class: 't boxed' });
+    const label = () => { go.textContent = chosen.size ? `${chosen.size} übernehmen` : 'Nichts gewählt'; go.disabled = !chosen.size; };
+    const ul = el('ul', { class: 'pk-choose' });
+    for (const c of CATEGORIES) {
+      const inCat = fresh.map((it, i) => [it, i] as const).filter(([it]) => validCategory(it.cat) === c.id);
+      if (!inCat.length) continue;
+      ul.append(el('li', { class: 'pk-choose-cat' }, c.label));
+      for (const [it, i] of inCat) {
+        const b = el('button', { type: 'button', class: 'pk-choose-item', 'aria-pressed': 'true' });
+        b.innerHTML = `<span class="pk-check" aria-hidden="true">${ICON.check}</span>`;
+        b.append(el('span', {}, it.name), it.qty > 1 ? el('span', { class: 'pk-qty' }, `${it.qty}×`) : '');
+        b.addEventListener('click', () => {
+          if (chosen.has(i)) chosen.delete(i); else chosen.add(i);
+          b.setAttribute('aria-pressed', String(chosen.has(i)));
+          label();
+        });
+        ul.append(el('li', {}, b));
+      }
+    }
+    const all = el('button', { type: 'button', class: 't' }, 'Keine');
+    all.addEventListener('click', () => {
+      const none = chosen.size > 0;
+      chosen.clear();
+      if (!none) fresh.forEach((_, i) => chosen.add(i));
+      for (const b of ul.querySelectorAll('.pk-choose-item')) b.setAttribute('aria-pressed', String(!none));
+      all.textContent = none ? 'Alle' : 'Keine';
+      label();
+    });
+    label();
+    const d = dialog(`Aus „${from}“`, el('div', { class: 'pk-choose-box' }, ul, el('div', { class: 'ask-row pk-edit-foot' }, all, go)));
+    d.classList.add('pk-dialog');
+    go.addEventListener('click', () => {
+      d.close();
+      const before = new Set(items.keys());
+      tx(() => {
+        let at = Date.now();
+        for (const i of [...chosen].sort((a, b) => a - b)) {
+          const it = fresh[i];
+          if (items.size >= MAX_PACK_ITEMS) break;
+          const m = new Y.Map<unknown>();
+          m.set('name', it.name); m.set('qty', it.qty || 1); m.set('mode', it.mode); m.set('cat', validCategory(it.cat)); m.set('at', at++);
+          items.set(rid(), m);
+        }
+      });
+      const added = [...items.keys()].filter(k => !before.has(k));
+      undoToast(`${added.length} übernommen.`, () => tx(() => { for (const k of added) items.delete(k); }));
+    });
+  }
+
+  // ── Duplizieren ───────────────────────────────────────────────────────────
+
+  /** Neue Liste mit denselben Artikeln (ohne Haken); der Titel ist zum Überschreiben markiert. */
+  function duplicate() {
+    flushSnapshot();
+    const id = randomDocId();
+    const copy = {
+      id, after: o.id, title: `${title() || 'Packliste'} (Kopie)`,
+      items: packItems(ydoc).map(i => ({ name: i.name, qty: i.qty, mode: i.mode, cat: i.cat })),
+    };
+    try { sessionStorage.setItem('md:pack:copy', JSON.stringify(copy)); } catch { /* dann eben leer */ }
+    location.href = `/${id}#pack`;
+  }
+
+  /** Gerade dupliziert: Inhalt einsetzen (legt die Liste dabei an). */
+  function takeCopy() {
+    if (o.exists) return;
+    let copy: { id: string; title: string; items: SnapItem[] } | null = null;
+    try { copy = JSON.parse(sessionStorage.getItem('md:pack:copy') || 'null'); } catch { /* nichts */ }
+    if (!copy || copy.id !== o.id || items.size) return;
+    try { sessionStorage.removeItem('md:pack:copy'); } catch { /* egal */ }
+    tx(() => {
+      meta.set('title', copy!.title);
+      let at = Date.now();
+      for (const it of copy!.items) {
+        const m = new Y.Map<unknown>();
+        m.set('name', it.name); m.set('qty', it.qty || 1); m.set('mode', it.mode); m.set('cat', validCategory(it.cat)); m.set('at', at++);
+        items.set(rid(), m);
+      }
+    });
+    syncTitle();
+    requestAnimationFrame(() => { titleInput.focus(); titleInput.select(); });
   }
 
   // ── Als Text teilen ───────────────────────────────────────────────────────
@@ -747,7 +937,7 @@ export function mountPack(o: PackOptions): PackHandle {
   items.observeDeep(schedule);
   claims.observe(schedule);
   members.observe(schedule);
-  local.whenSynced.then(() => { syncTitle(); render(); });
+  local.whenSynced.then(() => { loaded = true; syncTitle(); render(); takeCopy(); });
 
   function setEditable(on: boolean) {
     canEdit = on;
@@ -781,9 +971,24 @@ export function mountPack(o: PackOptions): PackHandle {
       const { names } = snapshot();
       if (items.size && together(names)) out.push(['Wer bringt was', whoBringsWhat]);
       if (canEdit && otherLists().length) out.push(['Aus Liste übernehmen …', copyFromList]);
+      if (items.size) out.push(['Duplizieren', duplicate]);
       if (canEdit && claims.size) out.push(['Zurücksetzen', () => resetList()]);
       if (items.size) out.push(['Als Text teilen', shareText]);
       return out;
+    },
+    destroy() {
+      flushSnapshot();
+      for (const g of grace.values()) clearTimeout(g.timer);
+      grace.clear();
+      if (frame) cancelAnimationFrame(frame);
+      items.unobserveDeep(schedule);
+      claims.unobserve(schedule);
+      members.unobserve(schedule);
+      provider.disconnect();
+      awareness.destroy();
+      local.destroy();
+      ydoc.destroy();
+      root.remove();
     },
   };
 }

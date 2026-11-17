@@ -82,6 +82,14 @@ Durable Object pro Dokument, Bilder in R2.
   Kategorie/Packmodus je Name (`md:pack:learned`) und der Stand der eigenen
   Listen (`md:pack:lists`) für Vorschläge und „Aus Liste übernehmen“.
   `/<id>.md` liefert die Liste als Aufgabenliste.
+  Alle eigenen Packlisten liegen nebeneinander (`src/client/pack-pager.ts`):
+  Reiter oben mit offenen Artikeln, Wischen bzw. ⌥←/→ wechselt ohne Neuladen
+  (nur die sichtbare Liste ist verbunden, die anderen zeigen ihren letzten
+  Stand aus diesem Browser). Reihenfolge in `md:pack:order`. ⋯ → Duplizieren
+  (neue Liste hinter dem Original, Titel markiert), Aus Liste übernehmen (mit
+  Auswahl), im Artikel „Auch auf“ für die anderen eigenen Listen. Im Board bzw.
+  in der Packliste zeigt das „md“-Menü zuerst die anderen Boards bzw.
+  Packlisten (Art steht in „Zuletzt geöffnet“ und im Konto, Spalte `kind`).
 - Als App installierbar (PWA): Start auf `/home` mit den zuletzt geöffneten
   Dokumenten, kompakte Leiste mit „Bearbeiten/Fertig“, Menüs als Blatt von
   unten. Offline: Seiten und Editor kommen aus dem Service Worker

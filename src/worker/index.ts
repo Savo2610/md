@@ -280,6 +280,8 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
   if (user && entry && !info.trashed) {
     const textTags = tagsOf(info.markdown);
     if (JSON.stringify(textTags) !== JSON.stringify(entry.textTags)) await accountStub(env, user.sub).setTextTags(id, textTags);
+    const kind = info.kind && info.kind !== 'md' ? info.kind : '';
+    if (kind !== (entry.kind || '')) await accountStub(env, user.sub).setKind(id, kind);
   }
   const editKey = entry?.editKey || undefined;
   const ownerKey = entry?.ownerKey || undefined;
@@ -444,7 +446,7 @@ async function api(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
     const editKey = await stub.create(id, '', undefined, docKind(body.kind));
     if (!editKey) return fail(409, 'Dieses Dokument wurde gerade von jemand anderem angelegt.');
     const ownerKey = await stub.ownerKey();
-    if (user) await accountStub(env, user.sub).upsert([{ id, editKey, ownerKey, opened: Date.now() }]);
+    if (user) await accountStub(env, user.sub).upsert([{ id, editKey, ownerKey, opened: Date.now(), kind: body.kind === 'board' || body.kind === 'pack' ? body.kind : '' }]);
     return json({ editKey, ownerKey }, 201);
   }
 

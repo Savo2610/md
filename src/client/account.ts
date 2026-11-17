@@ -9,7 +9,7 @@ import { el, store, recent, toast, docTags, type MenuItem, type Recent } from '.
 
 export interface User { name: string; email: string; picture: string }
 
-interface ServerDoc { id: string; title: string; editKey: string | null; opened: number; tags: string[]; textTags?: string[]; ownerKey: string | null; trashed: number }
+interface ServerDoc { id: string; title: string; editKey: string | null; opened: number; tags: string[]; textTags?: string[]; ownerKey: string | null; trashed: number; kind?: string }
 
 let user: User | null = null;
 let enabled = false;
@@ -151,7 +151,7 @@ async function push(): Promise<boolean> {
       recent.removed = recent.removed.filter(x => x !== id);
     }
     if (dirty.length) {
-      const items = dirty.map(r => ({ id: r.id, title: r.title, opened: r.at, editKey: store.get(`md:key:${r.id}`) || undefined, ownerKey: store.get(`md:owner:${r.id}`) || undefined, trashed: r.trashed || 0, ...(r.textTags ? { textTags: r.textTags } : {}) }));
+      const items = dirty.map(r => ({ id: r.id, title: r.title, opened: r.at, editKey: store.get(`md:key:${r.id}`) || undefined, ownerKey: store.get(`md:owner:${r.id}`) || undefined, trashed: r.trashed || 0, ...(r.textTags ? { textTags: r.textTags } : {}), ...(r.kind ? { kind: r.kind } : {}) }));
       const res = await fetch('/api/me/docs', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -180,7 +180,7 @@ function adopt(docs: ServerDoc[]) {
     if (d.ownerKey && !store.get(`md:owner:${d.id}`)) store.set(`md:owner:${d.id}`, d.ownerKey);
     const mine = local.get(d.id);
     if (mine?.dirty) { next.push(mine); local.delete(d.id); continue; }
-    next.push({ id: d.id, title: d.title || mine?.title || '', at: Math.max(d.opened, mine?.at || 0), own: !!d.editKey || !!mine?.own, tags: d.tags, textTags: d.textTags || [], trashed: d.trashed || undefined });
+    next.push({ id: d.id, title: d.title || mine?.title || '', at: Math.max(d.opened, mine?.at || 0), own: !!d.editKey || !!mine?.own, tags: d.tags, textTags: d.textTags || [], trashed: d.trashed || undefined, kind: d.kind === 'board' || d.kind === 'pack' ? d.kind : mine?.kind });
     local.delete(d.id);
   }
   for (const r of local.values()) if (r.dirty) next.push(r);
