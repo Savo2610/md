@@ -90,6 +90,14 @@ Durable Object pro Dokument, Bilder in R2.
   Auswahl), im Artikel „Auch auf“ für die anderen eigenen Listen. Im Board bzw.
   in der Packliste zeigt das „md“-Menü zuerst die anderen Boards bzw.
   Packlisten (Art steht in „Zuletzt geöffnet“ und im Konto, Spalte `kind`).
+  `/pack` (bzw. `pack.veerka.mp` ohne Pfad, Start der installierbaren App
+  „Packliste“, `public/pack.webmanifest`) öffnet die zuletzt benutzte Packliste.
+- Umzug aus der alten Packliste (`/pack/umzug`, `src/worker/packliste.ts`): mit
+  Google anmelden, md liest die Listen per Service-Account aus Firebase
+  (Projekt packliste-71d90, Secret `FIREBASE_SERVICE_ACCOUNT`, nur Lesen) und legt
+  sie als Packlisten an. Jede alte Liste hat eine feste md-Adresse (aus ihrer
+  alten ID), ein zweiter Umzug bzw. ein anderes Mitglied einer geteilten Liste
+  findet dieselbe wieder. Emoji vor den Titel, Haken nicht übernommen.
 - Als App installierbar (PWA): Start auf `/home` mit den zuletzt geöffneten
   Dokumenten, kompakte Leiste mit „Bearbeiten/Fertig“, Menüs als Blatt von
   unten. Offline: Seiten und Editor kommen aus dem Service Worker
