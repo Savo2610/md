@@ -4,11 +4,12 @@
 //   meta     Schlüssel/Wert: id, created, updated, accessed, editKey, ownerKey,
 //            pinned, imageBytes, markdown (letzter Stand als Text), title,
 //            flushedSeq, trashed (Zeitpunkt, wenn im Papierkorb),
-//            kind ('board' für Whiteboards, sonst leer: Markdown)
+//            kind ('board' für Whiteboards, 'pack' für Packlisten, sonst leer: Markdown)
 //
-// Whiteboards (src/shared/board.ts) liegen im selben Objekt, nur mit anderen
-// Yjs-Typen. Der Schnappschuss `markdown` ist dann aus dem Board erzeugt,
-// damit Titel, Übersicht und /<id>.md wie bei Dokumenten funktionieren.
+// Whiteboards (src/shared/board.ts) und Packlisten (src/shared/pack.ts)
+// liegen im selben Objekt, nur mit anderen Yjs-Typen. Der Schnappschuss
+// `markdown` ist dann daraus erzeugt, damit Titel, Übersicht und /<id>.md wie
+// bei Dokumenten funktionieren.
 //
 // Papierkorb: Wer das Dokument angelegt hat (ownerKey), kann es löschen. Es
 // ist dann sofort für alle weg, bleibt aber TRASH_DAYS lang erhalten und
@@ -31,6 +32,7 @@ import * as decoding from 'lib0/decoding';
 import * as syncProtocol from 'y-protocols/sync';
 import { titleOf } from '../shared/render';
 import { boardMarkdown, MAX_ITEMS } from '../shared/board';
+import { packMarkdown, MAX_PACK_ITEMS } from '../shared/pack';
 import { isRandomId, randomToken, timingSafeEqual } from './crypto';
 import { registry, type Env } from './env';
 
@@ -56,7 +58,9 @@ interface Attachment {
   aw: Record<string, number>;
 }
 
-export type DocKind = 'md' | 'board';
+export type DocKind = 'md' | 'board' | 'pack';
+const KINDS: DocKind[] = ['board', 'pack'];
+export const docKind = (v: unknown): DocKind => (KINDS.includes(v as DocKind) ? (v as DocKind) : 'md');
 
 export interface DocInfo {
   exists: boolean;
@@ -135,12 +139,13 @@ export class Doc extends DurableObject<Env> {
   }
 
   private kind(): DocKind {
-    return this.get('kind') === 'board' ? 'board' : 'md';
+    return docKind(this.get('kind'));
   }
 
-  /** Text bzw. aus dem Board erzeugtes Markdown. */
+  /** Text bzw. aus Board oder Packliste erzeugtes Markdown. */
   private current(doc: Y.Doc): string {
-    return this.kind() === 'board' ? boardMarkdown(doc) : doc.getText('md').toString();
+    const kind = this.kind();
+    return kind === 'board' ? boardMarkdown(doc) : kind === 'pack' ? packMarkdown(doc) : doc.getText('md').toString();
   }
 
   /** Aktueller Text, ohne das Yjs-Dokument zu laden, wenn der Schnappschuss aktuell ist. */
@@ -202,7 +207,7 @@ export class Doc extends DurableObject<Env> {
       id, created: from?.created ?? now, updated: now, accessed: now, editKey, ...(ownerKey ? { ownerKey } : {}),
       pinned: from?.pinned ? 1 : 0, imageBytes: from?.imageBytes ?? 0, imgPrefix: from?.imgPrefix ?? id,
       flushedSeq: 0, markdown: '',
-      ...((from?.kind ?? kind) === 'board' ? { kind: 'board' } : {}),
+      ...((from?.kind ?? kind) !== 'md' ? { kind: from?.kind ?? kind } : {}),
     };
     for (const [k, v] of Object.entries(meta)) this.set(k, v);
     if (from?.state) Y.applyUpdate(this.load(), from.state);
@@ -281,7 +286,7 @@ export class Doc extends DurableObject<Env> {
   }
 
   async replace(markdown: string): Promise<boolean> {
-    if (!this.live() || this.kind() === 'board') return false;
+    if (!this.live() || this.kind() !== 'md') return false;
     const t = this.text();
     this.load().transact(() => {
       t.delete(0, t.length);
@@ -315,7 +320,7 @@ export class Doc extends DurableObject<Env> {
       imageBytes: this.num('imageBytes'),
       imgPrefix: this.imagePrefix(),
       kind: this.kind(),
-      ...(this.kind() === 'board' ? { state: Y.encodeStateAsUpdate(this.load()) } : {}),
+      ...(this.kind() !== 'md' ? { state: Y.encodeStateAsUpdate(this.load()) } : {}),
     };
   }
 
@@ -544,6 +549,7 @@ export class Doc extends DurableObject<Env> {
   /** Maximalgröße erreicht: Text zu lang bzw. zu viele Elemente auf dem Board. */
   private full(): boolean {
     if (this.kind() === 'board') return this.load().getMap('items').size > MAX_ITEMS;
+    if (this.kind() === 'pack') return this.load().getMap('items').size > MAX_PACK_ITEMS;
     return this.text().length > MAX_CHARS;
   }
 

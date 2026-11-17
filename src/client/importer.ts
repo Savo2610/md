@@ -74,7 +74,7 @@ export function takePending(): string | null {
 }
 
 /** Beim Ziehen einer Datei über die Seite: Hinweis einblenden. */
-export function dropZone(onFile: (f: File) => void, active: () => boolean = () => true) {
+export function dropZone(onFile: (f: File) => void, active: () => boolean = () => true, signal?: AbortSignal) {
   let depth = 0;
   const hasFiles = (e: DragEvent) => [...(e.dataTransfer?.types || [])].includes('Files');
   const off = () => { depth = 0; document.body.classList.remove('drop-target'); };
@@ -82,9 +82,9 @@ export function dropZone(onFile: (f: File) => void, active: () => boolean = () =
     if (!hasFiles(e) || !active()) return;
     depth++;
     document.body.classList.add('drop-target');
-  });
-  addEventListener('dragleave', () => { if (--depth <= 0) off(); });
-  addEventListener('dragover', e => { if (hasFiles(e) && active()) e.preventDefault(); });
+  }, { signal });
+  addEventListener('dragleave', () => { if (--depth <= 0) off(); }, { signal });
+  addEventListener('dragover', e => { if (hasFiles(e) && active()) e.preventDefault(); }, { signal });
   addEventListener('drop', e => {
     off();
     if (e.defaultPrevented || !active()) return;
@@ -95,5 +95,5 @@ export function dropZone(onFile: (f: File) => void, active: () => boolean = () =
     const file = files.find(isTextFile);
     if (file) onFile(file);
     else toast('Nur Markdown-, Text- und HTML-Dateien.');
-  });
+  }, { signal });
 }

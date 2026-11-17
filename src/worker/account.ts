@@ -25,6 +25,8 @@ export interface AccountDoc {
   ownerKey: string | null;
   /** Im Papierkorb seit (ms), sonst 0. */
   trashed: number;
+  /** 'board' oder 'pack', sonst leer (Markdown). Für Übersicht und Wechsler. */
+  kind: string;
 }
 
 export interface Memo {
@@ -96,7 +98,7 @@ export class Account extends DurableObject<Env> {
       );
     `);
     // Spalten kamen später dazu (Papierkorb).
-    for (const col of ['owner_key TEXT', 'trashed INTEGER NOT NULL DEFAULT 0', "text_tags TEXT NOT NULL DEFAULT '[]'"]) {
+    for (const col of ['owner_key TEXT', 'trashed INTEGER NOT NULL DEFAULT 0', "text_tags TEXT NOT NULL DEFAULT '[]'", "kind TEXT NOT NULL DEFAULT ''"]) {
       try { this.sql.exec(`ALTER TABLE docs ADD COLUMN ${col}`); } catch { /* gibt es schon */ }
     }
     // Memo → Dokument.
@@ -144,6 +146,7 @@ export class Account extends DurableObject<Env> {
         textTags: Array.isArray(it.textTags) && newer ? cleanTags(it.textTags) : old?.textTags || [],
         ownerKey: typeof it.ownerKey === 'string' && it.ownerKey ? it.ownerKey.slice(0, 100) : old?.ownerKey ?? null,
         trashed: typeof it.trashed === 'number' && newer ? Math.max(0, it.trashed) : old?.trashed || 0,
+        kind: it.kind === 'board' || it.kind === 'pack' ? it.kind : old?.kind || '',
       };
       this.write(next);
       if (!old) count++;
@@ -162,6 +165,11 @@ export class Account extends DurableObject<Env> {
   /** #tags aus dem Text (Server sieht das Dokument beim Öffnen). */
   setTextTags(id: string, tags: string[]) {
     this.sql.exec('UPDATE docs SET text_tags = ? WHERE id = ?', JSON.stringify(cleanTags(tags)), id);
+  }
+
+  /** Art des Dokuments (vom Server beim Öffnen; ältere Einträge kennen sie nicht). */
+  setKind(id: string, kind: string) {
+    this.sql.exec('UPDATE docs SET kind = ? WHERE id = ?', kind === 'board' || kind === 'pack' ? kind : '', id);
   }
 
   /** Papierkorb-Stand eines eigenen Dokuments (vom Server beim Löschen/Wiederherstellen). */
@@ -292,10 +300,10 @@ export class Account extends DurableObject<Env> {
 
   private write(d: AccountDoc) {
     this.sql.exec(
-      `INSERT INTO docs (id, title, edit_key, opened, tags, owner_key, trashed, text_tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO docs (id, title, edit_key, opened, tags, owner_key, trashed, text_tags, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET title = excluded.title, edit_key = excluded.edit_key, opened = excluded.opened,
-         tags = excluded.tags, owner_key = excluded.owner_key, trashed = excluded.trashed, text_tags = excluded.text_tags`,
-      d.id, d.title, d.editKey, d.opened, JSON.stringify(d.tags), d.ownerKey, d.trashed || 0, JSON.stringify(d.textTags || []),
+         tags = excluded.tags, owner_key = excluded.owner_key, trashed = excluded.trashed, text_tags = excluded.text_tags, kind = excluded.kind`,
+      d.id, d.title, d.editKey, d.opened, JSON.stringify(d.tags), d.ownerKey, d.trashed || 0, JSON.stringify(d.textTags || []), d.kind || '',
     );
   }
 }
@@ -311,6 +319,6 @@ function row(r: Record<string, SqlStorageValue>): AccountDoc {
   try { textTags = JSON.parse((r.text_tags as string) || '[]'); } catch { /* leer */ }
   return {
     id: r.id as string, title: r.title as string, editKey: (r.edit_key as string) || null, opened: r.opened as number, tags, textTags,
-    ownerKey: (r.owner_key as string) || null, trashed: (r.trashed as number) || 0,
+    ownerKey: (r.owner_key as string) || null, trashed: (r.trashed as number) || 0, kind: (r.kind as string) || '',
   };
 }

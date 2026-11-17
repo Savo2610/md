@@ -5,7 +5,9 @@
 
 import { enhance } from './enhance';
 import type { EditorHandle, EditorStatus } from './editor';
+import type { DocKind } from './ui';
 import type { BoardHandle } from './board';
+import type { PackHandle } from './pack';
 import { titleOf, slugify } from '../shared/title';
 import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, unlock, recent, ago, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, docTags, type MenuItem } from './ui';
 import { tagsOf } from '../shared/tags';
@@ -13,11 +15,11 @@ import { account, accountItems, type User } from './account';
 import { fineRow, spellcheckOn, startMode, rememberMode, writerName } from './settings';
 import { openAsNew, takePending, dropZone, fileToMarkdown } from './importer';
 
-interface Boot {
+export interface Boot {
   page: 'doc' | 'admin' | 'home' | 'memos';
   build?: string;
   id?: string;
-  kind?: 'board';
+  kind?: 'board' | 'pack';
   exists?: boolean;
   siteKey?: string;
   katexCss?: string;
@@ -49,8 +51,13 @@ const ICONS = {
   qr: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="4" height="4" rx=".6"/><rect x="9.5" y="2.5" width="4" height="4" rx=".6"/><rect x="2.5" y="9.5" width="4" height="4" rx=".6"/><path d="M9.5 9.5h1.5v1.5M13.5 9.5v.01M9.5 13.5h.01M12 12v1.5h1.5"/></svg>',
 };
 
-function startDoc(boot: Boot) {
+/** Laufende Seite eines Dokuments; destroy() räumt sie ab (Wechsel zwischen Packlisten ohne Neuladen). */
+export interface DocSession { destroy(): void }
+
+function startDoc(boot: Boot, host?: HTMLElement): DocSession {
   const id = boot.id!;
+  const ac = new AbortController();
+  const sig = { signal: ac.signal };
   let exists = !!boot.exists;
   const keyName = `md:key:${id}`;
   const OPEN_EDIT = 'md:open-edit';
@@ -78,9 +85,16 @@ function startDoc(boot: Boot) {
   const isBoard = boot.kind === 'board' || (!exists && location.hash === '#board');
   if (location.hash === '#board') history.replaceState(null, '', location.pathname + location.search);
   if (isBoard) document.body.classList.add('is-board');
+  // Packliste: vom Server (kind) oder neu über /#pack.
+  const isPack = !isBoard && (boot.kind === 'pack' || (!exists && location.hash === '#pack'));
+  if (location.hash === '#pack') history.replaceState(null, '', location.pathname + location.search);
+  if (isPack) document.body.classList.add('is-pack');
+  /** Board oder Packliste: eigene Oberfläche statt Editor und Ansicht. */
+  const isApp = isBoard || isPack;
+  const kindHere: DocKind | undefined = isBoard ? 'board' : isPack ? 'pack' : undefined;
 
   const app = $('#app')!;
-  const article: HTMLElement = $<HTMLElement>('#view') ?? (isBoard ? el('article', { class: 'doc', id: 'view' }) : app.appendChild(el('article', { class: 'doc', id: 'view' })));
+  const article: HTMLElement = $<HTMLElement>('#view') ?? (isApp ? el('article', { class: 'doc', id: 'view' }) : app.appendChild(el('article', { class: 'doc', id: 'view' })));
   const workspace = el('div', { class: 'workspace' });
   const editorPane = el('div', { class: 'pane-editor' });
   const previewPane = el('div', { class: 'pane-preview' });
@@ -88,12 +102,13 @@ function startDoc(boot: Boot) {
   previewPane.append(preview);
   workspace.append(editorPane, previewPane);
   const boardHost = el('div', { class: 'board-host' });
-  app.append(isBoard ? boardHost : workspace);
+  const packHost = host ?? el('div', { class: 'pack-host' });
+  if (!host) app.append(isBoard ? boardHost : isPack ? packHost : workspace);
 
   /** #tags in der gerenderten Ansicht (vom Server). */
   const viewTags = () => [...article.querySelectorAll<HTMLElement>('.doc-tag')].map(s => s.dataset.tag || '').filter(Boolean)
     .filter((t, i, all) => all.findIndex(x => x.toLowerCase() === t.toLowerCase()) === i);
-  if (exists) recent.touch(id, document.title === id ? '' : document.title, !!editKey, viewTags());
+  if (exists) recent.touch(id, document.title === id ? '' : document.title, !!editKey, isApp ? undefined : viewTags(), kindHere);
   // Angemeldet: #tags im Text sichtbar; Antippen zeigt alle eigenen Dokumente
   // mit diesem Tag (Übersicht, gefiltert). Ohne Konto bleiben sie unsichtbar.
   if (account.user) document.body.classList.add('tags-visible');
@@ -123,15 +138,16 @@ function startDoc(boot: Boot) {
   document.body.prepend(bar);
 
   // Darf man bearbeiten: zuletzt benutzter Modus bzw. wie in den Einstellungen.
-  let mode: Mode = isBoard ? (canEdit() ? 'edit' : 'view') : !exists || startInEdit ? 'edit' : editKey ? startMode() : 'view';
+  let mode: Mode = isApp ? (canEdit() ? 'edit' : 'view') : !exists || startInEdit ? 'edit' : editKey ? startMode() : 'view';
   let spellcheck = spellcheckOn();
   // Umgeschaltet in den Einstellungen.
-  addEventListener('md:spellcheck', e => { spellcheck = (e as CustomEvent<boolean>).detail; editor?.setSpellcheck(spellcheck); });
-  addEventListener('md:name', () => { editor?.setName(writerName()); board?.setName(writerName()); });
+  addEventListener('md:spellcheck', e => { spellcheck = (e as CustomEvent<boolean>).detail; editor?.setSpellcheck(spellcheck); }, sig);
+  addEventListener('md:name', () => { editor?.setName(writerName()); board?.setName(writerName()); pack?.setName(writerName()); }, sig);
   let editor: EditorHandle | null = null;
   let board: BoardHandle | null = null;
+  let pack: PackHandle | null = null;
   /** Titel für Umbenennen, Papierkorb und „Zuletzt geöffnet“. */
-  const currentTitle = () => (board ? board.title() : editor ? titleOf(editor.text()) : document.title);
+  const currentTitle = () => (board ? board.title() : pack ? pack.title() : editor ? titleOf(editor.text()) : document.title);
   let editorLoading: Promise<EditorHandle> | null = null;
   let lastStatus: EditorStatus | null = null;
 
@@ -144,7 +160,7 @@ function startDoc(boot: Boot) {
   compactQuery.addEventListener('change', () => {
     if (compactQuery.matches && mode === 'split') setMode('edit');
     else renderBar();
-  });
+  }, sig);
 
   function renderBar() {
     right.replaceChildren();
@@ -154,6 +170,12 @@ function startDoc(boot: Boot) {
         right.append(board.controls);
       }
       if (!compactQuery.matches) right.append(el('span', { class: 'sep', 'aria-hidden': 'true' }), button('Teilen', 'Links zum Teilen', share));
+      right.append(button('⋯', 'Mehr', more, 't more'));
+      renderStatus();
+      return;
+    }
+    if (isPack) {
+      if (!compactQuery.matches) right.append(button('Teilen', 'Links zum Teilen', share));
       right.append(button('⋯', 'Mehr', more, 't more'));
       renderStatus();
       return;
@@ -204,7 +226,7 @@ function startDoc(boot: Boot) {
     status.dataset.state = state;
 
     peers.replaceChildren();
-    const list = (mode !== 'view' || isBoard) && s?.status === 'online' ? s.peers : [];
+    const list = (mode !== 'view' || isApp) && s?.status === 'online' ? s.peers : [];
     for (const p of list.slice(0, 5)) {
       const dot = isBoard && board && p.id !== undefined
         ? el('button', { type: 'button', class: 'peer', title: `${p.name} folgen`, 'aria-label': `${p.name} folgen` })
@@ -302,12 +324,51 @@ function startDoc(boot: Boot) {
     return board;
   }
 
+  async function loadPack(): Promise<PackHandle> {
+    const m = await import('./pack');
+    pack = m.mountPack({
+      id,
+      parent: packHost,
+      exists,
+      editable: mode !== 'view',
+      name: writerName(),
+      wsUrl: () => {
+        const u = new URL(`/api/docs/${encodeURIComponent(id)}/ws`, location.href);
+        u.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        if (editKey) u.searchParams.set('key', editKey);
+        return u.toString();
+      },
+      auth: (): Record<string, string> => (editKey ? { 'x-edit-key': editKey } : {}),
+      ensureCreated: create,
+      onStatus: s => { lastStatus = s; renderStatus(); },
+      onTitle: t => { document.title = t || 'Packliste'; },
+      onNotice: n => {
+        if (n.type === 'hello' && n.edit === false && mode !== 'view') {
+          store.del(keyName);
+          editKey = null;
+          toast('Keine Berechtigung zum Bearbeiten. Mit dem Bearbeiten-Link oder dem Code freischalten.');
+          setMode('view', false);
+        } else if (n.type === 'limit') {
+          toast('Die Packliste hat die Maximalgröße erreicht.');
+        } else if (n.type === 'moved' && n.to) {
+          followMove(n.to);
+        } else if (n.type === 'trashed' && !trashedHere) {
+          location.reload();
+        }
+      },
+      toast,
+    });
+    renderBar();
+    return pack;
+  }
+
   async function setMode(next: Mode, remember = true) {
     if (next !== 'view' && !canEdit()) return;
-    if (isBoard) {
+    if (isApp) {
       mode = next === 'view' ? 'view' : 'edit';
       document.body.dataset.mode = mode;
       board?.setEditable(mode !== 'view');
+      pack?.setEditable(mode !== 'view');
       renderBar();
       return;
     }
@@ -346,7 +407,7 @@ function startDoc(boot: Boot) {
     const res = await fetch(`/api/docs/${encodeURIComponent(id)}/create`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(isBoard ? { token, kind: 'board' } : { token }),
+      body: JSON.stringify(isBoard ? { token, kind: 'board' } : isPack ? { token, kind: 'pack' } : { token }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -359,7 +420,7 @@ function startDoc(boot: Boot) {
     store.set(keyName, editKey!);
     if (data.ownerKey) store.set(`md:owner:${id}`, data.ownerKey);
     exists = true;
-    recent.touch(id, '', true);
+    recent.touch(id, '', true, undefined, kindHere);
     turnstile?.remove();
     renderBar();
     cachePage();
@@ -407,7 +468,7 @@ function startDoc(boot: Boot) {
     const isRandom = /^[a-z0-9]{10}$/.test(id) && /\d/.test(id) && /[a-z]/.test(id);
     // Vorschlag: aus dem Titel (erste Überschrift bzw. erste Zeile) des Dokuments.
     const title = currentTitle();
-    const full = title === id || title === 'Neues Dokument' || title === 'Board' ? '' : slugify(title);
+    const full = title === id || title === 'Neues Dokument' || title === 'Board' || title === 'Packliste' ? '' : slugify(title);
     const suggestion = full.length <= 60 ? full : full.slice(0, 60).replace(/-[^-]*$/, '');
     const input = el('input', { type: 'text', value: isRandom && suggestion ? suggestion : id, placeholder: 'meine-anleitung', spellcheck: 'false', autocapitalize: 'off', 'aria-label': 'Neue Adresse' }) as HTMLInputElement;
     const save = el('button', { type: 'submit', class: 't boxed' }, 'Ändern');
@@ -485,7 +546,7 @@ function startDoc(boot: Boot) {
       line.append(copy);
       body.append(row);
     });
-    if (!exists) body.append(el('p', { class: 'hint' }, isBoard ? 'Das Board wird angelegt, sobald du etwas daraufsetzt.' : 'Das Dokument wird angelegt, sobald du etwas schreibst.'));
+    if (!exists) body.append(el('p', { class: 'hint' }, isBoard ? 'Das Board wird angelegt, sobald du etwas daraufsetzt.' : isPack ? 'Die Packliste wird angelegt, sobald du etwas einträgst.' : 'Das Dokument wird angelegt, sobald du etwas schreibst.'));
     dialog('Teilen', body);
   }
 
@@ -519,8 +580,13 @@ function startDoc(boot: Boot) {
   // ── Menüs ─────────────────────────────────────────────────────────────────
 
   function openRecent() {
-    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')], ['Neues Board', () => (location.href = '/#board')], ['Datei öffnen …', () => openAsNew()], ['Alle Dokumente', () => (location.href = '/home')], ['Memos', () => (location.href = '/memos')]];
-    const list = recent.list().filter(r => r.id !== id && !r.trashed);
+    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')], ['Neues Board', () => (location.href = '/#board')], ['Neue Packliste', () => (location.href = '/#pack')], ['Datei öffnen …', () => openAsNew()], ['Alle Dokumente', () => (location.href = '/home')], ['Memos', () => (location.href = '/memos')]];
+    // Im Board die anderen Boards, in der Packliste die anderen Packlisten.
+    const same = kindHere ? recent.list().filter(r => r.kind === kindHere && r.id !== id && !r.trashed).slice(0, 8) : [];
+    if (same.length) items.push(el('div', { class: 'menu-label' }, isBoard ? 'Boards' : 'Packlisten'));
+    for (const r of same) items.push(el('a', { href: `/${encodeURIComponent(r.id)}`, class: 'recent' }, el('span', { class: 'recent-title' }, r.title || r.id), el('span', { class: 'recent-meta' }, ago(r.at))));
+    const shown = new Set(same.map(r => r.id));
+    const list = recent.list().filter(r => r.id !== id && !r.trashed && !shown.has(r.id));
     if (list.length) items.push(el('div', { class: 'menu-label' }, 'Zuletzt geöffnet'));
     for (const r of list.slice(0, 5)) {
       items.push(el('a', { href: `/${encodeURIComponent(r.id)}`, class: 'recent' },
@@ -542,8 +608,20 @@ function startDoc(boot: Boot) {
       items.push(['Neues Dokument', () => { if (navigator.onLine) location.href = '/'; else toast('Offline: Neue Dokumente gehen nur mit Verbindung.'); }]);
     }
     if (isBoard && board && mode !== 'view' && board.peerCount()) items.push(['Alle zu mir holen', () => board!.summon()]);
+    // Als App fehlt das „md“-Menü: andere Boards hier.
+    if (isBoard && standalone) {
+      const others = recent.list().filter(r => r.kind === 'board' && r.id !== id && !r.trashed).slice(0, 6);
+      if (others.length) {
+        items.push(el('div', { class: 'menu-label' }, 'Boards'));
+        for (const r of others) items.push([r.title || r.id, () => (location.href = `/${encodeURIComponent(r.id)}`)]);
+        items.push(el('div', { class: 'menu-label' }, 'Dieses Board'));
+      }
+    }
+    if (pack) items.push(...pack.menuItems());
     items.push(['Markdown kopieren', copyMarkdown]);
-    if (isBoard) {
+    if (isPack) {
+      // Kein Herunterladen/Drucken: „Als Text teilen“ und /<id>.md reichen.
+    } else if (isBoard) {
       items.push(['Als Dokument öffnen', () => { if (board) openAsNew(new File([board.markdown()], `${board.title() || 'Board'}.md`, { type: 'text/markdown' })); }]);
       items.push(['Drucken (.pdf)', () => board?.print()]);
     } else {
@@ -554,9 +632,9 @@ function startDoc(boot: Boot) {
       if (!key) return;
       editKey = key;
       store.set(keyName, key);
-      recent.touch(id, document.title, true);
+      recent.touch(id, document.title, true, undefined, kindHere);
       enableTasks();
-      if (isBoard) { setMode('edit', false); board?.reconnect(); }
+      if (isApp) { setMode('edit', false); board?.reconnect(); pack?.reconnect(); }
       renderBar();
       toast('Freigeschaltet. Du kannst dieses Dokument jetzt bearbeiten.');
     };
@@ -586,7 +664,7 @@ function startDoc(boot: Boot) {
   }
 
   async function copyMarkdown() {
-    const local = editor?.text() ?? board?.markdown() ?? fetchedMd ?? undefined;
+    const local = editor?.text() ?? board?.markdown() ?? pack?.markdown() ?? fetchedMd ?? undefined;
     if (!exists && !local) { toast('Noch leer.'); return; }
     try {
       if (local !== undefined) {
@@ -642,11 +720,11 @@ function startDoc(boot: Boot) {
   addEventListener('beforeprint', () => {
     themeBeforePrint = document.documentElement.getAttribute('data-theme');
     document.documentElement.setAttribute('data-theme', 'light');
-  });
+  }, sig);
   addEventListener('afterprint', () => {
     if (themeBeforePrint) document.documentElement.setAttribute('data-theme', themeBeforePrint);
     else document.documentElement.removeAttribute('data-theme');
-  });
+  }, sig);
 
   /** In den Papierkorb (nur Ersteller oder Admin). */
   let trashedHere = false;
@@ -665,7 +743,7 @@ function startDoc(boot: Boot) {
   // ── Tastatur, Leiste beim Schreiben ausblenden ────────────────────────────
 
   addEventListener('keydown', e => {
-    if (isBoard) return;
+    if (isApp) return;
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === 'e') {
       e.preventDefault();
@@ -677,7 +755,7 @@ function startDoc(boot: Boot) {
     } else if (mode === 'view' && !mod && !e.altKey && e.key === 'e' && !(e.target instanceof HTMLInputElement) && !document.querySelector('dialog[open]')) {
       if (canEdit()) { e.preventDefault(); setMode('edit'); }
     }
-  });
+  }, sig);
 
   // Beim Tippen blendet sich die Leiste aus. Sie kommt zurück, sobald die
   // Maus ein Stück bewegt wird oder darüber schwebt, und bleibt klickbar.
@@ -690,13 +768,14 @@ function startDoc(boot: Boot) {
     if (!document.body.classList.contains('typing')) return;
     if (!typingFrom) { typingFrom = { x: e.clientX, y: e.clientY }; return; }
     if (Math.hypot(e.clientX - typingFrom.x, e.clientY - typingFrom.y) > 20) document.body.classList.remove('typing');
-  }, { passive: true });
+  }, { passive: true, ...sig });
 
   // Titel in „Zuletzt geöffnet“ aktuell halten.
   addEventListener('pagehide', () => {
     if (editor && exists && !trashedHere) recent.touch(id, titleOf(editor.text()), true, tagsOf(editor.text()));
-    if (board && exists && !trashedHere) recent.touch(id, board.title() || 'Board', !!editKey, tagsOf(board.markdown()));
-  });
+    if (board && exists && !trashedHere) recent.touch(id, board.title() || 'Board', !!editKey, tagsOf(board.markdown()), 'board');
+    if (pack && exists && !trashedHere) recent.touch(id, pack.title() || 'Packliste', !!editKey, undefined, 'pack');
+  }, sig);
 
   // Aufgaben in der Ansicht abhaken, wenn man bearbeiten darf.
   function enableTasks() {
@@ -741,19 +820,21 @@ function startDoc(boot: Boot) {
   account.sync();
   if (isBoard) {
     loadBoard();
+  } else if (isPack) {
+    loadPack();
   } else if (exists) {
     enableTasks();
     enhance(article, boot.katexCss);
     if (editKey && !navigator.onLine) showLocalCopy();
   }
-  if (mode !== 'view' && !isBoard) {
+  if (mode !== 'view' && !isApp) {
     const target = mode;
     mode = 'view';
     setMode(target, false);
   }
 
   // „Datei öffnen …“: Inhalt landet im neuen, leeren Dokument (legt es dabei an).
-  const imported = exists || isBoard ? null : takePending();
+  const imported = exists || isApp ? null : takePending();
   if (imported) {
     loadEditor().then(async ed => {
       await ed.whenLocal();
@@ -768,7 +849,19 @@ function startDoc(boot: Boot) {
   dropZone(file => {
     if (mode !== 'view' && editor) fileToMarkdown(file).then(md => editor!.insertBlock(md), () => toast('Die Datei ließ sich nicht lesen.'));
     else openAsNew(file);
-  }, () => !isBoard);
+  }, () => !isApp, ac.signal);
+
+  return {
+    destroy() {
+      if (pack && exists && !trashedHere) recent.touch(id, pack.title() || 'Packliste', !!editKey, undefined, 'pack');
+      ac.abort();
+      pack?.destroy();
+      pack = null;
+      turnstile?.remove();
+      bar.remove();
+      document.querySelectorAll('dialog').forEach(d => d.close());
+    },
+  };
 }
 
 // ── Gelöschtes Dokument (Papierkorb) ────────────────────────────────────────
@@ -868,6 +961,9 @@ if (boot.page === 'admin') {
   import('./memos').then(m => m.start(boot));
 } else if (boot.trashed) {
   startTrashed(boot);
+} else if (boot.kind === 'pack' || (!boot.exists && location.hash === '#pack')) {
+  // Packlisten: alle eigenen nebeneinander, Wechsel per Reiter oder Wischen.
+  import('./pack-pager').then(m => m.startPager(boot, (b, host) => startDoc(b, host)));
 } else {
   startDoc(boot);
 }
