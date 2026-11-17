@@ -722,15 +722,18 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
   /** In den Papierkorb (nur Ersteller oder Admin). */
   let trashedHere = false;
   async function trashDoc() {
-    if (!(await ask('Dokument löschen?', 'Es ist sofort für alle weg. 30 Tage lang kannst du es auf der Übersicht im Papierkorb wiederherstellen.', 'Löschen'))) return;
+    const what = isPack ? 'Packliste' : isBoard ? 'Board' : 'Dokument';
+    if (!(await ask(`${what} löschen?`, `${isPack ? 'Sie' : 'Es'} ist sofort für alle weg. 30 Tage lang kannst du ${isPack ? 'sie' : 'es'} auf der Übersicht im Papierkorb wiederherstellen.`, 'Löschen'))) return;
     // Vorher setzen: Der Server schließt gleich die Verbindung, das soll hier kein Neuladen auslösen.
     trashedHere = true;
     const res = await fetch(`/api/docs/${encodeURIComponent(id)}/trash`, { method: 'POST', headers: { ...ownerHeaders(id), ...adminHeaders() } });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { trashedHere = false; toast(data.error || 'Löschen fehlgeschlagen.'); return; }
     recent.markTrashed(id, data.trashed, currentTitle());
-    // Gleich weiterschreiben: neues, leeres Dokument (ohne Zurück zum gelöschten).
-    location.replace('/');
+    // Ohne Zurück zum gelöschten weiter: Packliste → die anderen Packlisten
+    // (bzw. eine neue, wenn es keine mehr gibt), Board → alle Boards,
+    // Dokument → gleich weiterschreiben in einem neuen.
+    location.replace(isPack ? '/pack' : isBoard ? '/home?art=board' : '/');
   }
 
   // ── Tastatur, Leiste beim Schreiben ausblenden ────────────────────────────
