@@ -155,6 +155,15 @@ const ALIASES: Record<string, string> = {
   bier: 'kueche', wasserflasche: 'kueche', kaffeepulver: 'kueche', gewuerze: 'kueche',
   buecher: 'sonstiges', spiele: 'sonstiges', badminton: 'sonstiges',
   musikbox: 'technik', lautsprecher: 'technik',
+  // Ergänzt beim Umzug aus der alten Packliste (dort nur von Hand einsortiert).
+  regencape: 'kleidung', fleece: 'kleidung', badelatsche: 'kleidung', badelatschen: 'kleidung',
+  medikit: 'hygiene', gehoerschutz: 'hygiene', waschzeug: 'hygiene', rasierzeug: 'hygiene',
+  fingernaegel: 'hygiene', nagelset: 'hygiene',
+  ipad: 'technik', iphone: 'technik', powercube: 'technik', ventilator: 'technik', handventilator: 'technik',
+  gas: 'ausruestung', sportbeutel: 'ausruestung', bettwaesche: 'ausruestung', faszienrolle: 'ausruestung',
+  messer: 'kueche', bialetti: 'kueche', espressokocher: 'kueche', kuechenrolle: 'kueche', schwamm: 'kueche',
+  spueli: 'kueche', spueltab: 'kueche', spueltabs: 'kueche', spuelschuessel: 'kueche', dosenfutter: 'kueche',
+  minutenterrine: 'kueche', lebensmittel: 'kueche', brottueten: 'kueche', 'zip beutel': 'kueche', ziplock: 'kueche',
 };
 
 /** Endungen, falls kein direkter Treffer. */
@@ -164,7 +173,7 @@ const SUFFIX_RULES: [RegExp, string][] = [
   [/(kabel|lader|ladung|akku|elektro|adapter|stecker|lampe|batterie)/, 'technik'],
   [/(pass|ausweis|ticket|schein|urkunde|dokument)/, 'dokumente'],
   [/(zelt|sack|matte|kocher|seil|rucksack|tasche|koffer|ski|board|helm|gurt|schlaeger)/, 'ausruestung'],
-  [/(flasche|becher|teller|besteck|topf|pfanne|essen|snack|getraenk)/, 'kueche'],
+  [/(flasche|becher|teller|besteck|topf|pfanne|essen|snack|getraenk|spuel|terrine)/, 'kueche'],
 ];
 
 /** Umlaute falten, Kleinschreibung, Sonderzeichen weg. */
