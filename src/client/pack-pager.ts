@@ -11,7 +11,7 @@
 import type { Boot, DocSession } from './main';
 import { $, el, store, recent } from './ui';
 import { snapshots, type Snapshot } from './pack';
-import { CATEGORIES, validCategory } from '../shared/pack';
+import { CATEGORIES, guessEmoji, splitTitle, validCategory } from '../shared/pack';
 
 const ORDER = 'md:pack:order';
 const PLUS = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>';
@@ -195,11 +195,14 @@ export function startPager(boot: Boot, start: (b: Boot, host: HTMLElement) => Do
 /** Statische Fassung einer Liste in denselben Klassen wie die echte. */
 function previewDom(title: string, snap: Snapshot | undefined, doneOpen: boolean, editable: boolean): HTMLElement {
   const items = snap?.items || [];
+  const split = splitTitle(title);
   const open = items.filter(i => !i.done);
   const done = items.filter(i => i.done);
   const summary = items.length ? (open.length ? `${open.length} offen · ${done.length} von ${items.length} eingepackt` : `Alles eingepackt · ${items.length}`) : '';
   const root = el('div', { class: 'pack pk-preview', 'aria-hidden': 'true' },
-    el('header', { class: 'pk-head' }, el('div', { class: 'pk-title' }, title), el('p', { class: 'pk-summary' }, summary)));
+    el('header', { class: 'pk-head' },
+      el('div', { class: 'pk-title-row' }, el('span', { class: `pk-emoji${split.emoji ? '' : ' auto'}` }, split.emoji || guessEmoji(split.text)), el('div', { class: 'pk-title' }, split.text)),
+      el('p', { class: 'pk-summary' }, summary)));
   if (editable) root.append(el('div', { class: 'pk-add' }, el('div', { class: 'pk-add-input pk-fake' }, 'Hinzufügen …')));
   const lists = el('div', { class: 'pk-lists' });
   const row = (i: (typeof items)[number]) => {

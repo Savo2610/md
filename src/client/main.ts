@@ -9,11 +9,12 @@ import type { DocKind } from './ui';
 import type { BoardHandle } from './board';
 import type { PackHandle } from './pack';
 import { titleOf, slugify } from '../shared/title';
-import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, unlock, recent, ago, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, docTags, type MenuItem } from './ui';
+import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, unlock, recent, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, type MenuItem } from './ui';
 import { tagsOf } from '../shared/tags';
-import { account, accountItems, type User } from './account';
-import { fineRow, spellcheckOn, startMode, rememberMode, writerName } from './settings';
+import { account, type User } from './account';
+import { spellcheckOn, startMode, rememberMode, writerName } from './settings';
 import { openAsNew, takePending, dropZone, fileToMarkdown } from './importer';
+import { toolMenu, NEW } from './nav';
 
 export interface Boot {
   page: 'doc' | 'admin' | 'home' | 'memos' | 'packstart' | 'umzug';
@@ -127,10 +128,12 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
   const right = el('nav', { class: 'bar-right' });
   // In der installierten App führt „md“ zurück zur Übersicht, im Browser
   // öffnet es das kleine Menü mit „Neues Dokument“ und den letzten Dokumenten.
-  const brand = standalone
+  // Board und Packliste haben auch als App das Menü (dort fehlt sonst der Weg zu den anderen).
+  const brandIsLink = standalone && !isApp;
+  const brand = brandIsLink
     ? el('a', { class: 'brand', href: '/home', title: 'Alle Dokumente' }, '‹ md')
-    : el('button', { type: 'button', class: 'brand', title: 'Neues Dokument und zuletzt geöffnete', 'aria-haspopup': 'dialog' }, 'md');
-  if (!standalone) brand.addEventListener('click', openRecent);
+    : el('button', { type: 'button', class: 'brand', title: 'Menü', 'aria-haspopup': 'dialog' }, 'md');
+  if (!brandIsLink) brand.addEventListener('click', openRecent);
   const status = el('span', { class: 'status', role: 'status' });
   const peers = el('span', { class: 'peers' });
   left.append(brand, status, peers);
@@ -580,47 +583,21 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
   // ── Menüs ─────────────────────────────────────────────────────────────────
 
   function openRecent() {
-    const items: MenuItem[] = [['Neues Dokument', () => (location.href = '/')], ['Neues Board', () => (location.href = '/#board')], ['Neue Packliste', () => (location.href = '/#pack')], ['Datei öffnen …', () => openAsNew()], ['Alle Dokumente', () => (location.href = '/home')], ['Memos', () => (location.href = '/memos')]];
-    // Im Board die anderen Boards, in der Packliste die anderen Packlisten.
-    const same = kindHere ? recent.list().filter(r => r.kind === kindHere && r.id !== id && !r.trashed).slice(0, 8) : [];
-    if (same.length) items.push(el('div', { class: 'menu-label' }, isBoard ? 'Boards' : 'Packlisten'));
-    for (const r of same) items.push(el('a', { href: `/${encodeURIComponent(r.id)}`, class: 'recent' }, el('span', { class: 'recent-title' }, r.title || r.id), el('span', { class: 'recent-meta' }, ago(r.at))));
-    const shown = new Set(same.map(r => r.id));
-    const list = recent.list().filter(r => r.id !== id && !r.trashed && !shown.has(r.id));
-    if (list.length) items.push(el('div', { class: 'menu-label' }, 'Zuletzt geöffnet'));
-    for (const r of list.slice(0, 5)) {
-      items.push(el('a', { href: `/${encodeURIComponent(r.id)}`, class: 'recent' },
-        el('span', { class: 'recent-title' }, r.title || r.id),
-        el('span', { class: 'recent-meta' }, `${ago(r.at)}${r.own ? ' · bearbeitbar' : ''}${docTags(r).length ? ' · ' + docTags(r).join(', ') : ''}`),
-      ));
-    }
-    items.push(...accountItems());
-    items.push(fineRow());
-    menu('left', items);
+    menu('left', toolMenu(kindHere ?? 'md', id));
   }
 
   function more() {
     fetchedMd = null; fetchingMd = null; // jedes Mal frisch, andere schreiben vielleicht mit
     prefetchMarkdown();
     const items: MenuItem[] = [];
-    if (compactQuery.matches) {
-      items.push(['Teilen', share]);
-      items.push(['Neues Dokument', () => { if (navigator.onLine) location.href = '/'; else toast('Offline: Neue Dokumente gehen nur mit Verbindung.'); }]);
-    }
+    if (compactQuery.matches) items.push(['Teilen', share]);
+    items.push(['Als Markdown teilen', shareMarkdown]);
+    // Handy als App: bei Dokumenten führt „‹ md“ zur Übersicht, Neues deshalb auch hier.
+    if (compactQuery.matches && brandIsLink) items.push(NEW.md);
     if (isBoard && board && mode !== 'view' && board.peerCount()) items.push(['Alle zu mir holen', () => board!.summon()]);
-    // Als App fehlt das „md“-Menü: andere Boards hier.
-    if (isBoard && standalone) {
-      const others = recent.list().filter(r => r.kind === 'board' && r.id !== id && !r.trashed).slice(0, 6);
-      if (others.length) {
-        items.push(el('div', { class: 'menu-label' }, 'Boards'));
-        for (const r of others) items.push([r.title || r.id, () => (location.href = `/${encodeURIComponent(r.id)}`)]);
-        items.push(el('div', { class: 'menu-label' }, 'Dieses Board'));
-      }
-    }
     if (pack) items.push(...pack.menuItems());
-    items.push(['Markdown kopieren', copyMarkdown]);
     if (isPack) {
-      // Kein Herunterladen/Drucken: „Als Text teilen“ und /<id>.md reichen.
+      // Kein Herunterladen/Drucken: „Als Markdown teilen“ und /<id>.md reichen.
     } else if (isBoard) {
       items.push(['Als Dokument öffnen', () => { if (board) openAsNew(new File([board.markdown()], `${board.title() || 'Board'}.md`, { type: 'text/markdown' })); }]);
       items.push(['Drucken (.pdf)', () => board?.print()]);
@@ -684,6 +661,22 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
     } catch {
       toast('Kopieren ging nicht.');
     }
+  }
+
+  /** Handy: Teilen-Dialog des Systems mit dem Markdown; sonst in die Zwischenablage. */
+  async function shareMarkdown() {
+    const local = editor?.text() ?? board?.markdown() ?? pack?.markdown() ?? fetchedMd ?? undefined;
+    const phone = compactQuery.matches || matchMedia('(pointer: coarse)').matches;
+    if (phone && navigator.share && local !== undefined) {
+      if (!exists && !local) { toast('Noch leer.'); return; }
+      try {
+        await navigator.share({ title: currentTitle() || undefined, text: local });
+        return;
+      } catch (e) {
+        if ((e as DOMException)?.name === 'AbortError') return;
+      }
+    }
+    copyMarkdown();
   }
 
   /** Ohne Clipboard-API (oder verweigert): klassisch über ein unsichtbares Textfeld. */

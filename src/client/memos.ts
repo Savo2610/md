@@ -9,7 +9,7 @@
 import { $, el, store, toast, ask, dialog } from './ui';
 import { toFunk } from '../shared/funk';
 import { account, accountItems, avatar, type User } from './account';
-import { fineRow } from './settings';
+import { toolMenu } from './nav';
 import { enhance } from './enhance';
 import { memoEditor, type MemoEditor } from './memo-editor';
 import { tagsOf, tagRe, withoutTags } from '../shared/tags';
@@ -63,11 +63,7 @@ export function start(boot: Boot) {
   // ── Kopfleiste ────────────────────────────────────────────────────────────
 
   const brand = el('button', { type: 'button', class: 'brand', title: 'Menü', 'aria-haspopup': 'dialog' }, 'md');
-  brand.addEventListener('click', () => popover(brand, [
-    ['Alle Dokumente', () => (location.href = '/home')],
-    ['Neues Dokument', () => (location.href = '/')],
-    fineRow(),
-  ], 'left'));
+  brand.addEventListener('click', () => popover(brand, toolMenu('memos'), 'left'));
   const right = el('nav', { class: 'bar-right' });
   const bar = el('header', { id: 'bar' }, el('div', { class: 'bar-left' }, brand, el('span', { class: 'bar-title' }, 'Memos')), right);
   document.body.prepend(bar);

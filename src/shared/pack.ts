@@ -348,3 +348,72 @@ export function packMarkdown(doc: Y.Doc): string {
   }
   return lines.join('\n') + '\n';
 }
+
+// ── Emoji am Titel ──────────────────────────────────────────────────────────
+// Steht vorne im Titel („🎪 Festival“), so bleibt es in Reitern, Übersicht und
+// Markdown ohne eigenes Feld erhalten. Wählt man keins, rät guessEmoji().
+
+const LEADING_EMOJI = /^(\p{Extended_Pictographic}(?:️|‍\p{Extended_Pictographic}|\p{Emoji_Modifier})*️?)\s*/u;
+
+export function splitTitle(title: string): { emoji: string; text: string } {
+  const m = LEADING_EMOJI.exec(title);
+  return m ? { emoji: m[1], text: title.slice(m[0].length) } : { emoji: '', text: title };
+}
+
+export const joinTitle = (emoji: string, text: string) => (emoji ? `${emoji} ${text}` : text);
+
+export const PACK_EMOJIS = [
+  '🧳', '🎒', '⛺', '🏕️', '🎪', '🎸', '🎉', '⛷️', '🏂', '🥾', '🏔️', '🏖️',
+  '☀️', '🌊', '🛶', '🏄', '⛵', '🤿', '🏊', '🚲', '🚐', '🚗', '✈️', '🚆',
+  '🏙️', '🎢', '🧖', '🧗', '🎣', '⛳', '⚽', '🏋️', '👶', '🐕', '💼', '🎄',
+  '💍', '🏥', '📦', '🛒', '🧺', '🔥',
+];
+
+const EMOJI_RULES: [RegExp, string][] = [
+  [/festival|open ?air|rock am|fusion|hurricane/, '🎪'],
+  [/konzert|gig|band/, '🎸'],
+  [/party|geburtstag|feier|junggesell|jga/, '🎉'],
+  [/snowboard/, '🏂'],
+  [/ski|piste/, '⛷️'],
+  [/wander|huette|trekking/, '🥾'],
+  [/berg|alpen/, '🏔️'],
+  [/camping|zelt|campen/, '⛺'],
+  [/bulli|wohnmobil|camper|van/, '🚐'],
+  [/strand|meer|kueste|insel|baden|ostsee|nordsee/, '🏖️'],
+  [/kanu|kajak|paddel/, '🛶'],
+  [/wakeboard|surf|kite|sup/, '🏄'],
+  [/segel|boot|toern/, '⛵'],
+  [/tauch|schnorchel/, '🤿'],
+  [/schwimm|pool/, '🏊'],
+  [/fahrrad|radtour|bike|velo/, '🚲'],
+  [/roadtrip|auto/, '🚗'],
+  [/flug|fliegen/, '✈️'],
+  [/zug|bahn|interrail/, '🚆'],
+  [/stadt|staedte|city/, '🏙️'],
+  [/freizeitpark|kirmes|europa ?park|phantasialand/, '🎢'],
+  [/sauna|wellness|spa|therme/, '🧖'],
+  [/kletter|boulder/, '🧗'],
+  [/angel/, '🎣'],
+  [/golf/, '⛳'],
+  [/fussball|turnier/, '⚽'],
+  [/fitness|gym|training/, '🏋️'],
+  [/baby|kita|kliniktasche|geburt/, '👶'],
+  [/hund|katze/, '🐕'],
+  [/business|dienstreise|messe|konferenz/, '💼'],
+  [/weihnacht|advent/, '🎄'],
+  [/hochzeit/, '💍'],
+  [/krankenhaus|klinik|reha|kur/, '🏥'],
+  [/umzug|einzug/, '📦'],
+  [/einkauf|supermarkt/, '🛒'],
+  [/picknick/, '🧺'],
+  [/grill|bbq/, '🔥'],
+  [/winter|schnee/, '⛷️'],
+  [/sommer|sonne/, '☀️'],
+];
+
+/** Passendes Emoji zum Titel, sonst der Koffer. */
+export function guessEmoji(text: string): string {
+  const n = normalize(text);
+  for (const [re, e] of EMOJI_RULES) if (re.test(n)) return e;
+  return '🧳';
+}
