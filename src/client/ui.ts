@@ -32,6 +32,32 @@ export type DocKind = 'board' | 'pack';
 export interface Recent { id: string; title: string; at: number; own: boolean; tags?: string[]; textTags?: string[]; dirty?: boolean; trashed?: number; kind?: DocKind }
 
 /** Alle Tags eines Dokuments: eigene (Dialog) und #tags aus dem Text, ohne Doppelte. */
+/**
+ * Bildschirmtastatur geht zu, das Feld behält aber den Fokus (Android: die
+ * Zurück-Taste schließt nur die Tastatur). `cb` läuft dann, z. B. um das
+ * Feld zu verlassen und Vorschläge zu schließen. Liefert eine Abmeldung.
+ */
+export function onKeyboardClose(cb: () => void): () => void {
+  const vv = window.visualViewport;
+  if (!vv) return () => {};
+  let full = vv.height;
+  let width = vv.width;
+  let open = false;
+  const update = () => {
+    // Gedreht oder gezoomt: neu messen.
+    if (Math.abs(vv.width - width) > 1) { width = vv.width; full = vv.height; open = false; return; }
+    full = Math.max(full, vv.height);
+    const kb = full - vv.height;
+    if (kb > 150) open = true;
+    else if (open && kb < 80) { open = false; cb(); }
+  };
+  vv.addEventListener('resize', update);
+  return () => vv.removeEventListener('resize', update);
+}
+
+/** Adresse eines Dokuments: Packlisten liegen im eigenen Bereich /pack/ (eigene App). */
+export const docHref = (id: string, kind?: DocKind) => `${kind === 'pack' ? '/pack/' : '/'}${encodeURIComponent(id)}`;
+
 export function docTags(r: Recent): string[] {
   const out: string[] = [];
   for (const t of [...(r.tags || []), ...(r.textTags || [])]) if (!out.some(x => x.toLowerCase() === t.toLowerCase())) out.push(t);

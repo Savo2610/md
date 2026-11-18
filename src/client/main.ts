@@ -9,7 +9,7 @@ import type { DocKind } from './ui';
 import type { BoardHandle } from './board';
 import type { PackHandle } from './pack';
 import { titleOf, slugify } from '../shared/title';
-import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, unlock, recent, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, type MenuItem } from './ui';
+import { $, el, dialog, toast, store, adminHeaders, isAdmin, setAccountAdmin, unlockDialog, unlock, recent, menu, ask, ownerKey, ownerHeaders, trashDaysLeft, docHref, type MenuItem } from './ui';
 import { tagsOf } from '../shared/tags';
 import { account, type User } from './account';
 import { spellcheckOn, startMode, rememberMode, writerName } from './settings';
@@ -500,7 +500,7 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
   // ── Teilen: Links und eigener Name ────────────────────────────────────────
 
   function share() {
-    const base = `${location.origin}/${encodeURIComponent(id)}`;
+    const base = `${location.origin}${docHref(id, kindHere)}`;
     const body = el('div', { class: 'sheet' });
 
     const rows: [string, string, string][] = [['Zum Lesen', base, 'Öffnet die Ansicht. Bearbeiten ist damit nicht möglich.']];
@@ -961,7 +961,10 @@ if (boot.page === 'admin') {
   import('./umzug').then(m => m.startUmzug(boot));
 } else if (boot.trashed) {
   startTrashed(boot);
-} else if (boot.kind === 'pack' || (!boot.exists && location.hash === '#pack')) {
+} else if (!boot.exists && location.hash === '#pack') {
+  // Alte Adresse /<id>#pack für eine neue Liste: in den Bereich der Packlisten-App.
+  location.replace(`/pack/${encodeURIComponent(boot.id!)}`);
+} else if (boot.kind === 'pack') {
   // Packlisten: alle eigenen nebeneinander, Wechsel per Reiter oder Wischen.
   import('./pack-pager').then(m => m.startPager(boot, (b, host) => startDoc(b, host)));
 } else {

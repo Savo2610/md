@@ -33,7 +33,10 @@ export async function startPackStart() {
   // Angemeldet auf einem neuen Gerät: erst die Liste aus dem Konto holen.
   if (account.user) await Promise.race([account.sync(true), new Promise(r => setTimeout(r, 2500))]);
   const last = recent.list().filter(r => r.kind === 'pack' && !r.trashed).sort((a, b) => b.at - a.at)[0];
-  location.replace(last ? `/${encodeURIComponent(last.id)}` : '/#pack');
+  const to = last ? `/pack/${encodeURIComponent(last.id)}` : '/pack/new';
+  // Offline als Ersatz für eine nie geöffnete Liste ausgeliefert: nicht im Kreis laufen.
+  if (to === location.pathname) { document.querySelector('#app')!.append(el('p', { class: 'umzug-meta' }, 'Offline – diese Packliste wurde hier noch nie geöffnet.')); return; }
+  location.replace(to);
 }
 
 interface Found { id: string; title: string; count: number; shared: boolean; moved: boolean }

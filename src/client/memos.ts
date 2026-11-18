@@ -1,12 +1,13 @@
 // Memos (/memos): kurze private Notizen im Konto, neueste oben.
 //
 // Oben die Eingabe (memo-editor.ts), darunter Tags zum Filtern und die Liste.
+// Am Handy springt ein + unten rechts in die Eingabe (wie bei Packlisten).
 // Die Liste kommt fertig gerendert mit der Seite (boot.memos), Änderungen
 // gehen an /api/me/memos. Ohne Verbindung Geschriebenes wartet im Browser
 // (md:memos:outbox) und wird nachgeschickt. Löschen wartet ein paar Sekunden
 // auf „Rückgängig“, bevor es an den Server geht.
 
-import { $, el, store, toast, ask, dialog } from './ui';
+import { $, el, store, toast, ask, dialog, onKeyboardClose } from './ui';
 import { toFunk } from '../shared/funk';
 import { account, accountItems, avatar, type User } from './account';
 import { toolMenu } from './nav';
@@ -20,11 +21,12 @@ interface Boot { user?: User | null; login?: boolean; memos?: Memo[]; katexCss?:
 const OUTBOX = 'md:memos:outbox';
 const DRAFT = 'md:memos:draft';
 const UNDO_MS = 6000;
-/** Handy: Eingabe unten am Daumen, Menüs als Blatt von unten (wie die Dialoge). */
+/** Handy: Menüs als Blatt von unten (wie die Dialoge). */
 const PHONE = matchMedia('(max-width: 600px)');
 const AUDIO = /^\/m\/[\w-]+\.(m4a|mp3|aac|webm|ogg|oga|opus|wav)$/;
 
 const ICON = {
+  plus: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>',
   search: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3.5 3.5"/></svg>',
   pending: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg>',
   file: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11.5 2.75H6a1.75 1.75 0 0 0-1.75 1.75v11A1.75 1.75 0 0 0 6 17.25h8a1.75 1.75 0 0 0 1.75-1.75V7z"/><path d="M11.5 2.75V7h4.25"/></svg>',
@@ -121,7 +123,23 @@ export function start(boot: Boot) {
     },
   });
 
-  dock(composer);
+  // Handy: + unten rechts springt in die Eingabe oben.
+  const fab = el('button', { type: 'button', class: 'memos-fab', title: 'Neues Memo', 'aria-label': 'Neues Memo' });
+  fab.innerHTML = ICON.plus;
+  fab.addEventListener('click', () => {
+    composer.scrollIntoView({ block: 'start' });
+    editor.focus();
+  });
+  page.append(fab);
+  composer.addEventListener('focusin', () => document.body.classList.add('composing'));
+  composer.addEventListener('focusout', e => {
+    if (!composer.contains(e.relatedTarget as Node | null)) document.body.classList.remove('composing');
+  });
+  // Zurück-Taste am Handy schließt nur die Tastatur: dann auch die Eingabe verlassen.
+  onKeyboardClose(() => {
+    const active = document.activeElement as HTMLElement | null;
+    if (active && (composer.contains(active) || inline?.root.contains(active))) active.blur();
+  });
 
   const search = el('input', { type: 'search', class: 'memos-search', placeholder: 'Suchen …', 'aria-label': 'Memos durchsuchen', hidden: '' }) as HTMLInputElement;
   const searchBtn = el('button', { type: 'button', class: 't icon', title: 'Suchen', 'aria-label': 'Suchen' });
@@ -449,26 +467,6 @@ export function start(boot: Boot) {
   flush();
   // Am Rechner gleich losschreiben; am Handy nicht die Tastatur aufreißen.
   if (!matchMedia('(pointer: coarse)').matches) editor.focus();
-}
-
-/**
- * Handy: Die Eingabe steht unten fest. Ihre Höhe (--dock) hält unten Platz
- * frei, --kb hebt sie über die Bildschirmtastatur (iOS verkleinert dafür
- * nur den sichtbaren Ausschnitt, nicht die Seite).
- */
-function dock(composer: HTMLElement) {
-  const root = document.documentElement.style;
-  new ResizeObserver(() => root.setProperty('--dock', `${composer.offsetHeight}px`)).observe(composer);
-  const vv = window.visualViewport;
-  if (!vv) return;
-  const update = () => {
-    const kb = Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop));
-    root.setProperty('--kb', `${kb}px`);
-    document.body.classList.toggle('kb-open', kb > 80);
-  };
-  vv.addEventListener('resize', update);
-  vv.addEventListener('scroll', update);
-  update();
 }
 
 /** Rundes Profilbild oben rechts: wer angemeldet ist, Abmelden. */
