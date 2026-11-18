@@ -5,7 +5,7 @@
   "lang": "de",
   "id": "/pack",
   "start_url": "/pack",
-  "scope": "/",
+  "scope": "/pack",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#ffffff",

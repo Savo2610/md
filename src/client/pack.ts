@@ -13,7 +13,7 @@ import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { Provider } from './provider';
-import { $, el, store, dialog, recent, type MenuItem } from './ui';
+import { $, el, store, dialog, recent, onKeyboardClose, type MenuItem } from './ui';
 import { account } from './account';
 import {
   CATEGORIES, DICTIONARY, PACK_EMOJIS, guessEmoji, joinTitle, splitTitle, MAX_PACK_ITEMS, MAX_QTY, categoryLabel, claimKey, claimsByItem, guessCategory, guessMode,
@@ -576,6 +576,8 @@ export function mountPack(o: PackOptions): PackHandle {
   addInput.addEventListener('input', () => { active = parseQuantity(addInput.value).name.trim() ? 0 : -1; renderSuggestions(); });
   addInput.addEventListener('focus', () => { root.classList.add('adding'); renderSuggestions(); });
   addInput.addEventListener('blur', () => { root.classList.remove('adding'); suggestBox.hidden = true; });
+  // Zurück-Taste am Handy: Tastatur weg heißt fertig mit Hinzufügen.
+  const offKeyboard = onKeyboardClose(() => { if (document.activeElement === addInput) addInput.blur(); });
   addInput.addEventListener('keydown', e => {
     const count = suggestBox.querySelectorAll('.pk-sug').length;
     if (e.key === 'ArrowDown' && count) { e.preventDefault(); active = (active + 1) % count; renderSuggestions(); }
@@ -922,7 +924,7 @@ export function mountPack(o: PackOptions): PackHandle {
       items: packItems(ydoc).map(i => ({ name: i.name, qty: i.qty, mode: i.mode, cat: i.cat })),
     };
     try { sessionStorage.setItem('md:pack:copy', JSON.stringify(copy)); } catch { /* dann eben leer */ }
-    location.href = `/${id}#pack`;
+    location.href = `/pack/${id}`;
   }
 
   /** Gerade dupliziert: Inhalt einsetzen (legt die Liste dabei an). */
@@ -995,6 +997,7 @@ export function mountPack(o: PackOptions): PackHandle {
       return out;
     },
     destroy() {
+      offKeyboard();
       flushSnapshot();
       for (const g of grace.values()) clearTimeout(g.timer);
       grace.clear();

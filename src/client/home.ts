@@ -4,7 +4,7 @@
 // Mit Konto: alle Dokumente des Kontos auf jedem Gerät, mit eigenen Tags
 // zum Filtern. So lässt sich md wie ein Notizbuch benutzen.
 
-import { $, el, recent, ago, toast, store, menu, isAdmin, ask, adminHeaders, ownerHeaders, trashDaysLeft, docTags, type MenuItem, type Recent } from './ui';
+import { docHref, $, el, recent, ago, toast, store, menu, isAdmin, ask, adminHeaders, ownerHeaders, trashDaysLeft, docTags, type MenuItem, type Recent } from './ui';
 import { account, accountItems, avatar } from './account';
 import { tagChips, tagDialog } from './tags';
 import { toolMenu } from './nav';
@@ -34,7 +34,7 @@ export function start() {
 
   // Neu anlegen: alle drei Arten direkt hier (Startseite der App).
   const create = el('div', { class: 'home-new-row' });
-  for (const [label, href] of [['Dokument', '/'], ['Board', '/#board'], ['Packliste', '/#pack']]) {
+  for (const [label, href] of [['Dokument', '/'], ['Board', '/#board'], ['Packliste', '/pack/new']]) {
     const a = el('a', { href, class: 'home-new' }, label);
     a.addEventListener('click', e => {
       if (!navigator.onLine) {
@@ -164,7 +164,7 @@ export function start() {
       const chips = tagChips(docTags(r), setFilter);
       if (chips) meta.append(chips);
       list.append(el('li', {},
-        el('a', { href: `/${encodeURIComponent(r.id)}`, class: 'note' },
+        el('a', { href: docHref(r.id, r.kind), class: 'note' },
           el('span', { class: 'note-title' }, r.title || r.id),
           meta,
         ),

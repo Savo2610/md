@@ -3,7 +3,9 @@
 // sichtbare Liste; die anderen zeigen ihren letzten Stand aus diesem Browser
 // (md:pack:lists), damit beim Wischen schon etwas zu sehen ist. Ist eine
 // andere Liste eingerastet, wird die bisherige abgebaut, die neue verbunden
-// und die Adresse gewechselt – ohne die Seite neu zu laden.
+// und die Adresse ersetzt – ohne Neuladen und ohne Eintrag im Verlauf (wie
+// bei Memos: Zurück verlässt die App, statt durch die Listen zu blättern).
+// Neue Listen gibt es übers Menü, nicht als eigenen Reiter.
 //
 // Reihenfolge der Reiter: md:pack:order (dieser Browser), neue hinten,
 // Duplikate direkt hinter ihrem Original.
@@ -14,7 +16,6 @@ import { snapshots, type Snapshot } from './pack';
 import { CATEGORIES, guessEmoji, splitTitle, validCategory } from '../shared/pack';
 
 const ORDER = 'md:pack:order';
-const PLUS = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>';
 
 export function startPager(boot: Boot, start: (b: Boot, host: HTMLElement) => DocSession) {
   const app = $('#app')!;
@@ -73,10 +74,6 @@ export function startPager(boot: Boot, start: (b: Boot, host: HTMLElement) => Do
       t.addEventListener('click', () => scrollToId(id, true));
       tabs.append(t);
     }
-    const add = el('button', { type: 'button', class: 'pk-tab pk-tab-new', title: 'Neue Packliste', 'aria-label': 'Neue Packliste' });
-    add.innerHTML = PLUS;
-    add.addEventListener('click', () => { location.href = '/#pack'; });
-    tabs.append(add);
     tabs.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
@@ -116,7 +113,7 @@ export function startPager(boot: Boot, start: (b: Boot, host: HTMLElement) => Do
   function settle() {
     settleTimer = null;
     const id = order[indexAt()];
-    if (id && id !== current) switchTo(id, true);
+    if (id && id !== current) switchTo(id);
   }
 
   // ── Wechsel ───────────────────────────────────────────────────────────────
@@ -124,7 +121,7 @@ export function startPager(boot: Boot, start: (b: Boot, host: HTMLElement) => Do
   let current = first;
   let session = start(boot, panels.get(first)!);
 
-  function switchTo(id: string, push: boolean) {
+  function switchTo(id: string) {
     const prev = current;
     session.destroy();
     current = id;
@@ -136,7 +133,7 @@ export function startPager(boot: Boot, start: (b: Boot, host: HTMLElement) => Do
       editKey: undefined, ownerKey: undefined, trashed: undefined,
       siteKey: id === fresh ? boot.siteKey : undefined,
     }, p);
-    if (push) history.pushState({ pack: id }, '', `/${encodeURIComponent(id)}`);
+    history.replaceState(null, '', `/pack/${encodeURIComponent(id)}`);
     if (navigator.onLine && 'caches' in window) caches.open('md-pages').then(c => c.add(new Request(location.pathname, { cache: 'no-store' }))).catch(() => {});
 
     // Leer gebliebene neue Liste: wieder weg.
@@ -166,13 +163,6 @@ export function startPager(boot: Boot, start: (b: Boot, host: HTMLElement) => Do
     }
     if (d.id === current) panels.get(d.id)?.querySelector(':scope > .pk-preview')?.remove();
     else preview(d.id);
-  });
-
-  addEventListener('popstate', () => {
-    const id = decodeURIComponent(location.pathname.slice(1));
-    if (!panels.has(id)) { location.reload(); return; }
-    if (id !== current) switchTo(id, false);
-    scrollToId(id, false);
   });
 
   addEventListener('resize', () => scrollToId(current, false));

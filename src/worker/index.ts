@@ -9,6 +9,11 @@
 //   /<id>.md             reines Markdown (für Agenten, ?download=1 zum Speichern)
 //   /admin               Übersicht aller Dokumente (2FA-Code)
 //   /memos               private Kurznotizen des Kontos (wie ein Chat mit sich selbst)
+//   /pack                Packlisten-App: zuletzt benutzte Liste (bzw. eine neue)
+//   /pack/<id>           Packliste (eigener Bereich, damit die installierte
+//                        Packlisten-App nicht auch /memos übernimmt);
+//                        /<id> einer Packliste leitet hierher weiter
+//   /pack/new            neue Packliste mit zufälliger ID
 //   /i/<id>/<datei>      Bilder aus R2
 //
 // API (JSON):
@@ -266,9 +271,16 @@ ${body}
   });
 }
 
-async function docPage(req: Request, env: Env, id: string): Promise<Response> {
+/**
+ * `asPack`: aufgerufen als /pack/<id>. Packlisten gehören dorthin (eigener
+ * Bereich der Packlisten-App), alles andere nach /<id>.
+ */
+async function docPage(req: Request, env: Env, id: string, asPack = false): Promise<Response> {
   const info = await docStub(env, id).info(true);
   if (info.movedTo) return moved(info.movedTo, '');
+  const search = new URL(req.url).search;
+  if (asPack && info.exists && info.kind !== 'pack') return redirect(`/${encodeURIComponent(id)}${search}`);
+  if (!asPack && info.kind === 'pack' && !info.trashed) return redirect(`/pack/${encodeURIComponent(id)}${search}`);
   const wantsMarkdown = /text\/markdown/.test(req.headers.get('accept') || '') && !/text\/html/.test(req.headers.get('accept') || '');
   if (wantsMarkdown) return rawMarkdown(info, id, false);
 
@@ -276,7 +288,9 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
   const common = { page: 'doc' as const, id, user: publicUser(user), login: loginEnabled(env), admin: isAdminUser(user, env) };
   if (!info.exists) {
     // Angemeldet braucht es keinen Spam-Schutz.
-    return page(req, 'Neues Dokument', `<main id="app"></main>`, { ...common, exists: false, siteKey: user ? undefined : env.TURNSTILE_SITEKEY }, 200);
+    const siteKey = user ? undefined : env.TURNSTILE_SITEKEY;
+    if (asPack) return page(req, 'Packliste', `<main id="app"></main>`, { ...common, exists: false, kind: 'pack', siteKey }, 200, PACK_APP);
+    return page(req, 'Neues Dokument', `<main id="app"></main>`, { ...common, exists: false, siteKey }, 200);
   }
   const entry = user ? await accountStub(env, user.sub).get(id) : null;
   // #tags aus dem Text in die eigene Dokumentliste übernehmen.
@@ -290,7 +304,7 @@ async function docPage(req: Request, env: Env, id: string): Promise<Response> {
   const ownerKey = entry?.ownerKey || undefined;
   if (info.trashed) {
     // Für alle weg. Der Ersteller holt sich den Inhalt im Browser mit seinem Schlüssel.
-    return page(req, 'Gelöscht', '<main id="app"></main>', { ...common, exists: true, trashed: info.trashed, ownerKey }, 410);
+    return page(req, 'Gelöscht', '<main id="app"></main>', { ...common, exists: true, trashed: info.trashed, ownerKey }, 410, asPack ? PACK_APP : MD_APP);
   }
   const title = info.title || id;
   if (info.kind === 'board' || info.kind === 'pack') {
@@ -991,7 +1005,7 @@ export default {
     // Dasselbe für Packlisten: pack.veerka.mp bzw. pack.veerka.mp/festival.
     // Ohne Pfad: zuletzt benutzte Packliste (/pack), mit Pfad: diese Liste.
     if (url.hostname === 'pack.veerka.mp') {
-      return new Response(null, { status: 302, headers: { location: path === '/' ? 'https://md.veerka.mp/pack' : `https://md.veerka.mp${path}#pack` } });
+      return new Response(null, { status: 302, headers: { location: path === '/' ? 'https://md.veerka.mp/pack' : `https://md.veerka.mp/pack${path}` } });
     }
 
     if (/^\/(assets|fonts|icons)\//.test(path) || STATIC_FILES.has(path)) {
@@ -1037,6 +1051,16 @@ export default {
     if (path === '/pack' || path === '/pack/umzug') {
       const user = await currentUser(req, env);
       return page(req, 'Packliste', '<main id="app"></main>', { page: path === '/pack' ? 'packstart' : 'umzug', user: publicUser(user), login: loginEnabled(env), admin: isAdminUser(user, env) }, 200, PACK_APP);
+    }
+    if (path === '/pack/new') return redirect(`/pack/${randomId()}`);
+    if (path.startsWith('/pack/')) {
+      const seg = path.slice(6).replace(/\/+$/, '');
+      const id = seg.includes('/') ? null : normalizeId(seg);
+      if (!id) return new Response('Nicht gefunden', { status: 404 });
+      if (encodeURIComponent(id) !== seg && decodeURIComponentSafe(seg) !== id) {
+        return new Response(null, { status: 301, headers: { location: `/pack/${encodeURIComponent(id)}${url.search}` } });
+      }
+      return docPage(req, env, id, true);
     }
     if (path.startsWith('/m/')) return memoFile(req, env, path.slice(3));
     if (path === '/datenschutz') return privacyPage(req);
@@ -1107,6 +1131,10 @@ ${th.metas}
 </body>
 </html>`;
   return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-security-policy': CSP } });
+}
+
+function redirect(location: string): Response {
+  return new Response(null, { status: 302, headers: { location, 'cache-control': 'no-store' } });
 }
 
 function moved(to: string, suffix: string): Response {

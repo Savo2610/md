@@ -31,6 +31,7 @@ self.addEventListener('install', event => {
       const pages = await caches.open(PAGES);
       await pages.add(new Request('/home', { cache: 'no-store' }));
       await pages.add(new Request('/memos', { cache: 'no-store' }));
+      await pages.add(new Request('/pack', { cache: 'no-store' }));
     } catch { /* offline installiert */ }
     await self.skipWaiting();
   })());
@@ -52,7 +53,7 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname === '/sw.js') return;
 
-  if (/^\/(assets|fonts|icons)\//.test(url.pathname) || ['/favicon.svg', '/manifest.webmanifest', '/memos.webmanifest', '/apple-touch-icon.png', '/memos-touch-icon.png'].includes(url.pathname)) {
+  if (/^\/(assets|fonts|icons)\//.test(url.pathname) || ['/favicon.svg', '/manifest.webmanifest', '/memos.webmanifest', '/pack.webmanifest', '/apple-touch-icon.png', '/memos-touch-icon.png', '/pack-touch-icon.png'].includes(url.pathname)) {
     event.respondWith(cacheFirst(req, STATIC));
     return;
   }
@@ -75,8 +76,9 @@ async function cacheFirst(req, name) {
 
 async function networkFirst(req) {
   const cache = await caches.open(PAGES);
-  // „/“ legt jedes Mal ein neues Dokument an – das nicht speichern.
-  const key = new URL(req.url).pathname === '/' ? null : req;
+  // „/“ und „/pack/new“ legen jedes Mal ein neues Dokument an – das nicht speichern.
+  const path = new URL(req.url).pathname;
+  const key = path === '/' || path === '/pack/new' ? null : req;
   try {
     const res = await fetch(req);
     // Nur echte Seiten merken (keine Weiterleitungen, keine Fehler).
@@ -87,7 +89,9 @@ async function networkFirst(req) {
   } catch {
     const hit = key && (await cache.match(key, { ignoreSearch: true }));
     if (hit) return hit;
-    const home = await cache.match('/home');
+    // Fallback passend zur App: Packlisten bzw. Memos statt der Übersicht.
+    const app = path.startsWith('/pack') ? '/pack' : path.startsWith('/memos') ? '/memos' : '/home';
+    const home = (await cache.match(app)) || (await cache.match('/home'));
     if (home) return home;
     return new Response('Offline – diese Seite wurde noch nie geöffnet.', { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } });
   }
