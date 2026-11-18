@@ -59,6 +59,7 @@ r = await fetch(`${BASE}/${id}`);
 let html = await r.text();
 ok(html.includes('<h1 id="von-der-api"') && html.includes('<title>Von der API</title>'), 'HTML-Ansicht ist serverseitig gerendert');
 ok(r.headers.get('x-robots-tag')?.includes('noindex'), 'noindex gesetzt');
+ok(/frame-ancestors 'none'/.test(r.headers.get('content-security-policy') || ''), 'Seite lässt sich nicht einbetten');
 
 r = await fetch(`${BASE}/api/docs/${id}`, { method: 'PUT', headers: { 'x-edit-key': editKey, 'content-type': 'text/markdown' }, body: '# Neu\n\n<script>alert(1)</script>' });
 ok(r.ok, 'PUT mit Bearbeitungsschlüssel');
@@ -112,6 +113,18 @@ s = await wsSession(editKey, 'Hallo ');
 ok(s.hello?.edit === true, 'WebSocket mit Schlüssel: bearbeiten');
 r = await fetch(`${BASE}/${id}.md`);
 ok((await r.text()).startsWith('Hallo # Neu'), 'Änderung mit Schlüssel kommt an');
+
+// Kaputte Nachricht: Verbindung zu, Dokument läuft weiter.
+{
+  const ws = new WebSocket(`${BASE.replace('http', 'ws')}/api/docs/${id}/ws?key=${editKey}`);
+  const code = await new Promise(resolve => {
+    ws.onopen = () => ws.send(new Uint8Array([0, 2, 200, 255, 255, 255, 255, 15]));
+    ws.onclose = ev => resolve(ev.code);
+    setTimeout(() => resolve(0), 3000);
+  });
+  r = await fetch(`${BASE}/${id}.md`);
+  ok(code === 1007 && (await r.text()).startsWith('Hallo # Neu'), 'Kaputte WebSocket-Nachricht schließt nur die Verbindung');
+}
 
 // ── 2FA ─────────────────────────────────────────────────────────────────────
 if (LIVE) console.log('– 2FA-Teil übersprungen (Live)');
@@ -406,8 +419,21 @@ if (!LIVE && vars.DEV_LOGIN === '1') {
   const part = new Uint8Array(await r.arrayBuffer());
   ok(r.status === 206 && r.headers.get('content-range') === 'bytes 100-199/4000' && part.length === 100 && part[0] === 100 % 251, 'Anhang mit Range (für Audio auf iOS)');
   r = await fetch(`${BASE}/api/me/memos/files`, { method: 'POST', headers: { ...C, 'content-type': 'text/html', 'x-file-name': 'x.html' }, body: '<script>alert(1)</script>' });
-  r = await fetch(`${BASE}${(await j(r)).url}`, { headers: C });
+  const htmlUrl = (await j(r)).url;
+  r = await fetch(`${BASE}${htmlUrl}`, { headers: C });
   ok(r.headers.get('content-type') === 'application/octet-stream' && /attachment/.test(r.headers.get('content-disposition') || ''), 'HTML-Anhang wird nur heruntergeladen');
+  ok(/sandbox/.test(r.headers.get('content-security-policy') || ''), 'Anhang mit CSP-Sandbox');
+  // Auch als Bild eines Dokuments (Memo → Dokument kopiert Anhänge nach /i/) nie als Seite.
+  {
+    const hid = `${mid}-html`;
+    await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: J, body: JSON.stringify({ id: hid, text: `[x](${htmlUrl})` }) });
+    r = await fetch(`${BASE}/api/me/memos/${hid}/doc`, { method: 'POST', headers: J });
+    const hdoc = (await j(r)).doc;
+    const link = (await (await fetch(`${BASE}/${hdoc}.md`)).text()).match(/\/i\/[^)]+/)?.[0];
+    r = await fetch(`${BASE}${link}`);
+    ok(!!link && r.headers.get('content-type') === 'application/octet-stream' && /attachment/.test(r.headers.get('content-disposition') || ''), 'HTML-Anhang im Dokument wird nur heruntergeladen');
+    await fetch(`${BASE}/api/me/memos/${hid}`, { method: 'DELETE', headers: J });
+  }
   const fid = `${mid}-f`;
   await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: J, body: JSON.stringify({ id: fid, text: `[Sprachmemo 0:02](${fileUrl})` }) });
   await fetch(`${BASE}/api/me/memos`, { method: 'POST', headers: J, body: JSON.stringify({ id: `${fid}2`, text: `Nochmal: [x](${fileUrl})` }) });

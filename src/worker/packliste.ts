@@ -17,11 +17,15 @@
 
 import * as Y from 'yjs';
 import { guessCategory, guessMode, MAX_PACK_ITEMS, MAX_QTY, type PackMode } from '../shared/pack';
+import { b64urlEncode } from './crypto';
+import { currentUser } from './auth';
+import { accountStub, docStub, type Env } from './env';
+import { fail, json, readJson } from './http';
 
 interface ServiceAccount { project_id: string; client_email: string; private_key: string }
 
-export interface OldItem { name: string; qty: number; mode: PackMode }
-export interface OldList { key: string; title: string; shared: boolean; items: OldItem[] }
+interface OldItem { name: string; qty: number; mode: PackMode }
+interface OldList { key: string; title: string; shared: boolean; items: OldItem[] }
 
 // ── Zugang ──────────────────────────────────────────────────────────────────
 
@@ -35,11 +39,9 @@ function account(raw: string | undefined): ServiceAccount | null {
   } catch { return null; }
 }
 
-export const packlisteEnabled = (raw: string | undefined) => !!account(raw);
+const packlisteEnabled = (raw: string | undefined) => !!account(raw);
 
-const b64url = (bytes: ArrayBuffer | Uint8Array) =>
-  btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-const b64urlText = (s: string) => b64url(new TextEncoder().encode(s));
+const b64urlText = (s: string) => b64urlEncode(new TextEncoder().encode(s));
 
 async function accessToken(sa: ServiceAccount): Promise<string> {
   if (cached && cached.email === sa.client_email && cached.exp > Date.now() + 60_000) return cached.token;
@@ -54,7 +56,7 @@ async function accessToken(sa: ServiceAccount): Promise<string> {
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${unsigned}.${b64url(sig)}` }),
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${unsigned}.${b64urlEncode(new Uint8Array(sig))}` }),
   });
   if (!res.ok) throw new Error(`Firebase-Zugang abgelehnt (${res.status})`);
   const data = await res.json<{ access_token: string; expires_in: number }>();
@@ -114,7 +116,7 @@ const modeOf = (v: unknown, name: string): PackMode => (v === 'gemeinsam' || v =
 const titleOf = (name: unknown, emoji: unknown) => [String(emoji || '').trim(), String(name || '').trim() || 'Packliste'].filter(Boolean).join(' ').slice(0, 120);
 
 /** Alle Listen, die zum Google-Konto gehören (eigene und geteilte), alphabetisch. */
-export async function oldLists(raw: string | undefined, sub: string, email: string): Promise<OldList[] | null> {
+async function oldLists(raw: string | undefined, sub: string, email: string): Promise<OldList[] | null> {
   const sa = account(raw);
   if (!sa) throw new Error('Firebase ist nicht eingerichtet.');
   const token = await accessToken(sa);
@@ -164,7 +166,7 @@ export async function oldLists(raw: string | undefined, sub: string, email: stri
 }
 
 /** Feste md-Adresse für eine alte Liste (sieht aus wie eine zufällige). */
-export async function packIdFor(oldKey: string): Promise<string> {
+async function packIdFor(oldKey: string): Promise<string> {
   for (let n = 0; ; n++) {
     const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`packliste:${oldKey}:${n}`)));
     const id = [...hash.slice(0, 10)].map(b => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
@@ -173,7 +175,7 @@ export async function packIdFor(oldKey: string): Promise<string> {
 }
 
 /** Yjs-Stand einer neuen Packliste (wie src/shared/pack.ts). */
-export function packState(list: OldList): Uint8Array {
+function packState(list: OldList): Uint8Array {
   const doc = new Y.Doc();
   doc.transact(() => {
     doc.getMap('meta').set('title', list.title);
@@ -193,4 +195,65 @@ export function packState(list: OldList): Uint8Array {
   const state = Y.encodeStateAsUpdate(doc);
   doc.destroy();
   return state;
+}
+
+// ── Route ───────────────────────────────────────────────────────────────────
+
+/**
+ * /api/pack/umzug: GET zeigt, was es in der alten Packliste gibt; POST legt
+ * die Listen an bzw. findet schon umgezogene wieder (feste Adresse je alter
+ * Liste) und trägt sie ins Konto ein. Body: { only?: string[] } (md-Adressen).
+ */
+export async function packUmzug(req: Request, env: Env): Promise<Response> {
+  const user = await currentUser(req, env);
+  if (!user) return fail(401, 'Bitte mit Google anmelden.');
+  if (!packlisteEnabled(env.FIREBASE_SERVICE_ACCOUNT)) return fail(503, 'Der Umzug ist noch nicht eingerichtet.');
+  if (req.method !== 'GET' && req.method !== 'POST') return fail(405, 'Methode nicht erlaubt.');
+  let lists;
+  try {
+    lists = await oldLists(env.FIREBASE_SERVICE_ACCOUNT, user.sub, user.email);
+  } catch (err) {
+    console.error(err);
+    return fail(502, 'Die alte Packliste ist gerade nicht erreichbar.');
+  }
+  if (!lists) return json({ found: false, lists: [] });
+  const withIds = await Promise.all(lists.map(async l => ({ ...l, id: await packIdFor(l.key) })));
+
+  if (req.method === 'GET') {
+    const out = await Promise.all(withIds.map(async l => {
+      const info = await docStub(env, l.id).info();
+      return { id: l.id, title: l.title, count: l.items.length, shared: l.shared, moved: info.exists || !!info.movedTo };
+    }));
+    return json({ found: true, lists: out });
+  }
+
+  const { success } = await env.CREATE_LIMIT.limit({ key: `u:${user.sub}` });
+  if (!success) return fail(429, 'Zu viele Versuche. Bitte kurz warten.');
+  const body = await readJson<{ only: unknown }>(req);
+  const only = Array.isArray(body.only) ? new Set(body.only.map(String)) : null;
+  const results: { id: string; editKey: string; ownerKey: string | null; title: string; created: boolean; items: { name: string; qty: number; mode: string; cat: string }[] }[] = [];
+  for (const l of withIds) {
+    if (only && !only.has(l.id)) continue;
+    let id = l.id;
+    let stub = docStub(env, id);
+    let info = await stub.info();
+    if (info.movedTo) { id = info.movedTo; stub = docStub(env, id); info = await stub.info(); }
+    if (info.trashed) continue;
+    let editKey: string | null = null;
+    let ownerKey: string | null = null;
+    let created = false;
+    if (!info.exists) {
+      editKey = await stub.create(id, '', undefined, 'pack', packState(l));
+      if (editKey) { ownerKey = await stub.ownerKey(); created = true; }
+    }
+    editKey ??= await stub.getEditKey();
+    if (!editKey) continue;
+    results.push({
+      id, editKey, ownerKey, created,
+      title: created ? l.title : info.title || l.title,
+      items: created ? l.items.map(i => ({ ...i, cat: guessCategory(i.name) })) : [],
+    });
+  }
+  if (results.length) await accountStub(env, user.sub).upsert(results.map(r => ({ id: r.id, editKey: r.editKey, ownerKey: r.ownerKey, opened: Date.now(), kind: 'pack', title: r.title })));
+  return json({ lists: results });
 }
