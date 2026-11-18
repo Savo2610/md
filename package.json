@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "node tools/build.mjs",
-    "dev": "node tools/build.mjs && concurrently -k -n client,worker \"node tools/build.mjs --watch\" \"wrangler dev --port 8790\"",
+    "dev": "node tools/build.mjs && concurrently -k -n client,worker \"node tools/build.mjs --watch\" \"wrangler dev --port ${PORT:-8790}\"",
     "typecheck": "tsc -p . && tsc -p tsconfig.client.json",
     "test": "node tools/test-api.mjs",
     "deploy": "node tools/build.mjs && wrangler deploy"

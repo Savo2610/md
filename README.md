@@ -182,7 +182,7 @@ Durable Object pro Dokument, Bilder in R2.
 
 ```bash
 npm install
-npm run dev        # http://localhost:8790 (Client-Build im Watch-Modus + wrangler dev)
+npm run dev        # http://localhost:8790 (Client-Build im Watch-Modus + wrangler dev; anderer Port: PORT=8802 npm run dev)
 npm test           # API-Tests gegen den laufenden Dev-Server
 npm run typecheck
 ```
@@ -215,7 +215,15 @@ Live-Test ohne 2FA-Teil:
 
 | Datei | Inhalt |
 | --- | --- |
-| `src/worker/index.ts` | Routing, Seiten (serverseitig gerendert), API, 2FA |
+| `src/worker/index.ts` | Routen-Übersicht, Einstieg, Dokumentseite (serverseitig gerendert) |
+| `src/worker/api.ts` | JSON-API: Dokumente, Konto-Liste, Freischalten mit 2FA |
+| `src/worker/access.ts` | Rechte: Adressen prüfen, Admin, Ersteller, Bearbeiten, Turnstile |
+| `src/worker/pages.ts` | HTML-Gerüst, Sicherheits-Header (CSP), Markdown-Rohtext, Datenschutz |
+| `src/worker/memos.ts` | Memos: Seite, API, Anhänge, Funk, Memo → Dokument |
+| `src/worker/files.ts` | Dateien aus R2 ausliefern (/i/, /m/): nur harmlose Typen direkt anzeigen |
+| `src/worker/link-preview.ts` | Titel bzw. Bild für eingefügte Links |
+| `src/worker/packliste.ts` | Umzug aus der alten Packliste (Firebase) |
+| `src/worker/http.ts` | Kleine Helfer für Antworten und Anfragen |
 | `src/worker/doc.ts` | Durable Object pro Dokument: Yjs-Updates in SQLite, WebSockets, Ablauf |
 | `src/worker/registry.ts` | Übersicht aller Dokumente, Fehlversuche, verbrauchte Codes |
 | `src/worker/auth.ts` | Google-Login (OIDC + PKCE), Sitzungs-Cookie |

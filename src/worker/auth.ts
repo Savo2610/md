@@ -15,6 +15,7 @@
 
 import { b64urlDecode, randomToken, readToken, sha256b64url, signToken } from './crypto';
 import { accountStub, type Env } from './env';
+import { json, redirect } from './http';
 
 export interface User {
   sub: string;
@@ -59,12 +60,6 @@ function safeNext(raw: string | null): string {
   return raw.slice(0, 500);
 }
 
-const redirect = (location: string, setCookies: string[] = []) => {
-  const headers = new Headers({ location, 'cache-control': 'no-store' });
-  for (const c of setCookies) headers.append('set-cookie', c);
-  return new Response(null, { status: 302, headers });
-};
-
 const errorPage = (msg: string, status = 400) =>
   new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Anmeldung</title>
 <body style="font:16px/1.6 system-ui;max-width:32rem;margin:15vh auto;padding:0 20px">
@@ -74,7 +69,7 @@ async function startSession(req: Request, env: Env, user: User, next: string): P
   if (!env.SESSION_SECRET) return errorPage('Auf dem Server fehlt SESSION_SECRET.', 503);
   await accountStub(env, user.sub).setProfile(user);
   const token = await signToken(env.SESSION_SECRET, SESSION_TTL, { role: 'user', ...user });
-  return redirect(next, [cookie(req, SESSION_COOKIE, token, SESSION_TTL), cookie(req, OAUTH_COOKIE, '', 0)]);
+  return redirect(next, 302, [cookie(req, SESSION_COOKIE, token, SESSION_TTL), cookie(req, OAUTH_COOKIE, '', 0)]);
 }
 
 export async function auth(req: Request, env: Env, url: URL): Promise<Response> {
@@ -82,9 +77,7 @@ export async function auth(req: Request, env: Env, url: URL): Promise<Response> 
 
   if (action === 'logout') {
     if (req.method !== 'POST') return new Response('Methode nicht erlaubt', { status: 405 });
-    return new Response(JSON.stringify({ ok: true }), {
-      headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'set-cookie': clearSessionCookie(req) },
-    });
+    return json({ ok: true }, 200, { 'set-cookie': clearSessionCookie(req) });
   }
 
   if (action === 'login') {
@@ -113,12 +106,12 @@ export async function auth(req: Request, env: Env, url: URL): Promise<Response> 
       code_challenge_method: 'S256',
       prompt: 'select_account',
     }).toString();
-    return redirect(google.toString(), [cookie(req, OAUTH_COOKIE, pending, OAUTH_TTL)]);
+    return redirect(google.toString(), 302, [cookie(req, OAUTH_COOKIE, pending, OAUTH_TTL)]);
   }
 
   if (action === 'callback') {
     const pending = await readToken<{ state: string; nonce: string; verifier: string; next: string }>(env.SESSION_SECRET, cookies(req)[OAUTH_COOKIE], 'oauth');
-    if (url.searchParams.get('error')) return redirect(pending?.next || '/home', [cookie(req, OAUTH_COOKIE, '', 0)]);
+    if (url.searchParams.get('error')) return redirect(pending?.next || '/home', 302, [cookie(req, OAUTH_COOKIE, '', 0)]);
     if (!pending || pending.state !== url.searchParams.get('state')) {
       return errorPage('Die Anmeldung ist abgelaufen oder wurde in einem anderen Fenster begonnen. Bitte noch einmal versuchen.');
     }

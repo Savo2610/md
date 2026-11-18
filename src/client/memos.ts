@@ -13,7 +13,7 @@ import { account, accountItems, avatar, type User } from './account';
 import { toolMenu } from './nav';
 import { enhance } from './enhance';
 import { memoEditor, type MemoEditor } from './memo-editor';
-import { tagsOf, tagRe, withoutTags } from '../shared/tags';
+import { tagsOf, tagRe } from '../shared/tags';
 
 interface Memo { id: string; text: string; created: number; updated: number; html?: string; pending?: boolean; doc?: string | null; docTitle?: string }
 interface Boot { user?: User | null; login?: boolean; memos?: Memo[]; katexCss?: string; admin?: boolean }

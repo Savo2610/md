@@ -851,7 +851,7 @@ export function mountPack(o: PackOptions): PackHandle {
     const box = el('div', { class: 'menu' });
     const d = dialog('Aus Liste übernehmen', box);
     d.classList.add('pk-dialog');
-    for (const [id, s] of lists) {
+    for (const [, s] of lists) {
       const onList = new Set(packItems(ydoc).map(i => normalize(i.name)));
       const fresh = s.items.filter(i => !onList.has(normalize(i.name)));
       const b = el('button', { type: 'button', class: 'pk-pick' },

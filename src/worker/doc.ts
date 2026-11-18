@@ -521,8 +521,17 @@ export class Doc extends DurableObject<Env> {
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
     if (typeof message === 'string') return;
     if (message.byteLength > MAX_MESSAGE) { ws.close(1009, 'Nachricht zu groß'); return; }
+    try {
+      this.handleMessage(ws, new Uint8Array(message));
+    } catch (err) {
+      // Kaputte Nachricht (falsches Protokoll, ungültiges Yjs-Update): Verbindung zu.
+      console.error('WebSocket', err);
+      try { ws.close(1007, 'Ungültige Nachricht'); } catch { /* schon zu */ }
+    }
+  }
+
+  private handleMessage(ws: WebSocket, data: Uint8Array) {
     const att = ws.deserializeAttachment() as Attachment;
-    const data = new Uint8Array(message);
     const dec = decoding.createDecoder(data);
     const type = decoding.readVarUint(dec);
 
@@ -545,18 +554,16 @@ export class Doc extends DurableObject<Env> {
 
     if (type === MSG_AWARENESS) {
       // Nur mitschreiben, welche Client-IDs zu diesem Socket gehören, und weiterreichen.
-      try {
-        const inner = decoding.createDecoder(decoding.readVarUint8Array(dec));
-        const n = decoding.readVarUint(inner);
-        for (let i = 0; i < n; i++) {
-          const id = decoding.readVarUint(inner);
-          const clock = decoding.readVarUint(inner);
-          const state = decoding.readVarString(inner);
-          if (state === 'null') delete att.aw[id];
-          else att.aw[id] = clock;
-        }
-        ws.serializeAttachment(att);
-      } catch { return; }
+      const inner = decoding.createDecoder(decoding.readVarUint8Array(dec));
+      const n = decoding.readVarUint(inner);
+      for (let i = 0; i < n; i++) {
+        const id = decoding.readVarUint(inner);
+        const clock = decoding.readVarUint(inner);
+        const state = decoding.readVarString(inner);
+        if (state === 'null') delete att.aw[id];
+        else att.aw[id] = clock;
+      }
+      ws.serializeAttachment(att);
       this.broadcast(data, ws);
       return;
     }

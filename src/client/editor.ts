@@ -2,14 +2,13 @@
 // damit die reine Ansicht schnell bleibt.
 
 import { EditorView, keymap, drawSelection, placeholder, ViewPlugin, Decoration, WidgetType, type DecorationSet, type ViewUpdate, dropCursor } from '@codemirror/view';
-import { EditorState, EditorSelection, Compartment, RangeSetBuilder, type Extension } from '@codemirror/state';
+import { EditorState, Compartment, RangeSetBuilder, type Extension } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { syntaxHighlighting, indentUnit, syntaxTree } from '@codemirror/language';
 import { defaultKeymap } from '@codemirror/commands';
 import { search, searchKeymap } from '@codemirror/search';
 import { autocompletion, completionKeymap, startCompletion, type CompletionContext, type Completion } from '@codemirror/autocomplete';
-import { tags as t } from '@lezer/highlight';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { IndexeddbPersistence } from 'y-indexeddb';
