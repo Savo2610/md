@@ -44,6 +44,8 @@ export const MSG_NOTICE = 9;
 const DAY = 24 * 3600_000;
 /** Nicht angepinnte Dokumente verschwinden nach so langer Zeit ohne Aufruf. */
 export const EXPIRE_AFTER = 365 * DAY;
+/** Leere Dokumente (z. B. nur für den Bearbeiten-Link angelegt) verschwinden nach so langer Zeit ohne Inhalt. */
+export const EMPTY_FOR = 30 * DAY;
 /** So lange bleibt ein gelöschtes Dokument im Papierkorb. */
 export const TRASH_FOR = 30 * DAY;
 const FLUSH_DELAY = 4000;
@@ -152,6 +154,12 @@ export class Doc extends DurableObject<Env> {
   private markdown(): string {
     if (this.ydoc || this.maxSeq() !== this.num('flushedSeq')) return this.current(this.load());
     return this.get('markdown') || '';
+  }
+
+  /** Ohne Inhalt: Text bzw. Board/Packliste wie frisch angelegt, keine Bilder. */
+  private empty(): boolean {
+    if (!this.live() || this.num('imageBytes')) return false;
+    return this.markdown().trim() === this.current(new Y.Doc()).trim();
   }
 
   /** Existiert, ist nicht umgezogen und nicht im Papierkorb. */
@@ -443,8 +451,11 @@ export class Doc extends DurableObject<Env> {
     if (this.flushPending) return;
     const trashed = this.num('trashed');
     if (trashed) { await this.ctx.storage.setAlarm(trashed + TRASH_FOR); return; }
-    if (this.get('pinned') === '1') await this.ctx.storage.deleteAlarm();
-    else await this.ctx.storage.setAlarm(this.num('accessed') + EXPIRE_AFTER);
+    if (this.get('pinned') === '1') { await this.ctx.storage.deleteAlarm(); return; }
+    let at = this.num('accessed') + EXPIRE_AFTER;
+    // Leer: schon EMPTY_FOR nach der letzten Änderung weg.
+    if (this.empty()) at = Math.min(at, this.num('updated') + EMPTY_FOR);
+    await this.ctx.storage.setAlarm(at);
   }
 
   async alarm() {
@@ -462,6 +473,12 @@ export class Doc extends DurableObject<Env> {
     }
     this.flushPending = true;
     await this.flush();
+    if (this.get('pinned') !== '1' && this.empty() && Date.now() - this.num('updated') >= EMPTY_FOR) {
+      // Hat es gerade jemand offen (fängt vielleicht an zu schreiben): später noch einmal.
+      if (this.ctx.getWebSockets().length) await this.ctx.storage.setAlarm(Date.now() + DAY);
+      else await this.destroy();
+      return;
+    }
     await this.scheduleAlarm();
   }
 

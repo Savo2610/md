@@ -286,6 +286,7 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
       return h;
     });
     editor = await editorLoading;
+    if (exists) editor.markCreated();
     return editor;
   }
 
@@ -405,7 +406,19 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
 
   const turnstile = boot.siteKey && !exists ? loadTurnstile(boot.siteKey) : null;
 
-  async function create(): Promise<boolean> {
+  let creating: Promise<boolean> | null = null;
+
+  /** Legt das Dokument an (nur einmal, auch bei gleichzeitigen Aufrufen). */
+  function create(): Promise<boolean> {
+    if (exists) return Promise.resolve(true);
+    creating ??= createNow().then(ok => {
+      if (!ok) creating = null;
+      return ok;
+    });
+    return creating;
+  }
+
+  async function createNow(): Promise<boolean> {
     const token = turnstile ? await turnstile.token().catch(() => '') : '';
     const res = await fetch(`/api/docs/${encodeURIComponent(id)}/create`, {
       method: 'POST',
@@ -423,6 +436,9 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
     store.set(keyName, editKey!);
     if (data.ownerKey) store.set(`md:owner:${id}`, data.ownerKey);
     exists = true;
+    editor?.markCreated();
+    board?.markCreated();
+    pack?.markCreated();
     recent.touch(id, '', true, undefined, kindHere);
     turnstile?.remove();
     renderBar();
@@ -503,14 +519,28 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
     const base = `${location.origin}${docHref(id, kindHere)}`;
     const body = el('div', { class: 'sheet' });
 
+    const editHref = () => `${base}#edit=${editKey}`;
+    // Noch nicht angelegt: Der Bearbeiten-Link entsteht erst beim Kopieren
+    // bzw. beim QR-Code, damit bloßes Öffnen von „Teilen“ nichts anlegt.
+    let pendingHint: HTMLElement | null = null;
+    const editLink = async (input: HTMLInputElement): Promise<string> => {
+      if (!editKey && !(await create())) throw new Error('nicht angelegt');
+      input.value = editHref();
+      pendingHint?.remove();
+      return input.value;
+    };
+
     const rows: [string, string, string][] = [['Zum Lesen', base, 'Öffnet die Ansicht. Bearbeiten ist damit nicht möglich.']];
-    if (editKey) rows.push(['Zum Bearbeiten', `${base}#edit=${editKey}`, 'Wer diesen Link hat, kann das Dokument ändern.']);
+    if (editKey || canEdit()) rows.push(['Zum Bearbeiten', editKey ? editHref() : '', 'Wer diesen Link hat, kann das Dokument ändern.']);
     if (exists) rows.push(['Als Markdown', `${base}.md`, 'Reiner Text, z. B. für KI-Assistenten.']);
     rows.forEach(([label, url, hint], i) => {
+      const lazy = !url;
       const input = el('input', { type: 'text', readonly: '', value: url, 'aria-label': label }) as HTMLInputElement;
+      if (lazy) input.placeholder = `${base.replace(/^https?:\/\//, '')}#edit=…`;
       input.addEventListener('focus', () => input.select());
       const copy = button('Kopieren', 'In die Zwischenablage', async () => {
-        await navigator.clipboard.writeText(url).catch(() => input.select());
+        const done = lazy && !input.value ? await copyLater(() => editLink(input)) : await navigator.clipboard.writeText(input.value).then(() => true, () => false);
+        if (!done) { input.select(); return; }
         copy.textContent = 'Kopiert';
         setTimeout(() => (copy.textContent = 'Kopieren'), 1500);
       }, 't boxed');
@@ -525,8 +555,10 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
         let box: HTMLElement | null = null;
         qrBtn.addEventListener('click', async () => {
           if (box) { box.remove(); box = null; qrBtn.setAttribute('aria-expanded', 'false'); return; }
+          const target = input.value || (await editLink(input).catch(() => ''));
+          if (!target) return;
           const { qrSvg } = await import('./qr');
-          box = qrCard(qrSvg(url), `${id}${label === 'Zum Bearbeiten' ? '-bearbeiten' : ''}`, label === 'Zum Bearbeiten');
+          box = qrCard(qrSvg(target), `${id}${label === 'Zum Bearbeiten' ? '-bearbeiten' : ''}`, label === 'Zum Bearbeiten');
           line.after(box);
           qrBtn.setAttribute('aria-expanded', 'true');
         });
@@ -549,8 +581,26 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
       line.append(copy);
       body.append(row);
     });
-    if (!exists) body.append(el('p', { class: 'hint' }, isBoard ? 'Das Board wird angelegt, sobald du etwas daraufsetzt.' : isPack ? 'Die Packliste wird angelegt, sobald du etwas einträgst.' : 'Das Dokument wird angelegt, sobald du etwas schreibst.'));
+    if (!exists) body.append(pendingHint = el('p', { class: 'hint' }, isBoard ? 'Das Board wird angelegt, sobald du etwas daraufsetzt oder den Bearbeiten-Link holst.' : isPack ? 'Die Packliste wird angelegt, sobald du etwas einträgst oder den Bearbeiten-Link holst.' : 'Das Dokument wird angelegt, sobald du etwas schreibst oder den Bearbeiten-Link holst.'));
     dialog('Teilen', body);
+  }
+
+  /**
+   * Kopiert einen Text, der erst noch entsteht (Anlegen übers Netz). Safari
+   * erlaubt die Zwischenablage nur direkt im Klick, darum ein ClipboardItem
+   * mit Promise; sonst nach dem Warten ganz normal.
+   */
+  async function copyLater(make: () => Promise<string>): Promise<boolean> {
+    const text = make();
+    text.catch(() => {});
+    if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then(t => new Blob([t], { type: 'text/plain' })) })]);
+        return true;
+      } catch { /* unten noch einmal ohne ClipboardItem */ }
+    }
+    const t = await text.catch(() => '');
+    return !!t && navigator.clipboard.writeText(t).then(() => true, () => false);
   }
 
   /** Aufgeklappter QR-Code: dunkel auf weiß (das lesen alle Kameras), als Bild sicherbar. */

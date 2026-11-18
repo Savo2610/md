@@ -48,6 +48,8 @@ export interface BoardHandle {
   summon(): void;
   peerCount(): number;
   reconnect(): void;
+  /** Anderswo angelegt (z. B. beim Kopieren des Bearbeiten-Links): verbinden. */
+  markCreated(): void;
   /** Druckdialog mit dem ganzen Board auf einer Seite. */
   print(): void;
 }
@@ -223,7 +225,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   ydoc.on('update', (_u: Uint8Array, origin: unknown) => {
     if (created || origin === provider || origin === local) return;
     creating ??= o.ensureCreated().then(ok => {
-      if (ok) { created = true; provider.connect(); }
+      if (ok && !created) { created = true; provider.connect(); }
       else creating = null;
       return ok;
     });
@@ -1641,6 +1643,13 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       o.toast('Alle folgen dir jetzt.');
     },
     peerCount: () => peers.length,
+    /** Anderswo angelegt (Teilen → Bearbeiten-Link): jetzt verbinden. */
+    markCreated() {
+      if (created) return;
+      created = true;
+      creating = Promise.resolve(true);
+      provider.connect();
+    },
     reconnect() {
       if (!created) return;
       provider.disconnect();

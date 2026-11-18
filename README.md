@@ -5,6 +5,10 @@ Durable Object pro Dokument, Bilder in R2.
 
 - `md.veerka.mp` öffnet ein neues Dokument mit zufälliger, schwer erratbarer Adresse.
 - `md.veerka.mp/irgendwas` öffnet das Dokument oder legt es beim ersten Tippen an.
+- Bearbeiten-Link schon vor dem ersten Tippen: Teilen → „Zum Bearbeiten“. Angelegt
+  wird erst beim Kopieren bzw. beim QR-Code, nicht schon beim Öffnen von „Teilen“.
+  Leere Dokumente (ohne Text und Bilder) verschwinden 30 Tage nach der letzten
+  Änderung, außer sie stehen auf „Behalten“ (`EMPTY_FOR` in `src/worker/doc.ts`).
 - Bestehende Dokumente öffnen in der Ansicht. Bearbeitungsrechte gelten immer
   für ein einzelnes Dokument und werden im Browser gespeichert: wer es angelegt
   hat, wer den Bearbeiten-Link öffnet (startet direkt im Bearbeiten-Modus), oder
