@@ -62,6 +62,8 @@ export interface EditorHandle {
   /** Markdown als eigenen Absatz an der Cursorstelle einsetzen (importierte Datei). */
   insertBlock(text: string): void;
   connect(): void;
+  /** Anderswo angelegt (z. B. beim Kopieren des Bearbeiten-Links): verbinden. */
+  markCreated(): void;
   /** Wartet, bis die lokale Kopie (IndexedDB) geladen ist. */
   whenLocal(): Promise<void>;
   /** Wartet, bis der Stand vom Server da ist (verbindet bei Bedarf). */
@@ -631,7 +633,7 @@ export function mountEditor(o: EditorOptions): EditorHandle {
   ydoc.on('update', (_u: Uint8Array, origin: unknown) => {
     if (created || origin === provider) return;
     creating ??= o.ensureCreated().then(ok => {
-      if (ok) { created = true; provider.connect(); }
+      if (ok && !created) { created = true; provider.connect(); }
       else creating = null;
       return ok;
     });
@@ -945,6 +947,13 @@ export function mountEditor(o: EditorOptions): EditorHandle {
       awareness.setLocalStateField('user', { name: name || 'Gast', color, colorLight: color + '33' });
     },
     connect: () => provider.connect(),
+    /** Anderswo angelegt (Teilen → Bearbeiten-Link): jetzt verbinden. */
+    markCreated() {
+      if (created) return;
+      created = true;
+      creating = Promise.resolve(true);
+      provider.connect();
+    },
     whenLocal: () => local.whenSynced.then(() => undefined),
     whenSynced() {
       if (provider.synced) return Promise.resolve();
