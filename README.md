@@ -245,7 +245,7 @@ Live-Test ohne 2FA-Teil:
 | `src/client/enhance.ts` | KaTeX, Mermaid, Highlighting – nur geladen, wenn gebraucht |
 | `tools/skill/SKILL.md` | Claude-Code-Skill zum Anlegen/Lesen (nach `~/.claude/skills/md-docs/`) |
 
-Schriften: iA Writer Quattro und Mono (SIL Open Font License, `public/fonts`).
+
 
 ## API für Agenten
 
@@ -259,3 +259,8 @@ curl https://md.veerka.mp/<id>.md
 curl -X PUT https://md.veerka.mp/api/docs/<id> -H "Authorization: Bearer $KEY" \
   -H "Content-Type: text/markdown" --data-binary @text.md
 ```
+
+## Lizenz
+
+Code: MIT (`LICENSE`). Schriften: iA Writer Quattro und Mono unter der SIL
+Open Font License (`public/fonts/LICENSE-iA-Fonts.md`).

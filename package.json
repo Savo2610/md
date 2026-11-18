@@ -2,6 +2,7 @@
   "name": "md",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "description": "Markdown-Editor auf md.veerka.mp",
   "type": "module",
   "scripts": {
