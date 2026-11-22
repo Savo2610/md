@@ -128,6 +128,8 @@ const ICON = {
   paste: svgIcon('<path d="M7 4.5H5.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-11a1 1 0 0 0-1-1H13"/><rect x="7" y="3" width="6" height="3" rx="1"/>'),
   all: svgIcon('<path d="M3.5 6V4.5a1 1 0 0 1 1-1H6M14 3.5h1.5a1 1 0 0 1 1 1V6M16.5 14v1.5a1 1 0 0 1-1 1H14M6 16.5H4.5a1 1 0 0 1-1-1V14M9 3.5h2M9 16.5h2M3.5 9v2M16.5 9v2"/>'),
   fit: svgIcon('<path d="M3.5 7.5v-4h4M12.5 3.5h4v4M16.5 12.5v4h-4M7.5 16.5h-4v-4"/>'),
+  group: svgIcon('<path d="M3.5 5.5v-2h2M14.5 3.5h2v2M16.5 14.5v2h-2M5.5 16.5h-2v-2"/><rect x="6" y="6" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1" class="fill"/>'),
+  ungroup: svgIcon('<rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="10.5" y="10.5" width="6" height="6" rx="1" class="fill"/>'),
   check: svgIcon('<path d="M4.5 10.5l3.5 3.5 7.5-8"/>'),
   style: svgIcon('<path d="M3.5 5h13" stroke-width="1"/><path d="M3.5 10h13" stroke-width="2"/><path d="M3.5 15.5h13" stroke-width="3.2"/>'),
   w1: svgIcon('<path d="M4 10h12" stroke-width="1"/>'),
@@ -798,9 +800,18 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   let drag: Drag | null = null;
   let poly: Poly | null = null;
 
-  function select(ids: Iterable<string>) {
+  /** Alle Elemente der Gruppe(n) von `ids` (ohne Gruppe: nur sie selbst). */
+  function groupOf(ids: Iterable<string>): Set<string> {
+    const out = new Set([...ids].filter(id => cache.has(id)));
+    const gs = new Set([...out].map(id => cache.get(id)!.g).filter(Boolean));
+    if (gs.size) for (const it of cache.values()) if (it.g && gs.has(it.g)) out.add(it.id);
+    return out;
+  }
+
+  /** Auswählen; Gruppen immer ganz, außer `exact` (ein einzelnes Element einer Gruppe). */
+  function select(ids: Iterable<string>, exact = false) {
     for (const id of selected) nodes.get(id)?.classList.remove('is-sel');
-    selected = new Set([...ids].filter(id => cache.has(id)));
+    selected = exact ? new Set([...ids].filter(id => cache.has(id))) : groupOf(ids);
     for (const id of selected) nodes.get(id)?.classList.add('is-sel');
     publish('sel', [...selected]);
     renderCtx();
@@ -1214,12 +1225,15 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   function insertCopies(list: Item[], dx: number, dy: number): string[] {
     if (items.size + list.length > MAX_ITEMS) { o.toast('Das Board ist voll.'); return []; }
     const ids = new Map(list.map(it => [it.id, rid()]));
+    const groups = new Map<string, string>();
     let zf = topZ(true), zi = topZ(false);
     const sorted = [...list].sort((a, b) => (a.z || 0) - (b.z || 0));
     tx(() => {
       for (const it of sorted) {
         const { id, ...rest } = it;
         const copy: Omit<Item, 'id'> = { ...rest, x: round(it.x + dx), y: round(it.y + dy), z: it.t === 'frame' ? zf++ : zi++ };
+        // Kopien bilden eine eigene Gruppe (nicht die des Originals).
+        if (it.g) { if (!groups.has(it.g)) groups.set(it.g, rid()); copy.g = groups.get(it.g); }
         if (it.t === 'arrow') {
           Object.assign(copy, shiftArrow(it, dx, dy));
           copy.from = it.from ? ids.get(it.from) : undefined;
@@ -1232,6 +1246,28 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     });
     return [...ids.values()];
   }
+
+  /** Auswahl zu einer Gruppe zusammenfassen (bestehende Gruppen gehen darin auf). */
+  function groupSelected() {
+    if (selected.size < 2) return;
+    const g = rid();
+    patchMany([...selected].map(id => [id, { g }]));
+    select(selected);
+  }
+
+  function ungroupSelected() {
+    const ids = [...selected].filter(id => cache.get(id)?.g);
+    if (!ids.length) return;
+    patchMany(ids.map(id => [id, { g: undefined }]));
+    flushNow();
+    select(selected, true);
+  }
+
+  /** Genau eine Gruppe ausgewählt (dann ist „Gruppieren“ überflüssig). */
+  const oneGroup = () => {
+    const gs = new Set([...selected].map(id => cache.get(id)?.g));
+    return gs.size === 1 && !gs.has(undefined);
+  };
 
   function duplicate() {
     if (!selected.size) return;
@@ -1252,7 +1288,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     const text = node?.querySelector<HTMLElement>('.b-text');
     if (!it || !node || !text || !TEXTUAL.has(it.t)) return;
     if (editing) endEdit();
-    select([id]);
+    select([id], true);
     editing = { id, node, text };
     node.classList.add('is-editing');
     editable(text, true);
@@ -1748,12 +1784,16 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     if (hitId) {
       if (double && TEXTUAL.has(hit?.t || '')) { owner = null; startEdit(hitId, false); return; }
       if (double && hit?.t === 'embed') { owner = null; activateEmbed(hitId); return; }
+      // Doppelt auf ein Element einer Gruppe: nur dieses auswählen.
+      if (double && hit?.g) { select([hitId], true); drag = { kind: 'move', start: p, orig: moveSet(), moved: false, clickId: null }; return; }
       let clickId: string | null = null;
       if (e.shiftKey) {
         const next = new Set(selected);
-        if (next.has(hitId)) next.delete(hitId); else next.add(hitId);
-        select(next);
-        if (!next.has(hitId)) { owner = null; return; }
+        const members = groupOf([hitId]);
+        const had = next.has(hitId);
+        for (const id of members) if (had) next.delete(id); else next.add(id);
+        select(next, true);
+        if (had) { owner = null; return; }
       } else if (!selected.has(hitId)) select([hitId]);
       else clickId = hitId;
       drag = { kind: 'move', start: p, orig: moveSet(), moved: false, clickId };
@@ -1990,7 +2030,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       const t = cache.get(d.clickId)?.t;
       if (selected.size === 1 && t === 'frame') startEdit(d.clickId);
       else if (selected.size === 1 && t === 'embed') activateEmbed(d.clickId);
-      else select([d.clickId]);
+      else if (selected.size > 1) select([d.clickId]);
     }
     if (d.kind === 'create') {
       let id = d.id;
@@ -2099,6 +2139,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     if (mod && key === 'y') { e.preventDefault(); undo.redo(); return; }
     if (mod && key === 'a') { e.preventDefault(); select(cache.keys()); return; }
     if (mod && key === 'd') { e.preventDefault(); duplicate(); return; }
+    if (mod && key === 'g') { e.preventDefault(); if (e.shiftKey) ungroupSelected(); else groupSelected(); return; }
     if (mod) return;
     if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); removeSelected(); return; }
     if (e.key === 'Enter' && selected.size === 1) {
@@ -2238,6 +2279,9 @@ export function mountBoard(o: BoardOptions): BoardHandle {
         [ICON.cut, 'Ausschneiden', () => { if (copySelection()) removeSelected(); }, keyHint('X')],
         [ICON.paste, 'Einfügen', () => pasteFromClipboard(at), keyHint('V')],
         [ICON.dup, 'Duplizieren', duplicate, keyHint('D')],
+        null,
+        selected.size > 1 && !oneGroup() ? [ICON.group, 'Gruppieren', groupSelected, keyHint('G')] : null,
+        [...selected].some(id => cache.get(id)?.g) ? [ICON.ungroup, 'Gruppe auflösen', ungroupSelected, touchDevice ? undefined : isMac ? '⇧⌘G' : 'Strg+⇧+G'] : null,
         null,
         [ICON.front, 'Nach vorne', () => restack(true)],
         [ICON.back, 'Nach hinten', () => restack(false)],

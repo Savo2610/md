@@ -47,6 +47,8 @@ export interface Item {
   pr?: number[];
   /** Stift: 1 = Textmarker (breit, durchscheinend). */
   hl?: number;
+  /** Gruppe: Elemente mit gleicher ID werden zusammen ausgewählt. */
+  g?: string;
   /** Bild: Adresse (/i/…). Einbettung: Adresse des Videos. */
   src?: string;
 }

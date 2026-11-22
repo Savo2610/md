@@ -87,14 +87,17 @@ Ein Cloudflare Worker, ein Durable Object pro Dokument, Bilder in R2.
   Bild oder Video gezeichnet bzw. geschrieben ist (darüber und fast ganz
   innerhalb), gehört dazu: wandert mit, wird mitkopiert, mitgelöscht und in
   der Ebene mitverschoben. Die Auswahlleiste zeigt nur Farbe, Strich, Form und
-  Löschen; Duplizieren und Ebenen stehen im Kontextmenü. Doppelklick auf die Fläche: neue Notiz;
+  Löschen; Duplizieren und Ebenen stehen im Kontextmenü. Gruppieren (Feld
+  `g`): Kontextmenü bzw. ⌘G, auflösen mit ⇧⌘G; Klick wählt die ganze Gruppe,
+  Doppelklick auf ein Element (außer Text) nur dieses; Kopien bilden eine
+  eigene Gruppe. Doppelklick auf die Fläche: neue Notiz;
   Tab beim Schreiben: nächste Notiz daneben (Shift: darunter). Eingefügter
   Text wird zu einer Notiz pro Zeile. Kopfleiste: Titel, Timer für alle,
   Abstimmen mit Punkten (verdeckt bis „Abstimmung beenden“), farbige Punkte
   der anderen antippen = folgen, ⋯ → „Alle zu mir holen“. `/<id>.md` liefert
   das Board als Markdown (Bereiche → Überschriften, Notizen → Liste, nach
   Stimmen sortiert, Pfeile als „A → B“); ⋯ → „Als Dokument öffnen“ macht daraus
-  ein md-Dokument. Kürzel: V H N F R L A T P E K I, ⌘D, ⌘Z, ⇧1 (alles zeigen),
+  ein md-Dokument. Kürzel: V H N F R L A T P E K I, ⌘D, ⌘G/⇧⌘G, ⌘Z, ⇧1 (alles zeigen),
   Leertaste halten zum Verschieben.
 - Packlisten (`src/client/pack.ts`, Datenmodell, Kategorien und Markdown in
   `src/shared/pack.ts`, übernommen aus packliste.veerka.mp): „Neue Packliste“
