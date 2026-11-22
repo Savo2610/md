@@ -534,6 +534,9 @@ button.t.strong { color: var(--fg); font-weight: 700; }
 .note-btn:hover { color: var(--fg-soft); }
 .note-btn.note-remove { font-size: 20px; padding-left: 10px; }
 .note-btn.note-remove:hover { color: var(--danger); }
+.note-btn.note-trash { display: inline-flex; padding: 10px 6px; }
+.note-btn.note-trash:hover { color: var(--danger); }
+.trash-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
 .notes li:not(:hover) .note-btn:not(:focus-visible) { opacity: .7; }
 
 /* Tags */
