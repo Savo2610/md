@@ -157,6 +157,13 @@ export function start() {
         });
         actions.append(tag);
       }
+      const remove = el('button', { type: 'button', class: 'note-btn note-remove', title: 'Aus der Liste entfernen', 'aria-label': 'Aus der Liste entfernen' }, '×');
+      remove.addEventListener('click', e => {
+        e.preventDefault();
+        recent.remove(r.id);
+        render();
+      });
+      actions.append(remove);
       // Löschen (in den Papierkorb) darf, wer es angelegt hat; × vergisst nur den Eintrag.
       if (ownerKey(r.id) || isAdmin()) {
         const trash = el('button', { type: 'button', class: 'note-btn note-trash', title: 'In den Papierkorb', 'aria-label': 'In den Papierkorb' }, trashIcon());
@@ -172,13 +179,6 @@ export function start() {
         });
         actions.append(trash);
       }
-      const remove = el('button', { type: 'button', class: 'note-btn note-remove', title: 'Aus der Liste entfernen', 'aria-label': 'Aus der Liste entfernen' }, '×');
-      remove.addEventListener('click', e => {
-        e.preventDefault();
-        recent.remove(r.id);
-        render();
-      });
-      actions.append(remove);
 
       const meta = el('span', { class: 'note-meta' }, `${ago(r.at)}${r.own ? ' · bearbeitbar' : ''}`);
       const chips = tagChips(docTags(r), setFilter);
