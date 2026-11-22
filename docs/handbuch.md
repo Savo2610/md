@@ -80,7 +80,10 @@ Ein Cloudflare Worker, ein Durable Object pro Dokument, Bilder in R2.
   Löschen bzw. auf der Fläche Einfügen, Notiz, Alles auswählen, Alles zeigen.
   Stift-Modus: schaltet sich beim ersten Apple-Pencil-Strich ein (Knopf rechts
   in den Werkzeugen); dann zeichnet nur der Stift, Finger verschieben und
-  zoomen, der Handballen wird ignoriert. Doppelklick auf die Fläche: neue Notiz;
+  zoomen, der Handballen wird ignoriert. Ein ausgewähltes Element greifen
+  Finger und Stift immer (verschieben statt zeichnen); mit einem Werkzeug
+  daneben angesetzt, hebt die Auswahl auf. Neue Formen liegen hinter allem
+  anderen (zum Umrahmen von Zeichnungen). Doppelklick auf die Fläche: neue Notiz;
   Tab beim Schreiben: nächste Notiz daneben (Shift: darunter). Eingefügter
   Text wird zu einer Notiz pro Zeile. Kopfleiste: Titel, Timer für alle,
   Abstimmen mit Punkten (verdeckt bis „Abstimmung beenden“), farbige Punkte

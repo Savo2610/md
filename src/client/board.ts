@@ -1131,6 +1131,13 @@ export function mountBoard(o: BoardOptions): BoardHandle {
 
   // ── Anlegen, Ändern, Löschen ──────────────────────────────────────────────
 
+  /** Unter allem anderen (außer Bereichen) – für neue Formen. */
+  function backZ(): number {
+    let z = Infinity;
+    for (const it of cache.values()) if (it.t !== 'frame') z = Math.min(z, it.z || 0);
+    return Number.isFinite(z) ? z - 1 : 0;
+  }
+
   function topZ(frame: boolean): number {
     let z = 0;
     for (const it of cache.values()) if ((it.t === 'frame') === frame) z = Math.max(z, it.z || 0);
@@ -1599,13 +1606,16 @@ export function mountBoard(o: BoardOptions): BoardHandle {
 
     if (e.button === 1 || spaceDown || tool === 'hand' || !canEdit) { startPan(sp, hitId); return; }
 
-    // Stift-Modus: Finger verschieben nur (Tippen wählt aus, doppelt tippen bearbeitet).
+    // Schon ausgewählt (leuchtet): Finger und Stift greifen es, statt zu zeichnen.
+    const onHandle = !!handleKind && selected.size === 1;
+    const grab = !!hitId && selected.has(hitId) && !voteActive() && !poly && tool !== 'laser' && (tool !== 'eraser' || (touch && penMode));
+
+    // Stift-Modus: Finger verschieben die Ansicht (Tippen wählt aus, doppelt tippen bearbeitet).
     if (touch && penMode) {
       if (hitId && target.closest('[data-play]')) { select([hitId]); activateEmbed(hitId); owner = null; return; }
       if (double && hit && TEXTUAL.has(hit.t)) { owner = null; startEdit(hitId!, false); return; }
       if (double && hit?.t === 'embed') { owner = null; activateEmbed(hit.id); return; }
-      startPan(sp, hitId);
-      return;
+      if (!grab && !onHandle) { startPan(sp, hitId); return; }
     }
 
     // Finger: Ziehen verschiebt, Tippen setzt den nächsten Punkt.
@@ -1613,7 +1623,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     if (poly) { polyClick(p, e.shiftKey); owner = null; return; }
 
     // Seitentaste am Stift (Radier-Ende): radieren, egal welches Werkzeug.
-    if ((pen && e.buttons & 32) || tool === 'eraser') {
+    if (!grab && !onHandle && ((pen && e.buttons & 32) || tool === 'eraser')) {
       drag = { kind: 'erase', last: p, doomed: new Set() };
       undo.stopCapturing();
       eraseAlong(p, p, drag);
@@ -1621,7 +1631,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       trailPush('erase', 'b-trail-erase', p, 200, ERASER_R * 2);
       return;
     }
-    if (tool === 'laser') {
+    if (tool === 'laser' && !onHandle) {
       drag = { kind: 'laser' };
       trailPush('laser', 'b-trail-laser', p, LASER_MS, 7);
       sendLaser(true);
@@ -1660,6 +1670,13 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       drag = { kind: 'wp', id, i: handleIndex };
       return;
     }
+
+    if (grab && tool !== 'select') {
+      drag = { kind: 'move', start: p, orig: moveSet(), moved: false, clickId: hitId };
+      return;
+    }
+    // Mit einem Werkzeug daneben angesetzt: Auswahl aufheben.
+    if (selected.size && tool !== 'select') select([]);
 
     if (tool === 'note') {
       const id = addNote(p);
@@ -1824,7 +1841,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
           if (Math.hypot(r.w * view.z, r.h * view.z) < 6) return;
           drag.id = drag.t === 'frame'
             ? addItem({ t: 'frame', x: round(r.x), y: round(r.y), w: round(r.w), h: round(r.h), z: topZ(true), text: '' })
-            : addItem({ t: 'shape', x: round(r.x), y: round(r.y), w: round(r.w), h: round(r.h), z: topZ(false), s: 'rect', c: lastInk, sw: lastWidth === 2 ? undefined : lastWidth, ds: lastDash, text: '' });
+            : addItem({ t: 'shape', x: round(r.x), y: round(r.y), w: round(r.w), h: round(r.h), z: backZ(), s: 'rect', c: lastInk, sw: lastWidth === 2 ? undefined : lastWidth, ds: lastDash, text: '' });
         } else patch(drag.id, { x: round(r.x), y: round(r.y), w: round(Math.max(r.w, 8)), h: round(Math.max(r.h, 8)) });
         break;
       }
@@ -1957,7 +1974,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
         const w = d.t === 'frame' ? 640 : 180, h = d.t === 'frame' ? 420 : 120;
         id = d.t === 'frame'
           ? addItem({ t: 'frame', x: round(d.start.x - w / 2), y: round(d.start.y - h / 2), w, h, z: topZ(true), text: '' })
-          : addItem({ t: 'shape', x: round(d.start.x - w / 2), y: round(d.start.y - h / 2), w, h, z: topZ(false), s: 'rect', c: lastInk, sw: lastWidth === 2 ? undefined : lastWidth, ds: lastDash, text: '' });
+          : addItem({ t: 'shape', x: round(d.start.x - w / 2), y: round(d.start.y - h / 2), w, h, z: backZ(), s: 'rect', c: lastInk, sw: lastWidth === 2 ? undefined : lastWidth, ds: lastDash, text: '' });
       }
       setTool('select');
       flushNow();
