@@ -58,6 +58,27 @@ export function onKeyboardClose(cb: () => void): () => void {
 /** Adresse eines Dokuments: Packlisten liegen im eigenen Bereich /pack/ (eigene App). */
 export const docHref = (id: string, kind?: DocKind) => `${kind === 'pack' ? '/pack/' : '/'}${encodeURIComponent(id)}`;
 
+/** Angezeigter Name: unbenannte Boards heißen nicht alle „Board“, sondern nach ihrer Adresse. */
+export const recentTitle = (r: Recent) => (r.kind === 'board' && r.title === 'Board' ? '' : r.title) || r.id;
+
+/** Kleines Zeichen für die Art (Dokument bzw. Board) vor dem Titel in Listen. */
+export function kindIcon(kind?: DocKind): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('class', 'kind-icon');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(ns, 'path');
+  // Board: Fläche mit zwei Notizen; Packliste: Häkchen; Dokument: Blatt mit Zeilen.
+  path.setAttribute('d', kind === 'board'
+    ? 'M2.5 2.5h11v11h-11z M5 5h3v3H5z M9.5 8.5h2v2.5h-2z'
+    : kind === 'pack'
+      ? 'M2.5 4.5l1.5 1.5 2.5-2.5 M8.5 5h5 M2.5 10.5l1.5 1.5 2.5-2.5 M8.5 11h5'
+      : 'M3.5 1.5h6l3 3v10h-9z M6 7h4.5 M6 9.5h4.5 M6 12h3');
+  svg.append(path);
+  return svg;
+}
+
 export function docTags(r: Recent): string[] {
   const out: string[] = [];
   for (const t of [...(r.tags || []), ...(r.textTags || [])]) if (!out.some(x => x.toLowerCase() === t.toLowerCase())) out.push(t);
