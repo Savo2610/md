@@ -1275,16 +1275,16 @@ body.pk-paged #bar { border-bottom: 0; }
 /* Übersicht: drei Arten neu anlegen, nach Art filtern */
 .home-new-row { display: flex; gap: 8px; margin-bottom: 18px; }
 .home-new-row .home-new { flex: 1 1 auto; min-width: 0; margin-bottom: 0; padding: 13px 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Packlisten und Memos: eigene Apps, nur der Weg dorthin */
-.home-apps { display: flex; align-items: center; gap: 2px; flex-shrink: 0; margin-left: 6px; }
-.home-app { padding: 13px 8px; font-size: 14px; color: var(--muted); text-decoration: none; white-space: nowrap; border-radius: 4px; }
+/* Packlisten und Memos: eigene Apps, oben in der Leiste nur der Weg dorthin */
+.home-new-row .home-new { flex: 1 1 0; }
+.home-apps { display: flex; align-items: center; margin-right: 6px; }
+.home-app { padding: 6px 8px; font-size: 14px; color: var(--muted); text-decoration: none; white-space: nowrap; border-radius: 4px; }
 .home-app:hover, .home-app:active { color: var(--fg); background: var(--soft); }
 @media (max-width: 420px) {
   .home-new-row { gap: 6px; }
   .home-new-row .home-new { padding: 12px 8px; font-size: 14px; }
   .home-new-row .home-new::before { margin-right: 4px; }
-  .home-apps { margin-left: 0; gap: 0; }
-  .home-app { padding: 12px 6px; }
+  .home-apps { margin-right: 2px; }
 }
 /* Art vor dem Titel: Dokument oder Board, leise */
 .kind-icon { width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px; fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }

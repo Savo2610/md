@@ -23,17 +23,20 @@ export function start() {
   const brand = el('button', { type: 'button', class: 'brand', title: 'Menü', 'aria-haspopup': 'dialog' }, 'md');
   brand.addEventListener('click', () => menu('left', toolMenu('home')));
   dropZone(file => openAsNew(file));
+  // Packlisten und Memos: eigene Apps, oben nur der Weg dorthin (neue legt man
+  // selten an, und dann dort).
+  const apps = el('nav', { class: 'home-apps', 'aria-label': 'Weitere Apps' });
+  for (const [label, href] of [['Packlisten', '/pack'], ['Memos', '/memos']]) apps.append(el('a', { href, class: 'home-app' }, label));
   const bar = el('header', { id: 'bar' },
     el('div', { class: 'bar-left' }, brand),
-    right,
+    el('div', { class: 'bar-right' }, apps, right),
   );
   document.body.prepend(bar);
 
   const main = el('div', { class: 'home' });
   app.append(main);
 
-  // Neu anlegen: Dokument und Board. Packlisten und Memos sind eigene Apps,
-  // dorthin nur ein Weg (neue Packlisten legt man selten an, und dann dort).
+  // Neu anlegen: Dokument und Board.
   const create = el('div', { class: 'home-new-row' });
   for (const [label, href] of [['Dokument', '/'], ['Board', '/#board']]) {
     const a = el('a', { href, class: 'home-new' }, label);
@@ -45,9 +48,6 @@ export function start() {
     });
     create.append(a);
   }
-  const apps = el('nav', { class: 'home-apps', 'aria-label': 'Weitere' });
-  for (const [label, href] of [['Packlisten', '/pack'], ['Memos', '/memos']]) apps.append(el('a', { href, class: 'home-app' }, label));
-  create.append(apps);
 
   // Nach Art filtern (?art=md|board), z. B. „Alle Boards“ aus dem Menü.
   // Packlisten stehen hier nicht: die wechselt man in ihrer eigenen App.
