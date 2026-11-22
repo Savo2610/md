@@ -1267,6 +1267,11 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   let pinch: { d: number; mid: Pt; z: number; x: number; y: number } | null = null;
   /** Zeiger, dem der laufende Zug gehört (andere Finger, Handballen: egal). */
   let owner: { id: number; pen: boolean } | null = null;
+  /** Wann der Stift zuletzt abgehoben wurde bzw. ein Finger aufgesetzt hat. */
+  let penUpAt = -1e9;
+  let touchAt = -1e9;
+  /** So lange nach dem Abheben des Stifts gelten Berührungen als Handballen. */
+  const PALM_MS = 500;
   let lastTap = { t: 0, x: 0, y: 0, id: '' };
   let spaceDown = false;
   let lastPointer: Pt | null = null;
@@ -1570,8 +1575,12 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     const pen = e.pointerType === 'pen';
     // Erster Strich mit Apple Pencil o. ä.: Stift-Modus an (außer schon bewusst aus).
     if (pen && !penMode && store.get(PEN_KEY) === null) setPenMode(true, true);
-    // Handballen beim Zeichnen mit dem Stift: ignorieren.
-    if (touch && penMode && owner?.pen) { e.preventDefault(); return; }
+    // Handballen beim Zeichnen mit dem Stift (und kurz nach dem Abheben): ignorieren.
+    if (touch && penMode && (owner?.pen || performance.now() - penUpAt < PALM_MS)) { e.preventDefault(); return; }
+    // Der Stift hat Vorrang vor allem, was Finger bzw. Handballen gerade tun.
+    if (pen && (pinch || (owner && !owner.pen))) dropTouches();
+    // Neuer Stift-Kontakt, bevor der alte sauber beendet war: alten abschließen.
+    if (pen && owner?.pen && owner.id !== e.pointerId) endPointer({ pointerId: owner.id, type: 'pointerup', pointerType: 'pen', target: root, clientX: e.clientX, clientY: e.clientY, shiftKey: false } as unknown as PointerEvent);
     // Fokus steuern wir selbst (sonst nimmt das Board ihn einer gerade geöffneten Notiz weg).
     e.preventDefault();
     viewed = true;
@@ -1580,6 +1589,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     try { root.setPointerCapture(e.pointerId); } catch { /* egal */ }
 
     if (touch) {
+      touchAt = performance.now();
       pointers.set(e.pointerId, sp);
       if (pointers.size === 2) {
         // Zwei Finger: Zoomen und Verschieben. Was der erste Finger begonnen hat, fällt weg.
@@ -1907,7 +1917,21 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     if (drag && drag.kind !== 'pan' && drag.kind !== 'marquee' && drag.kind !== 'laser' && drag.kind !== 'erase') paintOverlay();
   });
 
+  /** Finger/Handballen fallen weg; ein gerade erst begonnenes Verschieben bzw. Zoomen wird zurückgenommen. */
+  function dropTouches() {
+    const recent = performance.now() - touchAt < 800;
+    if (pinch && recent) view = { z: pinch.z, x: pinch.x, y: pinch.y };
+    else if (drag?.kind === 'pan' && recent) { view.x = drag.vx; view.y = drag.vy; }
+    if (recent) applyView();
+    pointers.clear();
+    pinch = null;
+    drag = null;
+    owner = null;
+    root.classList.remove('is-panning');
+  }
+
   function endPointer(e: PointerEvent) {
+    if (e.pointerType === 'pen') penUpAt = performance.now();
     pointers.delete(e.pointerId);
     if (pinch) { if (pointers.size < 2) pinch = null; drag = null; owner = null; return; }
     if (owner && owner.id !== e.pointerId) return;
