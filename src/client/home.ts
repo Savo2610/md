@@ -4,7 +4,7 @@
 // Mit Konto: alle Dokumente des Kontos auf jedem Gerät, mit eigenen Tags
 // zum Filtern. So lässt sich md wie ein Notizbuch benutzen.
 
-import { docHref, $, el, recent, ago, toast, store, menu, isAdmin, ask, adminHeaders, ownerHeaders, trashDaysLeft, docTags, recentTitle, kindIcon, type MenuItem, type Recent } from './ui';
+import { docHref, $, el, recent, ago, toast, store, menu, isAdmin, ask, adminHeaders, ownerHeaders, trashDaysLeft, docTags, recentTitle, kindIcon, ownerKey, type MenuItem, type Recent } from './ui';
 import { account, accountItems, avatar } from './account';
 import { tagChips, tagDialog } from './tags';
 import { toolMenu } from './nav';
@@ -157,6 +157,21 @@ export function start() {
         });
         actions.append(tag);
       }
+      // Löschen (in den Papierkorb) darf, wer es angelegt hat; × vergisst nur den Eintrag.
+      if (ownerKey(r.id) || isAdmin()) {
+        const trash = el('button', { type: 'button', class: 'note-btn note-trash', title: 'In den Papierkorb', 'aria-label': 'In den Papierkorb' }, trashIcon());
+        trash.addEventListener('click', async e => {
+          e.preventDefault();
+          trash.disabled = true;
+          const res = await fetch(`/api/docs/${encodeURIComponent(r.id)}/trash`, { method: 'POST', headers: { ...ownerHeaders(r.id), ...adminHeaders() } });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) { trash.disabled = false; toast(data.error || 'Löschen fehlgeschlagen.'); return; }
+          recent.markTrashed(r.id, data.trashed);
+          toast(`„${recentTitle(r)}“ liegt 30 Tage im Papierkorb.`);
+          render();
+        });
+        actions.append(trash);
+      }
       const remove = el('button', { type: 'button', class: 'note-btn note-remove', title: 'Aus der Liste entfernen', 'aria-label': 'Aus der Liste entfernen' }, '×');
       remove.addEventListener('click', e => {
         e.preventDefault();
@@ -177,6 +192,18 @@ export function start() {
       ));
     }
 
+  }
+
+  function trashIcon(): SVGSVGElement {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('class', 'trash-icon');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', 'M2.5 4h11 M6 4V2.5h4V4 M4 4l.7 9.5h6.6L12 4 M6.7 6.5v4.5 M9.3 6.5v4.5');
+    svg.append(path);
+    return svg;
   }
 
   /** Titel mit kleinem Zeichen für die Art; ohne Namen die Adresse, etwas leiser. */
