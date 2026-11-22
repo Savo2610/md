@@ -83,7 +83,11 @@ Ein Cloudflare Worker, ein Durable Object pro Dokument, Bilder in R2.
   zoomen, der Handballen wird ignoriert. Ein ausgewähltes Element greifen
   Finger und Stift immer (verschieben statt zeichnen); mit einem Werkzeug
   daneben angesetzt, hebt die Auswahl auf. Neue Formen liegen hinter allem
-  anderen (zum Umrahmen von Zeichnungen). Doppelklick auf die Fläche: neue Notiz;
+  anderen (zum Umrahmen von Zeichnungen). Was auf einer Notiz, Form, einem
+  Bild oder Video gezeichnet bzw. geschrieben ist (darüber und fast ganz
+  innerhalb), gehört dazu: wandert mit, wird mitkopiert, mitgelöscht und in
+  der Ebene mitverschoben. Die Auswahlleiste zeigt nur Farbe, Strich, Form und
+  Löschen; Duplizieren und Ebenen stehen im Kontextmenü. Doppelklick auf die Fläche: neue Notiz;
   Tab beim Schreiben: nächste Notiz daneben (Shift: darunter). Eingefügter
   Text wird zu einer Notiz pro Zeile. Kopfleiste: Titel, Timer für alle,
   Abstimmen mit Punkten (verdeckt bis „Abstimmung beenden“), farbige Punkte

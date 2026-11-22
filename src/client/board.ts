@@ -1013,12 +1013,8 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       if (playing.has(it.id)) kids.push(ctxButton(ICON.stop, 'Video beenden', () => stopEmbed(it.id)));
       if (kids.length) group(...kids);
     }
-    group(
-      ctxButton(ICON.dup, 'Duplizieren (⌘D)', duplicate),
-      ctxButton(ICON.front, 'Nach vorne', () => restack(true)),
-      ctxButton(ICON.back, 'Nach hinten', () => restack(false)),
-      ctxButton(ICON.trash, 'Löschen (⌫)', removeSelected),
-    );
+    // Duplizieren und Ebenen: im Kontextmenü (mit Text), hier nur Löschen.
+    group(ctxButton(ICON.trash, 'Löschen (⌫)', removeSelected));
   }
 
   // ── Werkzeuge ─────────────────────────────────────────────────────────────
@@ -1148,16 +1144,44 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     return addItem({ t: 'note', x: round(at.x - NOTE / 2), y: round(at.y - NOTE / 2), w: NOTE, h: NOTE, z: topZ(false), c, text: '' });
   }
 
+  // Was auf einer Notiz, Form, einem Bild oder Video gezeichnet bzw. geschrieben
+  // ist (darüber und fast ganz innerhalb), gehört dazu: wandert mit, wird mit
+  // kopiert, gelöscht und in der Ebene verschoben. Wie der Inhalt von Bereichen.
+  const HOSTS = new Set(['note', 'shape', 'image', 'embed']);
+  function attachedTo(host: Item, it: Item): boolean {
+    if (it.id === host.id || (it.z || 0) <= (host.z || 0)) return false;
+    const hb = bounds(host);
+    const box = { x: hb.x - 2, y: hb.y - 2, w: hb.w + 4, h: hb.h + 4 };
+    if (it.t === 'stroke') {
+      const pts = it.pts || [];
+      let inside = 0;
+      for (let i = 0; i + 1 < pts.length; i += 2) if (contains(box, { x: it.x + pts[i], y: it.y + pts[i + 1] })) inside++;
+      return pts.length >= 2 && inside >= (pts.length / 2) * 0.7;
+    }
+    if (it.t === 'text') return contains(box, center(bounds(it)));
+    if (it.t === 'arrow') return !it.from && !it.to && arrowPoints(it).every(q => contains(box, q));
+    return false;
+  }
+
+  /** Auswahl samt dem, was daran hängt. */
+  function withAttached(ids: Iterable<string>): Set<string> {
+    const out = new Set(ids);
+    const hosts = [...out].map(id => cache.get(id)).filter((i): i is Item => !!i && HOSTS.has(i.t));
+    if (!hosts.length) return out;
+    for (const it of cache.values()) if (!out.has(it.id) && hosts.some(h => attachedTo(h, it))) out.add(it.id);
+    return out;
+  }
+
   function removeSelected() {
     if (!selected.size) return;
-    const ids = new Set(selected);
+    const ids = withAttached(selected);
     for (const it of cache.values()) if (it.t === 'arrow' && ((it.from && ids.has(it.from)) || (it.to && ids.has(it.to)))) ids.add(it.id);
     tx(() => { for (const id of ids) items.delete(id); });
     select([]);
   }
 
   function restack(front: boolean) {
-    const list = [...selected].map(id => cache.get(id)!).filter(Boolean).sort((a, b) => (a.z || 0) - (b.z || 0));
+    const list = [...withAttached(selected)].map(id => cache.get(id)!).filter(Boolean).sort((a, b) => (a.z || 0) - (b.z || 0));
     const changes: [string, Partial<Item>][] = [];
     for (const frame of [true, false]) {
       const part = list.filter(i => (i.t === 'frame') === frame);
@@ -1211,7 +1235,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
 
   function duplicate() {
     if (!selected.size) return;
-    const ids = insertCopies(snapshot(selected), 24, 24);
+    const ids = insertCopies(snapshot(withAttached(selected)), 24, 24);
     flushNow();
     select(ids);
   }
@@ -1749,7 +1773,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   /** Was beim Verschieben mitgeht: Auswahl, dazu der Inhalt ausgewählter Bereiche. */
   function moveSet(): Map<string, Item> {
     const out = new Map<string, Item>();
-    for (const id of selected) { const it = cache.get(id); if (it) out.set(id, { ...it }); }
+    for (const id of withAttached(selected)) { const it = cache.get(id); if (it) out.set(id, { ...it }); }
     for (const f of [...out.values()].filter(i => i.t === 'frame')) {
       for (const it of cache.values()) {
         if (out.has(it.id)) continue;
@@ -2112,7 +2136,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   /** Auswahl für die Zwischenablage: Text (lesbar) und HTML (mit den Elementen). */
   function clipOf(): { plain: string; html: string } | null {
     if (!selected.size) return null;
-    const list = snapshot(selected);
+    const list = snapshot(withAttached(selected));
     memoryClip = list;
     const plain = plainOf(list);
     const json = JSON.stringify(list).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
