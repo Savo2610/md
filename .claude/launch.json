@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "md", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 8790 }
+    { "name": "md", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 8790 },
+    { "name": "md-uebersicht", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "node tools/build.mjs && npx concurrently -k -n client,worker \"node tools/build.mjs --watch\" \"npx wrangler dev --port 8806\""], "port": 8806 }
   ]
 }

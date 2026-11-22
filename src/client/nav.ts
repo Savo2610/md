@@ -4,12 +4,13 @@
 //   2. Zuletzt geöffnet – nur von derselben Art (nicht bei Packlisten: die
 //      stehen alle als Reiter oben)
 //   3. Die anderen Werkzeuge (Dokumente, Boards, Packlisten, Memos);
-//      Packlisten und Memos zeigen sich gegenseitig zuerst (beides eigene Apps)
+//      Packlisten und Memos zeigen sich gegenseitig zuerst (beides eigene Apps).
+//      Neu angelegt werden sie dort, nicht von außen (das braucht man selten).
 //   4. Konto, Einstellungen
 //
-// Die Übersicht (/home) filtert über ?art=md|board|pack nach Art.
+// Die Übersicht (/home) filtert über ?art=md|board nach Art; Packlisten stehen dort nicht.
 
-import { el, recent, ago, docTags, docHref, toast, type MenuItem, type Recent } from './ui';
+import { el, recent, ago, docTags, docHref, toast, recentTitle, type MenuItem, type Recent } from './ui';
 import { accountItems } from './account';
 import { fineRow } from './settings';
 import { openAsNew } from './importer';
@@ -40,7 +41,7 @@ const TOOLS: [Tool, string, string][] = [
 function recentRow(r: Recent): HTMLElement {
   const tags = docTags(r);
   return el('a', { href: docHref(r.id, r.kind), class: 'recent' },
-    el('span', { class: 'recent-title' }, r.title || r.id),
+    el('span', { class: 'recent-title' }, recentTitle(r)),
     el('span', { class: 'recent-meta' }, `${ago(r.at)}${r.own ? ' · bearbeitbar' : ''}${tags.length ? ' · ' + tags.join(', ') : ''}`),
   );
 }
@@ -52,7 +53,7 @@ export function toolMenu(here: Tool, current = ''): MenuItem[] {
   if (here === 'md') items.push(NEW.md, ['Datei öffnen …', () => openAsNew()], ['Alle Dokumente', () => go('/home?art=md')]);
   else if (here === 'board') items.push(NEW.board, ['Alle Boards', () => go('/home?art=board')]);
   else if (here === 'pack') items.push(NEW.pack);
-  else if (here === 'home') items.push(NEW.md, NEW.board, NEW.pack, ['Datei öffnen …', () => openAsNew()]);
+  else if (here === 'home') items.push(NEW.md, NEW.board, ['Datei öffnen …', () => openAsNew()]);
 
   if (here === 'md' || here === 'board') {
     const same = recent.list().filter(r => kindOf(r) === here && r.id !== current && !r.trashed).slice(0, 5);

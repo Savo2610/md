@@ -109,7 +109,7 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
   /** #tags in der gerenderten Ansicht (vom Server). */
   const viewTags = () => [...article.querySelectorAll<HTMLElement>('.doc-tag')].map(s => s.dataset.tag || '').filter(Boolean)
     .filter((t, i, all) => all.findIndex(x => x.toLowerCase() === t.toLowerCase()) === i);
-  if (exists) recent.touch(id, document.title === id ? '' : document.title, !!editKey, isApp ? undefined : viewTags(), kindHere);
+  if (exists) recent.touch(id, document.title === id || (isBoard && document.title === 'Board') ? '' : document.title, !!editKey, isApp ? undefined : viewTags(), kindHere);
   // Angemeldet: #tags im Text sichtbar; Antippen zeigt alle eigenen Dokumente
   // mit diesem Tag (Übersicht, gefiltert). Ohne Konto bleiben sie unsichtbar.
   if (account.user) document.body.classList.add('tags-visible');
@@ -819,7 +819,7 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
   // Titel in „Zuletzt geöffnet“ aktuell halten.
   addEventListener('pagehide', () => {
     if (editor && exists && !trashedHere) recent.touch(id, titleOf(editor.text()), true, tagsOf(editor.text()));
-    if (board && exists && !trashedHere) recent.touch(id, board.title() || 'Board', !!editKey, tagsOf(board.markdown()), 'board');
+    if (board && exists && !trashedHere) recent.touch(id, board.title(), !!editKey, tagsOf(board.markdown()), 'board');
     if (pack && exists && !trashedHere) recent.touch(id, pack.title() || 'Packliste', !!editKey, undefined, 'pack');
   }, sig);
 

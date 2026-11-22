@@ -4,7 +4,7 @@
 // Mit Konto: alle Dokumente des Kontos auf jedem Gerät, mit eigenen Tags
 // zum Filtern. So lässt sich md wie ein Notizbuch benutzen.
 
-import { docHref, $, el, recent, ago, toast, store, menu, isAdmin, ask, adminHeaders, ownerHeaders, trashDaysLeft, docTags, type MenuItem, type Recent } from './ui';
+import { docHref, $, el, recent, ago, toast, store, menu, isAdmin, ask, adminHeaders, ownerHeaders, trashDaysLeft, docTags, recentTitle, kindIcon, type MenuItem, type Recent } from './ui';
 import { account, accountItems, avatar } from './account';
 import { tagChips, tagDialog } from './tags';
 import { toolMenu } from './nav';
@@ -23,18 +23,22 @@ export function start() {
   const brand = el('button', { type: 'button', class: 'brand', title: 'Menü', 'aria-haspopup': 'dialog' }, 'md');
   brand.addEventListener('click', () => menu('left', toolMenu('home')));
   dropZone(file => openAsNew(file));
+  // Packlisten und Memos: eigene Apps, oben nur der Weg dorthin (neue legt man
+  // selten an, und dann dort).
+  const apps = el('nav', { class: 'home-apps', 'aria-label': 'Weitere Apps' });
+  for (const [label, href] of [['Packlisten', '/pack'], ['Memos', '/memos']]) apps.append(el('a', { href, class: 'home-app' }, label));
   const bar = el('header', { id: 'bar' },
     el('div', { class: 'bar-left' }, brand),
-    right,
+    el('div', { class: 'bar-right' }, apps, right),
   );
   document.body.prepend(bar);
 
   const main = el('div', { class: 'home' });
   app.append(main);
 
-  // Neu anlegen: alle drei Arten direkt hier (Startseite der App).
+  // Neu anlegen: Dokument und Board.
   const create = el('div', { class: 'home-new-row' });
-  for (const [label, href] of [['Dokument', '/'], ['Board', '/#board'], ['Packliste', '/pack/new']]) {
+  for (const [label, href] of [['Dokument', '/'], ['Board', '/#board']]) {
     const a = el('a', { href, class: 'home-new' }, label);
     a.addEventListener('click', e => {
       if (!navigator.onLine) {
@@ -45,9 +49,10 @@ export function start() {
     create.append(a);
   }
 
-  // Nach Art filtern (?art=md|board|pack), z. B. „Alle Boards“ aus dem Menü.
-  type Art = '' | 'md' | 'board' | 'pack';
-  const ARTS: [Art, string][] = [['', 'Alle'], ['md', 'Dokumente'], ['board', 'Boards'], ['pack', 'Packlisten']];
+  // Nach Art filtern (?art=md|board), z. B. „Alle Boards“ aus dem Menü.
+  // Packlisten stehen hier nicht: die wechselt man in ihrer eigenen App.
+  type Art = '' | 'md' | 'board';
+  const ARTS: [Art, string][] = [['', 'Alle'], ['md', 'Dokumente'], ['board', 'Boards']];
   const fromUrl = new URLSearchParams(location.search).get('art');
   let art: Art = ARTS.some(([a]) => a === fromUrl) ? fromUrl as Art : '';
   const artBar = el('nav', { class: 'art-bar', role: 'tablist', 'aria-label': 'Art' });
@@ -99,7 +104,7 @@ export function start() {
   function render() {
     // Abgelaufenes aus dem Papierkorb ist auf dem Server schon weg.
     for (const r of recent.list()) if (r.trashed && !trashDaysLeft(r.trashed)) recent.remove(r.id);
-    const everything = recent.list();
+    const everything = recent.list().filter(r => r.kind !== 'pack' || r.trashed);
     const all = everything.filter(r => !r.trashed);
     const trashed = everything.filter(r => r.trashed);
     const tags = account.user ? account.allTags() : [];
@@ -119,7 +124,7 @@ export function start() {
 
     const q = search.value.trim().toLowerCase();
     const matches = (r: Recent) => !q
-      || (r.title || r.id).toLowerCase().includes(q)
+      || recentTitle(r).toLowerCase().includes(q)
       || r.id.includes(q)
       || docTags(r).some(t => t.toLowerCase().includes(q));
     const inFilter = (r: Recent) => !filter || (filter === UNTAGGED ? !docTags(r).length : docTags(r).some(t => t.toLowerCase() === filter.toLowerCase()));
@@ -139,7 +144,7 @@ export function start() {
 
     list.replaceChildren();
     if (!items.length) {
-      list.append(el('li', { class: 'notes-empty' }, q || filter ? 'Nichts gefunden.' : art === 'board' ? 'Noch keine Boards.' : art === 'pack' ? 'Noch keine Packlisten.' : 'Noch keine Dokumente.'));
+      list.append(el('li', { class: 'notes-empty' }, q || filter ? 'Nichts gefunden.' : art === 'board' ? 'Noch keine Boards.' : 'Noch keine Dokumente.'));
     }
     for (const r of items) {
       if (inTrash) { list.append(trashRow(r)); continue; }
@@ -165,13 +170,19 @@ export function start() {
       if (chips) meta.append(chips);
       list.append(el('li', {},
         el('a', { href: docHref(r.id, r.kind), class: 'note' },
-          el('span', { class: 'note-title' }, r.title || r.id),
+          noteTitle(r),
           meta,
         ),
         actions,
       ));
     }
 
+  }
+
+  /** Titel mit kleinem Zeichen für die Art; ohne Namen die Adresse, etwas leiser. */
+  function noteTitle(r: Recent): HTMLElement {
+    const named = recentTitle(r) !== r.id || r.title === r.id;
+    return el('span', { class: `note-title${named ? '' : ' unnamed'}` }, kindIcon(r.kind), recentTitle(r));
   }
 
   /** Eintrag im Papierkorb: Wiederherstellen oder endgültig löschen. */
@@ -189,7 +200,7 @@ export function start() {
     const purge = el('button', { type: 'button', class: 'note-btn note-remove', title: 'Endgültig löschen', 'aria-label': 'Endgültig löschen' }, '×');
     purge.addEventListener('click', async e => {
       e.preventDefault();
-      if (!(await ask('Endgültig löschen?', `„${r.title || r.id}“ und alle Bilder darin verschwinden sofort. Das lässt sich nicht rückgängig machen.`, 'Endgültig löschen'))) return;
+      if (!(await ask('Endgültig löschen?', `„${recentTitle(r)}“ und alle Bilder darin verschwinden sofort. Das lässt sich nicht rückgängig machen.`, 'Endgültig löschen'))) return;
       const res = await fetch(`/api/docs/${encodeURIComponent(r.id)}`, { method: 'DELETE', headers });
       if (!res.ok && res.status !== 404) { toast((await res.json().catch(() => ({}))).error || 'Löschen fehlgeschlagen.'); return; }
       recent.remove(r.id);
@@ -199,7 +210,7 @@ export function start() {
     });
     return el('li', { class: 'trashed' },
       el('a', { href: `/${encodeURIComponent(r.id)}`, class: 'note' },
-        el('span', { class: 'note-title' }, r.title || r.id),
+        noteTitle(r),
         el('span', { class: 'note-meta' }, days === 1 ? 'wird morgen endgültig gelöscht' : `noch ${days} Tage`),
       ),
       el('div', { class: 'note-actions' }, restore, purge),
