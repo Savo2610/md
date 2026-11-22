@@ -64,15 +64,26 @@ Ein Cloudflare Worker, ein Durable Object pro Dokument, Bilder in R2.
   `board.veerka.mp` / `wb.veerka.mp` (leiten auf `md.veerka.mp/<pfad>#board`
   weiter). Ein Board
   ist ein Dokument mit `kind = board` (gleiche Links, Rechte, Papierkorb,
-  Umbenennen). Notizen, Bereiche, Formen, Pfeile (hängen an Elementen), Text,
-  Stift, Bilder (R2 wie im Editor). Doppelklick auf die Fläche: neue Notiz;
+  Umbenennen). Notizen, Bereiche, Formen, Linien und Pfeile (hängen an
+  Elementen; Klick, Klick, … setzt Wendepunkte, Klick auf den letzten Punkt
+  bzw. ↵ beendet; ausgewählt: Punkte ziehen, Griff dazwischen ziehen fügt einen
+  ein, Doppelklick entfernt; Shift rastet auf 15°), Text, Stift (mit Druck,
+  perfect-freehand; auch als Textmarker), Radierer (zerschneidet Striche,
+  entfernt anderes beim Loslassen; auch die Radiertaste am Stift),
+  Laserpointer (für alle sichtbar, über Awareness), Bilder (R2 wie im Editor;
+  am Tablet/Handy auch „Foto aufnehmen“) und YouTube/Vimeo-Videos (Einfügen →
+  Video, oder Link einfügen/hereinziehen; erst Vorschaubild, Player erst nach
+  ▶). Strichstärke, Strichart, Spitzen, Kurve unter „Strich“ in der Leiste.
+  Stift-Modus: schaltet sich beim ersten Apple-Pencil-Strich ein (Knopf rechts
+  in den Werkzeugen); dann zeichnet nur der Stift, Finger verschieben und
+  zoomen, der Handballen wird ignoriert. Doppelklick auf die Fläche: neue Notiz;
   Tab beim Schreiben: nächste Notiz daneben (Shift: darunter). Eingefügter
   Text wird zu einer Notiz pro Zeile. Kopfleiste: Titel, Timer für alle,
   Abstimmen mit Punkten (verdeckt bis „Abstimmung beenden“), farbige Punkte
   der anderen antippen = folgen, ⋯ → „Alle zu mir holen“. `/<id>.md` liefert
   das Board als Markdown (Bereiche → Überschriften, Notizen → Liste, nach
   Stimmen sortiert, Pfeile als „A → B“); ⋯ → „Als Dokument öffnen“ macht daraus
-  ein md-Dokument. Kürzel: V H N F R A T P I, ⌘D, ⌘Z, ⇧1 (alles zeigen),
+  ein md-Dokument. Kürzel: V H N F R L A T P E K I, ⌘D, ⌘Z, ⇧1 (alles zeigen),
   Leertaste halten zum Verschieben.
 - Packlisten (`src/client/pack.ts`, Datenmodell, Kategorien und Markdown in
   `src/shared/pack.ts`, übernommen aus packliste.veerka.mp): „Neue Packliste“

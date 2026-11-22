@@ -40,6 +40,7 @@
     "markdown-it-sub": "^2.0.0",
     "markdown-it-sup": "^2.0.0",
     "mermaid": "^12.3.0",
+    "perfect-freehand": "^1.2.3",
     "turndown": "^7.2.5",
     "y-codemirror.next": "^0.3.6",
     "y-indexeddb": "^9.0.12",

@@ -1,5 +1,6 @@
-// Whiteboard: unendliche Fläche mit Notizen, Bereichen, Formen, Pfeilen,
-// Text, Stift und Bildern. Gemeinsam über dasselbe Yjs/WebSocket wie die
+// Whiteboard: unendliche Fläche mit Notizen, Bereichen, Formen, Linien und
+// Pfeilen (mit Wendepunkten), Text, Stift (druckempfindlich), Radierer,
+// Laserpointer, Bildern und Videos. Gemeinsam über dasselbe Yjs/WebSocket wie die
 // Dokumente (Datenmodell in src/shared/board.ts).
 //
 // Darstellung: DOM in einer Ebene mit CSS-Transformation (Verschieben und
@@ -10,14 +11,20 @@
 //
 // Workshop: Abstimmen mit Punkten (verdeckt bis zum Ende), gemeinsamer
 // Timer, anderen folgen bzw. alle zu sich holen (über Awareness).
+//
+// Stift-Modus (Apple Pencil o. ä.): schaltet sich beim ersten Stift-Strich
+// ein. Dann zeichnet nur der Stift, Finger verschieben und zoomen, der
+// Handballen stört nicht.
 
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { IndexeddbPersistence } from 'y-indexeddb';
+import { getStroke } from 'perfect-freehand';
 import { Provider } from './provider';
 import { uploadImage } from './images';
-import { el, store, menu } from './ui';
+import { el, store, menu, dialog } from './ui';
 import { boardMarkdown, readItem, voteCounts, MAX_ITEMS, type Item, type Timer, type Vote } from '../shared/board';
+import { videoOf, videoUrl, videoEmbed } from '../shared/video';
 import type { EditorStatus, Peer } from './editor';
 
 export interface BoardOptions {
@@ -54,19 +61,25 @@ export interface BoardHandle {
   print(): void;
 }
 
-type Tool = 'select' | 'hand' | 'note' | 'frame' | 'shape' | 'arrow' | 'text' | 'pen';
+type Tool = 'select' | 'hand' | 'note' | 'frame' | 'shape' | 'line' | 'arrow' | 'text' | 'pen' | 'eraser' | 'laser';
 interface Pt { x: number; y: number }
 interface Box { x: number; y: number; w: number; h: number }
 
 type Drag =
-  | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; moved: boolean; tapId: string | null }
+  | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; moved: boolean; tapId: string | null; tapPoly?: boolean }
   | { kind: 'move'; start: Pt; orig: Map<string, Item>; moved: boolean; clickId: string | null }
   | { kind: 'marquee'; start: Pt; base: Set<string> }
   | { kind: 'resize'; id: string; start: Pt; orig: Item }
   | { kind: 'create'; t: 'frame' | 'shape'; start: Pt; id: string | null }
-  | { kind: 'arrow'; start: Pt; from: string | null; id: string | null }
+  | { kind: 'arrow'; start: Pt; from: string | null; id: string | null; line: boolean }
   | { kind: 'end'; id: string; end: 'from' | 'to' }
-  | { kind: 'stroke'; pts: number[]; node: HTMLElement; path: SVGPathElement };
+  | { kind: 'wp'; id: string; i: number }
+  | { kind: 'stroke'; pts: number[]; pr: number[] | null; node: HTMLElement; path: SVGPathElement }
+  | { kind: 'erase'; last: Pt; doomed: Set<string> }
+  | { kind: 'laser' };
+
+/** Linie bzw. Pfeil, der gerade Punkt für Punkt gesetzt wird (Klick, Klick, …). */
+interface Poly { id: string; fixed: Pt[] }
 
 const LOCAL = 'board-local';
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -80,8 +93,19 @@ const NOTE = 150;
 const MIN_Z = 0.1;
 const MAX_Z = 4;
 const TEXTUAL = new Set(['note', 'shape', 'text', 'frame']);
-const VOTABLE = new Set(['note', 'shape', 'text', 'image']);
-const RESIZABLE = new Set(['note', 'frame', 'shape', 'image', 'text']);
+const VOTABLE = new Set(['note', 'shape', 'text', 'image', 'embed']);
+const RESIZABLE = new Set(['note', 'frame', 'shape', 'image', 'text', 'embed']);
+/** Seitenverhältnis bleibt beim Größerziehen. */
+const KEEP_RATIO = new Set(['image', 'embed']);
+/** Werkzeuge mit eigener Leiste für Farbe und Strich, solange nichts ausgewählt ist. */
+const STYLED_TOOLS = new Set<Tool>(['shape', 'line', 'arrow', 'text', 'pen']);
+/** Strichstärke 1–3 → Breite in px (Linien, Formen) bzw. Durchmesser (Stift, Marker). */
+const LINE_W = [0, 1.25, 2, 4];
+const PEN_W = [0, 2.5, 4.5, 9];
+const MARKER_W = [0, 12, 20, 32];
+/** Radierer: Radius in Bildschirm-px. */
+const ERASER_R = 10;
+const LASER_MS = 700;
 
 const svgIcon = (d: string) => `<svg viewBox="0 0 20 20" aria-hidden="true">${d}</svg>`;
 const ICON = {
@@ -92,8 +116,32 @@ const ICON = {
   shape: svgIcon('<rect x="3" y="3" width="8.5" height="8.5" rx="1"/><circle cx="12.5" cy="12.5" r="4.5"/>'),
   arrow: svgIcon('<path d="M4 16L16 4M9 4h7v7"/>'),
   text: svgIcon('<path d="M4.5 5V3.8h11V5M10 3.8v12.4M7.8 16.2h4.4"/>'),
+  line: svgIcon('<path d="M3.5 15.5l5-7 4 4 4-8"/>'),
   pen: svgIcon('<path d="M3.5 16.5c2-.3 3-1 4-2l8-8a1.8 1.8 0 0 0-2.5-2.5l-8 8c-1 1-1.7 2-2 4z"/>'),
+  eraser: svgIcon('<path d="M8 16.5h8.5M11.5 4.2l4.3 4.3a1.3 1.3 0 0 1 0 1.8L9.6 16.5H6.4l-2.6-2.6a1.3 1.3 0 0 1 0-1.8l5.9-7.9a1.3 1.3 0 0 1 1.8 0zM6.7 8.6l5.7 5.7"/>'),
+  laser: svgIcon('<circle cx="13" cy="7" r="2.6"/><path d="M3.5 16.5l7.3-7.3M13 2v1.3M13 10.7V12M18 7h-1.3M9.3 7H8M16.5 3.5l-.9.9M10.4 9.6l-.9.9M16.5 10.5l-.9-.9"/>'),
+  insert: svgIcon('<rect x="3" y="3" width="14" height="14" rx="2"/><path d="M10 6.5v7M6.5 10h7"/>'),
   image: svgIcon('<rect x="3" y="4" width="14" height="12" rx="1.5"/><circle cx="7.5" cy="8.3" r="1.3"/><path d="M3.5 14.5l4-4 3 3 2-2 4 3.5"/>'),
+  camera: svgIcon('<path d="M3 7.2A1.7 1.7 0 0 1 4.7 5.5h1.8L8 3.5h4l1.5 2h1.8A1.7 1.7 0 0 1 17 7.2v7.1a1.7 1.7 0 0 1-1.7 1.7H4.7A1.7 1.7 0 0 1 3 14.3z"/><circle cx="10" cy="10.5" r="3"/>'),
+  video: svgIcon('<rect x="2.5" y="4.5" width="15" height="11" rx="2.5"/><path d="M8.5 7.6v4.8l4-2.4z" class="fill"/>'),
+  penmode: svgIcon('<path d="M9.5 16.5c1.6-.3 2.5-.9 3.3-1.7l4-4a1.6 1.6 0 0 0-2.2-2.2l-4 4c-.8.8-1.4 1.7-1.7 3.3z"/><path d="M6 12.5V5.2a1 1 0 0 1 2 0V10M8 9.5V3.8a1 1 0 0 1 2 0V8.6M4 9.4a1 1 0 0 1 2 0v3.6c0 2 .8 3.5 2.3 3.5"/>'),
+  check: svgIcon('<path d="M4.5 10.5l3.5 3.5 7.5-8"/>'),
+  style: svgIcon('<path d="M3.5 5h13" stroke-width="1"/><path d="M3.5 10h13" stroke-width="2"/><path d="M3.5 15.5h13" stroke-width="3.2"/>'),
+  w1: svgIcon('<path d="M4 10h12" stroke-width="1"/>'),
+  w2: svgIcon('<path d="M4 10h12" stroke-width="2.2"/>'),
+  w3: svgIcon('<path d="M4 10h12" stroke-width="4"/>'),
+  solid: svgIcon('<path d="M3.5 10h13"/>'),
+  dash: svgIcon('<path d="M3.5 10h3M8.5 10h3M13.5 10h3"/>'),
+  dot: svgIcon('<path d="M4 10h.01M7 10h.01M10 10h.01M13 10h.01M16 10h.01" stroke-width="2.2"/>'),
+  hdNone: svgIcon('<path d="M3.5 10h13"/>'),
+  hdEnd: svgIcon('<path d="M3.5 10h13M12.5 6l4 4-4 4"/>'),
+  external: svgIcon('<path d="M11 3.5h5.5V9M16.5 3.5L9 11M14 11.5v4a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4"/>'),
+  stop: svgIcon('<rect x="5" y="5" width="10" height="10" rx="1.5" class="fill"/>'),
+  hdBoth: svgIcon('<path d="M3.5 10h13M12.5 6l4 4-4 4M7.5 6l-4 4 4 4"/>'),
+  sharp: svgIcon('<path d="M3.5 15l5-9 3 8 5-8"/>'),
+  curve: svgIcon('<path d="M3.5 15c2-9 4-9 5.5-4.5S13 14 16.5 6"/>'),
+  pencil: svgIcon('<path d="M3.5 16.5c2-.3 3-1 4-2l8-8a1.8 1.8 0 0 0-2.5-2.5l-8 8c-1 1-1.7 2-2 4z"/>'),
+  marker: svgIcon('<path d="M5 15l2.5-6.5 4.5 4.5zM7.5 8.5l5-5 4 4-5 5M3.5 17h6" /><path d="M5 15l2.5-6.5 4.5 4.5z" class="fill"/>'),
   undo: svgIcon('<path d="M7.5 5L4 8.5 7.5 12"/><path d="M4 8.5h7.5a4 4 0 0 1 0 8H9"/>'),
   redo: svgIcon('<path d="M12.5 5L16 8.5 12.5 12"/><path d="M16 8.5H8.5a4 4 0 0 0 0 8H11"/>'),
   rename: svgIcon('<path d="M4 16l.8-3.6L13 4.2l2.8 2.8-8.2 8.2z"/><path d="M11.2 6l2.8 2.8"/>'),
@@ -106,16 +154,19 @@ const ICON = {
   diamond: svgIcon('<path d="M10 3.5l6.5 6.5-6.5 6.5L3.5 10z"/>'),
 };
 
-const TOOLS: [Tool | 'image', string, string][] = [
+const TOOLS: [Tool | 'insert', string, string][] = [
   ['select', 'Auswählen', 'V'],
   ['hand', 'Verschieben', 'H'],
   ['note', 'Notiz', 'N'],
   ['frame', 'Bereich', 'F'],
   ['shape', 'Form', 'R'],
+  ['line', 'Linie', 'L'],
   ['arrow', 'Pfeil', 'A'],
   ['text', 'Text', 'T'],
   ['pen', 'Stift', 'P'],
-  ['image', 'Bild', 'I'],
+  ['eraser', 'Radierer', 'E'],
+  ['laser', 'Laserpointer', 'K'],
+  ['insert', 'Einfügen', 'I'],
 ];
 
 const rid = () => Math.random().toString(36).slice(2, 10);
@@ -145,6 +196,7 @@ function clipToBox(box: Box, toward: Pt): Pt {
   return { x: c.x + dx * t, y: c.y + dy * t };
 }
 
+/** Mittellinie eines Strichs (zum Treffen und Hervorheben). */
 function strokePath(pts: number[]): string {
   if (pts.length < 4) return `M${pts[0]} ${pts[1]}l.01 0`;
   let d = `M${pts[0]} ${pts[1]}`;
@@ -152,6 +204,80 @@ function strokePath(pts: number[]): string {
     d += `Q${pts[i]} ${pts[i + 1]} ${round((pts[i] + pts[i + 2]) / 2)} ${round((pts[i + 1] + pts[i + 3]) / 2)}`;
   }
   return d + `L${pts[pts.length - 2]} ${pts[pts.length - 1]}`;
+}
+
+/** Umriss aus perfect-freehand → SVG-Pfad (geglättet). */
+function outlinePath(outline: number[][]): string {
+  const n = outline.length;
+  if (n < 2) return '';
+  const r = (v: number) => Math.round(v * 100) / 100;
+  let d = `M${r(outline[0][0])} ${r(outline[0][1])}Q`;
+  for (let i = 0; i < n; i++) {
+    const [x0, y0] = outline[i];
+    const [x1, y1] = outline[(i + 1) % n];
+    d += `${r(x0)} ${r(y0)} ${r((x0 + x1) / 2)} ${r((y0 + y1) / 2)} `;
+  }
+  return d + 'Z';
+}
+
+/** Freihand-Strich als gefüllte Fläche: mit Stiftdruck, sonst aus dem Tempo. */
+function inkPath(pts: number[], pr: number[] | null | undefined, sw: number, marker: boolean, done: boolean): string {
+  const input: number[][] = [];
+  for (let i = 0; i < pts.length; i += 2) input.push(pr ? [pts[i], pts[i + 1], pr[i / 2] ?? 0.5] : [pts[i], pts[i + 1]]);
+  if (input.length === 1) input.push([input[0][0] + 0.01, input[0][1], input[0][2] ?? 0.5]);
+  const outline = getStroke(input, marker
+    ? { size: MARKER_W[sw] || MARKER_W[2], thinning: 0, smoothing: 0.6, streamline: 0.45, simulatePressure: false, last: done }
+    : { size: PEN_W[sw] || PEN_W[2], thinning: pr ? 0.65 : 0.5, smoothing: 0.6, streamline: pr ? 0.35 : 0.5, simulatePressure: !pr, last: done,
+      start: { taper: false, cap: true }, end: { taper: false, cap: true } });
+  return outlinePath(outline);
+}
+
+/** Catmull-Rom → kubische Bézier-Stücke durch alle Punkte. */
+function curveSegments(p: Pt[]): [Pt, Pt, Pt, Pt][] {
+  const out: [Pt, Pt, Pt, Pt][] = [];
+  for (let i = 0; i < p.length - 1; i++) {
+    const p0 = p[i - 1] || p[i], p1 = p[i], p2 = p[i + 1], p3 = p[i + 2] || p2;
+    out.push([p1, { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 }, { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 }, p2]);
+  }
+  return out;
+}
+const bezierAt = ([a, b, c, d]: [Pt, Pt, Pt, Pt], t: number): Pt => {
+  const u = 1 - t;
+  return {
+    x: u * u * u * a.x + 3 * u * u * t * b.x + 3 * u * t * t * c.x + t * t * t * d.x,
+    y: u * u * u * a.y + 3 * u * u * t * b.y + 3 * u * t * t * c.y + t * t * t * d.y,
+  };
+};
+
+/** Abstand Punkt–Strecke. */
+function segDist(p: Pt, a: Pt, b: Pt): number {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = dx * dx + dy * dy;
+  const t = len ? clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / len, 0, 1) : 0;
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/** Winkel auf 15°-Schritte einrasten (mit Shift). */
+function snapAngle(from: Pt, to: Pt): Pt {
+  const len = Math.hypot(to.x - from.x, to.y - from.y);
+  const step = Math.PI / 12;
+  const ang = Math.round(Math.atan2(to.y - from.y, to.x - from.x) / step) * step;
+  return { x: from.x + Math.cos(ang) * len, y: from.y + Math.sin(ang) * len };
+}
+
+const pairs = (flat: number[] | undefined): Pt[] => {
+  const out: Pt[] = [];
+  if (flat) for (let i = 0; i + 1 < flat.length; i += 2) out.push({ x: flat[i], y: flat[i + 1] });
+  return out;
+};
+const flat = (list: Pt[]): number[] => list.flatMap(p => [round(p.x), round(p.y)]);
+
+/** Pfeil/Linie um dx/dy verschieben (Enden und Wendepunkte). */
+function shiftArrow(it: Item, dx: number, dy: number): Partial<Item> {
+  return {
+    fx: round((it.fx ?? 0) + dx), fy: round((it.fy ?? 0) + dy), tx: round((it.tx ?? 0) + dx), ty: round((it.ty ?? 0) + dy),
+    wp: it.wp?.length ? it.wp.map((v, i) => round(v + (i % 2 ? dy : dx))) : undefined,
+  };
 }
 
 function svg(tag: string, attrs: Record<string, string> = {}): SVGElement {
@@ -274,8 +400,10 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   const endB = el('div', { class: 'b-handle b-end', 'data-handle': 'to' });
   const marquee = el('div', { class: 'b-marquee' });
   const cursors = el('div', { class: 'b-cursors' });
+  const wpLayer = el('div', { class: 'b-wps' });
   const ctxBar = el('div', { class: 'b-ctx', role: 'toolbar', 'aria-label': 'Auswahl' });
-  overlay.append(selBox, handle, endA, endB, marquee, cursors, ctxBar);
+  const styleBar = el('div', { class: 'b-ctx b-ctx-sub', role: 'toolbar', 'aria-label': 'Strich' });
+  overlay.append(selBox, handle, endA, endB, wpLayer, marquee, cursors, ctxBar, styleBar);
   const tools = el('div', { class: 'b-tools', role: 'toolbar', 'aria-label': 'Werkzeuge' });
   const zoomBar = el('div', { class: 'b-zoom' });
   const followBar = el('div', { class: 'b-follow' });
@@ -283,11 +411,14 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   o.parent.append(root);
 
   const fileInput = el('input', { type: 'file', accept: 'image/*', multiple: '' }) as HTMLInputElement;
-  fileInput.addEventListener('change', () => {
-    const files = [...(fileInput.files || [])];
-    fileInput.value = '';
-    placeImages(files, viewCenter());
-  });
+  const cameraInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment' }) as HTMLInputElement;
+  for (const input of [fileInput, cameraInput]) {
+    input.addEventListener('change', () => {
+      const files = [...(input.files || [])];
+      input.value = '';
+      placeImages(files, viewCenter());
+    });
+  }
 
   // ── Ansicht (Verschieben, Zoomen) ─────────────────────────────────────────
 
@@ -462,9 +593,12 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       node.append(el('div', { class: 'b-frame-title' }, el('div', { class: 'b-text' })));
     } else if (it.t === 'image') {
       node.append(el('img', { alt: '', draggable: 'false' }), el('div', { class: 'b-votes' }));
+    } else if (it.t === 'embed') {
+      node.append(el('div', { class: 'b-embed-box' }), el('div', { class: 'b-votes' }));
     } else if (it.t === 'arrow' || it.t === 'stroke') {
       const s = svg('svg', { class: 'b-svg' });
       s.append(svg('path', { class: 'hit' }), svg('path', { class: 'line' }));
+      if (it.t === 'arrow') s.append(svg('path', { class: 'head' }));
       node.append(s);
     }
     return node;
@@ -489,14 +623,20 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     if (it.t === 'shape') {
       const s = node.querySelector('svg')!;
       const kind = it.s || 'rect';
-      if (s.dataset.s !== kind) {
-        s.dataset.s = kind;
-        s.setAttribute('viewBox', '0 0 100 100');
-        s.replaceChildren(kind === 'ellipse'
-          ? svg('ellipse', { cx: '50', cy: '50', rx: '50', ry: '50', 'vector-effect': 'non-scaling-stroke' })
+      const { w, h } = it;
+      const key = `${kind}|${w}|${h}|${it.sw}|${it.ds}`;
+      if (s.dataset.k !== key) {
+        s.dataset.k = key;
+        s.setAttribute('viewBox', `0 0 ${w} ${h}`);
+        const sw = LINE_W[it.sw || 2] || 2;
+        const shape = kind === 'ellipse'
+          ? svg('ellipse', { cx: String(w / 2), cy: String(h / 2), rx: String(w / 2), ry: String(h / 2) })
           : kind === 'diamond'
-            ? svg('path', { d: 'M50 0L100 50L50 100L0 50Z', 'vector-effect': 'non-scaling-stroke' })
-            : svg('rect', { x: '0', y: '0', width: '100', height: '100', rx: '2', 'vector-effect': 'non-scaling-stroke' }));
+            ? svg('path', { d: `M${w / 2} 0L${w} ${h / 2}L${w / 2} ${h}L0 ${h / 2}Z` })
+            : svg('rect', { x: '0', y: '0', width: String(w), height: String(h), rx: '2' });
+        shape.setAttribute('stroke-width', String(sw));
+        if (it.ds) shape.setAttribute('stroke-dasharray', it.ds === 'dash' ? `${sw * 4 + 2} ${sw * 3 + 3}` : `0 ${sw * 2.5 + 2}`);
+        s.replaceChildren(shape);
       }
     }
     if (it.t === 'image') {
@@ -504,21 +644,17 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       if (it.src && img.getAttribute('src') !== it.src) img.src = it.src;
     }
     if (it.t === 'stroke') {
-      const d = strokePath(it.pts || [0, 0]);
-      for (const p of node.querySelectorAll('path')) p.setAttribute('d', d);
+      const key = `${it.pts?.length}|${it.sw}|${it.hl}|${it.pts?.[0]}|${it.pts?.[it.pts.length - 1]}`;
+      if (node.dataset.k !== key) {
+        node.dataset.k = key;
+        const pts = it.pts?.length ? it.pts : [0, 0];
+        node.querySelector('.hit')!.setAttribute('d', strokePath(pts));
+        node.querySelector('.line')!.setAttribute('d', inkPath(pts, it.pr, it.sw || 2, !!it.hl, true));
+      }
+      node.classList.toggle('is-marker', !!it.hl);
     }
-    if (it.t === 'arrow') {
-      const [a, b] = arrowEnds(it);
-      const ang = Math.atan2(b.y - a.y, b.x - a.x);
-      const len = Math.hypot(b.x - a.x, b.y - a.y);
-      const head = Math.min(14, len / 2);
-      const h1 = { x: b.x - head * Math.cos(ang - 0.45), y: b.y - head * Math.sin(ang - 0.45) };
-      const h2 = { x: b.x - head * Math.cos(ang + 0.45), y: b.y - head * Math.sin(ang + 0.45) };
-      const r = (p: Pt) => `${round(p.x)} ${round(p.y)}`;
-      const [line, hit] = [node.querySelector('.line')!, node.querySelector('.hit')!];
-      line.setAttribute('d', `M${r(a)}L${r(b)}M${r(h1)}L${r(b)}L${r(h2)}`);
-      hit.setAttribute('d', `M${r(a)}L${r(b)}`);
-    }
+    if (it.t === 'arrow') drawArrow(node, it);
+    if (it.t === 'embed') drawEmbed(node, it);
     if (VOTABLE.has(it.t)) drawVotes(node, it);
   }
 
@@ -538,20 +674,114 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     }
   }
 
-  function arrowEnds(it: Item): [Pt, Pt] {
+  function drawArrow(node: HTMLElement, it: Item) {
+    const p = arrowPoints(it);
+    const w = LINE_W[it.sw || 2] || 2;
+    const r = (q: Pt) => `${round(q.x)} ${round(q.y)}`;
+    let body: string;
+    // Richtung an den Enden (für die Spitzen).
+    let endFrom: Pt, startFrom: Pt;
+    if (it.cv && p.length > 2) {
+      const segs = curveSegments(p);
+      body = `M${r(p[0])}` + segs.map(([, c1, c2, e]) => `C${r(c1)} ${r(c2)} ${r(e)}`).join('');
+      endFrom = segs[segs.length - 1][2];
+      startFrom = segs[0][1];
+      if (Math.hypot(endFrom.x - p[p.length - 1].x, endFrom.y - p[p.length - 1].y) < 0.5) endFrom = p[p.length - 2];
+      if (Math.hypot(startFrom.x - p[0].x, startFrom.y - p[0].y) < 0.5) startFrom = p[1];
+    } else {
+      body = `M${r(p[0])}` + p.slice(1).map(q => `L${r(q)}`).join('');
+      endFrom = p[p.length - 2];
+      startFrom = p[1];
+    }
+    const headAt = (tip: Pt, from: Pt) => {
+      const len = Math.hypot(tip.x - from.x, tip.y - from.y);
+      if (len < 0.5) return '';
+      const ang = Math.atan2(tip.y - from.y, tip.x - from.x);
+      const size = Math.min(10 + w * 2, len * 0.8);
+      const h1 = { x: tip.x - size * Math.cos(ang - 0.45), y: tip.y - size * Math.sin(ang - 0.45) };
+      const h2 = { x: tip.x - size * Math.cos(ang + 0.45), y: tip.y - size * Math.sin(ang + 0.45) };
+      return `M${r(h1)}L${r(tip)}L${r(h2)}`;
+    };
+    const heads = (it.hd === 'none' ? '' : headAt(p[p.length - 1], endFrom)) + (it.hd === 'both' ? headAt(p[0], startFrom) : '');
+    const line = node.querySelector('.line')!, head = node.querySelector('.head')!;
+    line.setAttribute('d', body);
+    head.setAttribute('d', heads);
+    node.querySelector('.hit')!.setAttribute('d', body);
+    node.style.setProperty('--sw', `${w}px`);
+    line.setAttribute('stroke-dasharray', it.ds === 'dash' ? `${round(w * 4 + 2)} ${round(w * 3 + 3)}` : it.ds === 'dot' ? `0 ${round(w * 2.5 + 2)}` : '');
+  }
+
+  // ── Videos ────────────────────────────────────────────────────────────────
+
+  /** Läuft (Player geladen); `liveEmbed` nimmt gerade Klicks an. */
+  const playing = new Set<string>();
+  let liveEmbed: string | null = null;
+
+  function drawEmbed(node: HTMLElement, it: Item) {
+    const v = it.src ? videoOf(it.src) : null;
+    const box = node.querySelector<HTMLElement>('.b-embed-box')!;
+    node.classList.toggle('is-live', liveEmbed === it.id);
+    if (!v) { box.replaceChildren(); return; }
+    const key = `${playing.has(it.id) ? 'play' : 'thumb'}|${v.kind}|${v.id}|${v.start || 0}`;
+    if (box.dataset.k === key) return;
+    box.dataset.k = key;
+    if (playing.has(it.id)) {
+      box.replaceChildren(el('iframe', {
+        src: videoEmbed(v, true), allow: 'autoplay; fullscreen; picture-in-picture; encrypted-media',
+        allowfullscreen: '', referrerpolicy: 'strict-origin-when-cross-origin', title: v.kind === 'youtube' ? 'YouTube' : 'Vimeo',
+      }));
+      return;
+    }
+    const play = el('button', { type: 'button', class: 'b-play', 'data-play': '', 'aria-label': 'Abspielen', title: 'Abspielen' });
+    play.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4.5v11l9-5.5z"/></svg>';
+    const thumb = el('img', { alt: '', draggable: 'false', class: 'b-thumb' }) as HTMLImageElement;
+    if (v.kind === 'youtube') thumb.src = `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`;
+    else thumb.hidden = true;
+    box.replaceChildren(thumb, el('span', { class: 'b-embed-kind' }, v.kind === 'youtube' ? 'YouTube' : 'Vimeo'), play);
+  }
+
+  function stopEmbed(id: string) {
+    playing.delete(id);
+    if (liveEmbed === id) liveEmbed = null;
+    draw(id);
+    renderCtx();
+  }
+
+  function playEmbed(id: string) {
+    playing.add(id);
+    liveEmbed = id;
+    draw(id);
+    renderCtx();
+  }
+
+  function releaseEmbed() {
+    if (!liveEmbed) return;
+    const id = liveEmbed;
+    liveEmbed = null;
+    if (cache.has(id)) draw(id);
+  }
+
+  /** Anfang, Wendepunkte, Ende – Enden an festgemachten Elementen auf deren Rand. */
+  function arrowPoints(it: Item): Pt[] {
     const fromIt = it.from ? cache.get(it.from) : undefined;
     const toIt = it.to ? cache.get(it.to) : undefined;
     const fromBox = fromIt && fromIt.t !== 'arrow' ? bounds(fromIt) : null;
     const toBox = toIt && toIt.t !== 'arrow' ? bounds(toIt) : null;
+    const mids = pairs(it.wp);
     let a: Pt = fromBox ? center(fromBox) : { x: it.fx ?? 0, y: it.fy ?? 0 };
     let b: Pt = toBox ? center(toBox) : { x: it.tx ?? 0, y: it.ty ?? 0 };
-    if (fromBox) a = clipToBox(fromBox, b);
-    if (toBox) b = clipToBox(toBox, a);
-    return [a, b];
+    if (fromBox) a = clipToBox(fromBox, mids[0] ?? b);
+    if (toBox) b = clipToBox(toBox, mids[mids.length - 1] ?? a);
+    return [a, ...mids, b];
+  }
+
+  function arrowEnds(it: Item): [Pt, Pt] {
+    const p = arrowPoints(it);
+    return [p[0], p[p.length - 1]];
   }
 
   function bounds(it: Item): Box {
-    if (it.t === 'arrow') { const [a, b] = arrowEnds(it); return rectOf(a, b); }
+    if (it.t === 'arrow') return union(arrowPoints(it).map(q => ({ x: q.x, y: q.y, w: 0, h: 0 })))!;
     if (it.t === 'text') {
       const h = nodes.get(it.id)?.offsetHeight;
       return { x: it.x, y: it.y, w: it.w, h: h || it.h };
@@ -563,6 +793,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
 
   let selected = new Set<string>();
   let drag: Drag | null = null;
+  let poly: Poly | null = null;
 
   function select(ids: Iterable<string>) {
     for (const id of selected) nodes.get(id)?.classList.remove('is-sel');
@@ -579,39 +810,117 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     const box = union(list.map(bounds));
     const show = (n: HTMLElement, on: boolean) => { n.style.display = on ? '' : 'none'; };
     const arrowOnly = !!single && single.t === 'arrow';
+    const lineEdit = arrowOnly && canEdit && !poly;
     show(selBox, !!box && !arrowOnly && !editing);
     show(handle, !!single && canEdit && RESIZABLE.has(single.t) && !editing && drag?.kind !== 'move');
-    show(endA, arrowOnly && canEdit);
-    show(endB, arrowOnly && canEdit);
+    show(endA, lineEdit);
+    show(endB, lineEdit);
     if (box) {
       const a = toScreen(box), z = view.z;
       Object.assign(selBox.style, { transform: `translate(${a.x - 4}px, ${a.y - 4}px)`, width: `${box.w * z + 8}px`, height: `${box.h * z + 8}px` });
       handle.style.transform = `translate(${a.x + box.w * z - 2}px, ${a.y + box.h * z - 2}px)`;
     }
-    if (arrowOnly) {
+    if (lineEdit) {
       const [p1, p2] = arrowEnds(single!).map(toScreen);
       endA.style.transform = `translate(${p1.x - 6}px, ${p1.y - 6}px)`;
       endB.style.transform = `translate(${p2.x - 6}px, ${p2.y - 6}px)`;
     }
-    // Leiste zur Auswahl: über dem Rahmen, sonst darunter.
-    const ctxOn = !!box && canEdit && !drag && !editing && ctxBar.childElementCount > 0 && !voteActive();
+    paintWaypoints(lineEdit && drag?.kind !== 'move' ? single : null);
+    // Leiste zur Auswahl: über dem Rahmen, sonst darunter. Ohne Auswahl: Stil des Werkzeugs über den Werkzeugen.
+    const toolMode = !box && STYLED_TOOLS.has(tool);
+    const ctxOn = canEdit && !editing && ctxBar.childElementCount > 0 && !voteActive() && (box ? !drag : toolMode && (!drag || drag.kind === 'pan'));
     show(ctxBar, ctxOn);
-    if (ctxOn && box) {
-      const a = toScreen(box), b = toScreen({ x: box.x + box.w, y: box.y + box.h });
+    show(styleBar, ctxOn && styleOpen && styleBar.childElementCount > 0);
+    if (ctxOn) {
       const w = ctxBar.offsetWidth, h = ctxBar.offsetHeight;
-      let top = a.y - h - 14;
-      if (top < 8) top = b.y + 14;
-      top = clamp(top, 8, root.clientHeight - h - 76);
-      const left = clamp((a.x + b.x) / 2 - w / 2, 8, root.clientWidth - w - 8);
+      let top: number, left: number;
+      if (box) {
+        const a = toScreen(box), b = toScreen({ x: box.x + box.w, y: box.y + box.h });
+        top = a.y - h - 14;
+        if (top < 8) top = b.y + 14;
+        top = clamp(top, 8, root.clientHeight - h - 76);
+        left = clamp((a.x + b.x) / 2 - w / 2, 8, root.clientWidth - w - 8);
+      } else {
+        const tr = tools.getBoundingClientRect(), rr = root.getBoundingClientRect();
+        top = tr.top - rr.top - h - 8;
+        left = clamp(tr.left - rr.left + tr.width / 2 - w / 2, 8, root.clientWidth - w - 8);
+      }
       ctxBar.style.transform = `translate(${left}px, ${top}px)`;
+      if (styleOpen && styleBar.childElementCount) {
+        const sw = styleBar.offsetWidth, sh = styleBar.offsetHeight;
+        let st = top - sh - 6;
+        if (st < 8) st = top + h + 6;
+        styleBar.style.transform = `translate(${clamp(left + w - sw, 8, root.clientWidth - sw - 8)}px, ${st}px)`;
+      }
     }
     paintCursors();
+  }
+
+  // Griffe für Wendepunkte (ziehen, doppelt tippen entfernt) und dazwischen (ziehen fügt einen ein).
+  const wpPool: HTMLElement[] = [];
+  const midPool: HTMLElement[] = [];
+  function placeHandles(pool: HTMLElement[], cls: string, kind: string, list: { p: Pt; i: number }[]) {
+    while (pool.length < list.length) {
+      const n = el('div', { class: `b-handle ${cls}`, 'data-handle': kind });
+      wpLayer.append(n);
+      pool.push(n);
+    }
+    pool.forEach((n, j) => {
+      const h = list[j];
+      n.style.display = h ? '' : 'none';
+      if (!h) return;
+      n.dataset.i = String(h.i);
+      const s = toScreen(h.p);
+      n.style.transform = `translate(${s.x}px, ${s.y}px)`;
+    });
+  }
+  function paintWaypoints(it: Item | null) {
+    const pts = it ? arrowPoints(it) : [];
+    const wps = pts.slice(1, -1).map((p, i) => ({ p, i }));
+    const mids: { p: Pt; i: number }[] = [];
+    if (it) {
+      const segs = it.cv && pts.length > 2 ? curveSegments(pts) : null;
+      for (let k = 0; k < pts.length - 1; k++) {
+        const a = toScreen(pts[k]), b = toScreen(pts[k + 1]);
+        if (Math.hypot(b.x - a.x, b.y - a.y) < 40) continue;
+        mids.push({ p: segs ? bezierAt(segs[k], 0.5) : { x: (pts[k].x + pts[k + 1].x) / 2, y: (pts[k].y + pts[k + 1].y) / 2 }, i: k });
+      }
+    }
+    placeHandles(wpPool, 'b-wp', 'wp', wps);
+    placeHandles(midPool, 'b-mid', 'mid', mids);
   }
 
   // ── Leiste zur Auswahl ────────────────────────────────────────────────────
 
   let lastNote = store.get('md:board:note') || 'yellow';
   let lastInk = store.get('md:board:ink') || 'fg';
+  let lastWidth = Number(store.get('md:board:sw')) || 2;
+  let lastDash = (store.get('md:board:ds') || undefined) as Item['ds'];
+  let lastCurve = store.get('md:board:cv') === '1';
+  let lastMarker = store.get('md:board:hl') === '1';
+  let styleOpen = false;
+
+  type StyleKey = 'sw' | 'ds' | 'hd' | 'cv' | 'hl';
+  interface StyleOpt { v: string | number | undefined; icon: string; title: string }
+  const STYLE: Record<StyleKey, StyleOpt[]> = {
+    hl: [{ v: undefined, icon: ICON.pencil, title: 'Stift' }, { v: 1, icon: ICON.marker, title: 'Textmarker' }],
+    sw: [{ v: 1, icon: ICON.w1, title: 'Dünn' }, { v: undefined, icon: ICON.w2, title: 'Mittel' }, { v: 3, icon: ICON.w3, title: 'Dick' }],
+    ds: [{ v: undefined, icon: ICON.solid, title: 'Durchgezogen' }, { v: 'dash', icon: ICON.dash, title: 'Gestrichelt' }, { v: 'dot', icon: ICON.dot, title: 'Gepunktet' }],
+    hd: [{ v: 'none', icon: ICON.hdNone, title: 'Ohne Spitze' }, { v: undefined, icon: ICON.hdEnd, title: 'Spitze am Ende' }, { v: 'both', icon: ICON.hdBoth, title: 'Spitzen an beiden Enden' }],
+    cv: [{ v: undefined, icon: ICON.sharp, title: 'Ecken' }, { v: 1, icon: ICON.curve, title: 'Kurve' }],
+  };
+  const STYLE_KEYS: Record<string, StyleKey[]> = {
+    stroke: ['hl', 'sw'], arrow: ['sw', 'ds', 'hd', 'cv'], shape: ['sw', 'ds'],
+    pen: ['hl', 'sw'], line: ['sw', 'ds', 'cv'], 'tool-arrow': ['sw', 'ds', 'cv'], 'tool-shape': ['sw', 'ds'],
+  };
+  const defaults = (): Partial<Item> => ({ sw: lastWidth === 2 ? undefined : lastWidth, ds: lastDash, cv: lastCurve ? 1 : undefined, hl: lastMarker ? 1 : undefined });
+
+  function setDefault(key: StyleKey, v: StyleOpt['v']) {
+    if (key === 'sw') { lastWidth = (v as number) || 2; store.set('md:board:sw', String(lastWidth)); }
+    if (key === 'ds') { lastDash = v as Item['ds']; store.set('md:board:ds', (v as string) || ''); }
+    if (key === 'cv') { lastCurve = !!v; store.set('md:board:cv', v ? '1' : '0'); }
+    if (key === 'hl') { lastMarker = !!v; store.set('md:board:hl', v ? '1' : '0'); }
+  }
 
   function ctxButton(icon: string, title: string, run: () => void, pressed?: boolean): HTMLButtonElement {
     const b = el('button', { type: 'button', title, 'aria-label': title });
@@ -621,25 +930,60 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     return b;
   }
 
+  /** Knöpfe für Strichstärke, Strichart usw. – für Elemente oder (ohne) für neue. */
+  function styleGroups(keys: StyleKey[], targets: Item[]): HTMLElement[] {
+    return keys.map(key => {
+      const fits = targets.filter(t => STYLE_KEYS[t.t]?.includes(key));
+      const cur = new Set<unknown>(targets.length ? fits.map(t => t[key]) : [defaults()[key]]);
+      return el('div', { class: 'b-ctx-group' }, ...STYLE[key].map(opt => ctxButton(opt.icon, opt.title, () => {
+        if (fits.length) patchMany(fits.map(t => [t.id, { [key]: opt.v }]));
+        if (key !== 'hd') setDefault(key, opt.v);
+        renderCtx();
+        paintOverlay();
+      }, cur.size === 1 && cur.has(opt.v))));
+    });
+  }
+
   function renderCtx() {
     ctxBar.replaceChildren();
-    const list = [...selected].map(id => cache.get(id)).filter((i): i is Item => !!i);
-    if (!list.length || !canEdit) return;
-    const notes = list.filter(i => i.t === 'note');
-    const inked = list.filter(i => i.t === 'shape' || i.t === 'arrow' || i.t === 'stroke' || i.t === 'text');
-    const shapes = list.filter(i => i.t === 'shape');
+    styleBar.replaceChildren();
+    if (!canEdit) return;
+    let list = [...selected].map(id => cache.get(id)).filter((i): i is Item => !!i);
     const group = (...kids: HTMLElement[]) => ctxBar.append(el('div', { class: 'b-ctx-group' }, ...kids));
     const swatches = (colors: string[], targets: Item[], fallback: string, ink: boolean) => {
-      const current = new Set(targets.map(t => t.c || fallback));
+      const current = new Set(targets.length ? targets.map(t => t.c || fallback) : [ink ? lastInk : lastNote]);
       return colors.map(c => {
         const b = el('button', { type: 'button', class: `b-sw${ink ? ' ink' : ''}`, 'data-c': c, title: COLOR_NAMES[c], 'aria-label': COLOR_NAMES[c], 'aria-pressed': String(current.size === 1 && current.has(c)) });
         b.addEventListener('click', () => {
           patchMany(targets.map(t => [t.id, { c }]));
           if (ink) { lastInk = c; store.set('md:board:ink', c); } else { lastNote = c; store.set('md:board:note', c); }
+          if (!targets.length) { renderCtx(); paintOverlay(); }
         });
         return b;
       });
     };
+    const styleToggle = (keys: StyleKey[], targets: Item[]) => {
+      if (!keys.length) return;
+      group(ctxButton(ICON.style, 'Strich', () => { styleOpen = !styleOpen; renderCtx(); paintOverlay(); }, styleOpen));
+      styleBar.append(...styleGroups(keys, targets));
+    };
+
+    // Ohne Auswahl: Farbe und Strich für das gewählte Werkzeug (bzw. die Linie, die gerade entsteht).
+    if (!list.length) {
+      if (!STYLED_TOOLS.has(tool)) return;
+      const live = poly ? cache.get(poly.id) : undefined;
+      if (live) list = [live];
+      group(...swatches(INK_COLORS, list, 'fg', true));
+      const keys = live ? STYLE_KEYS.arrow : STYLE_KEYS[tool === 'arrow' || tool === 'shape' ? `tool-${tool}` : tool] || [];
+      if (tool === 'pen') ctxBar.append(...styleGroups(keys, list));
+      else styleToggle(keys, list);
+      if (live) group(ctxButton(ICON.check, 'Fertig (↵)', () => finishPoly()));
+      return;
+    }
+
+    const notes = list.filter(i => i.t === 'note');
+    const inked = list.filter(i => i.t === 'shape' || i.t === 'arrow' || i.t === 'stroke' || i.t === 'text');
+    const shapes = list.filter(i => i.t === 'shape');
     if (notes.length) group(...swatches(NOTE_COLORS, notes, 'yellow', false));
     if (inked.length) group(...swatches(INK_COLORS, inked, 'fg', true));
     if (shapes.length) {
@@ -647,7 +991,17 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       group(...(['rect', 'ellipse', 'diamond'] as const).map(s =>
         ctxButton(ICON[s], { rect: 'Rechteck', ellipse: 'Ellipse', diamond: 'Raute' }[s], () => patchMany(shapes.map(t => [t.id, { s }])), cur.size === 1 && cur.has(s))));
     }
+    const keys = (Object.keys(STYLE) as StyleKey[]).filter(k => list.some(i => STYLE_KEYS[i.t]?.includes(k)));
+    styleToggle(keys, list);
     if (list.length === 1 && list[0].t === 'frame') group(ctxButton(ICON.rename, 'Umbenennen (↵)', () => startEdit(list[0].id)));
+    if (list.length === 1 && list[0].t === 'embed') {
+      const it = list[0];
+      const v = it.src ? videoOf(it.src) : null;
+      const kids: HTMLElement[] = [];
+      if (v) kids.push(ctxButton(ICON.external, v.kind === 'youtube' ? 'Auf YouTube öffnen' : 'Auf Vimeo öffnen', () => window.open(videoUrl(v), '_blank', 'noopener')));
+      if (playing.has(it.id)) kids.push(ctxButton(ICON.stop, 'Video beenden', () => stopEmbed(it.id)));
+      if (kids.length) group(...kids);
+    }
     group(
       ctxButton(ICON.dup, 'Duplizieren (⌘D)', duplicate),
       ctxButton(ICON.front, 'Nach vorne', () => restack(true)),
@@ -663,10 +1017,10 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   for (const [t, label, key] of TOOLS) {
     const b = el('button', { type: 'button', title: `${label} (${key})`, 'aria-label': label, 'data-tool': t });
     b.innerHTML = ICON[t];
-    b.addEventListener('click', () => (t === 'image' ? pickImage() : setTool(t)));
-    toolButtons.set(t, b);
+    b.addEventListener('click', () => (t === 'insert' ? insertMenu(b) : setTool(t)));
+    if (t !== 'insert') toolButtons.set(t, b);
     tools.append(b);
-    if (t === 'hand' || t === 'image') tools.append(el('span', { class: 'b-sep', 'aria-hidden': 'true' }));
+    if (t === 'hand' || t === 'laser' || t === 'insert') tools.append(el('span', { class: `b-sep${t === 'laser' ? ' b-sep-laser' : ''}`, 'aria-hidden': 'true' }));
   }
   const undoBtn = ctxButton(ICON.undo, 'Rückgängig (⌘Z)', () => undo.undo());
   const redoBtn = ctxButton(ICON.redo, 'Wiederholen (⇧⌘Z)', () => undo.redo());
@@ -684,16 +1038,72 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   zoomBar.append(zoomOut, zoomLabel, zoomIn);
 
   function setTool(t: Tool) {
+    closePop();
+    if (poly && t !== 'select') finishPoly();
     tool = t;
+    styleOpen = false;
     for (const [k, b] of toolButtons) b.setAttribute('aria-pressed', String(k === t));
     root.dataset.tool = t;
     if (t !== 'select' && t !== 'hand') select([]);
+    else { renderCtx(); paintOverlay(); }
+    if (t !== 'eraser') eraserRing.style.display = 'none';
   }
-  setTool('select');
+
+  // ── Einfügen: Bild, Foto, Video ───────────────────────────────────────────
+
+  let pop: HTMLElement | null = null;
+  function closePop() { pop?.remove(); pop = null; }
+  const touchDevice = navigator.maxTouchPoints > 0;
+
+  function insertMenu(anchor: HTMLElement) {
+    if (pop) { closePop(); return; }
+    if (!canEdit) return;
+    const entries: [string, string, () => void][] = [[ICON.image, 'Bild', pickImage]];
+    if (touchDevice) entries.push([ICON.camera, 'Foto aufnehmen', () => cameraInput.click()]);
+    entries.push([ICON.video, 'Video', askVideo]);
+    pop = el('div', { class: 'b-pop', role: 'menu' });
+    for (const [icon, label, run] of entries) {
+      const b = el('button', { type: 'button', role: 'menuitem' });
+      b.innerHTML = icon;
+      b.append(el('span', {}, label));
+      b.addEventListener('click', () => { closePop(); run(); });
+      pop.append(b);
+    }
+    root.append(pop);
+    const ar = anchor.getBoundingClientRect(), rr = root.getBoundingClientRect();
+    pop.style.left = `${clamp(ar.left - rr.left + ar.width / 2 - pop.offsetWidth / 2, 8, root.clientWidth - pop.offsetWidth - 8)}px`;
+    pop.style.top = `${ar.top - rr.top - pop.offsetHeight - 8}px`;
+  }
 
   function pickImage() {
     if (!canEdit) return;
     fileInput.click();
+  }
+
+  function askVideo() {
+    const input = el('input', { type: 'url', placeholder: 'YouTube- oder Vimeo-Link', 'aria-label': 'Link', autocomplete: 'off', inputmode: 'url', required: '' }) as HTMLInputElement;
+    const ok = el('button', { type: 'submit', class: 't boxed' }, 'Einbetten');
+    const form = el('form', { class: 'sheet' }, el('div', { class: 'field-line' }, input, ok));
+    const d = dialog('Video einbetten', form);
+    input.addEventListener('input', () => input.setCustomValidity(''));
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const v = videoOf(input.value);
+      if (!v) { input.setCustomValidity('Kein YouTube- oder Vimeo-Link'); input.reportValidity(); return; }
+      d.close();
+      placeVideo(input.value, viewCenter());
+    });
+    setTimeout(() => input.focus(), 30);
+  }
+
+  function placeVideo(url: string, at: Pt): boolean {
+    const v = videoOf(url);
+    if (!v || !canEdit) return false;
+    const w = 480, h = 270;
+    const id = addItem({ t: 'embed', x: round(at.x - w / 2), y: round(at.y - h / 2), w, h, z: topZ(false), src: videoUrl(v) });
+    flushNow();
+    if (id) { setTool('select'); select([id]); }
+    return true;
   }
 
   // ── Anlegen, Ändern, Löschen ──────────────────────────────────────────────
@@ -757,7 +1167,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
         const { id, ...rest } = it;
         const copy: Omit<Item, 'id'> = { ...rest, x: round(it.x + dx), y: round(it.y + dy), z: it.t === 'frame' ? zf++ : zi++ };
         if (it.t === 'arrow') {
-          Object.assign(copy, { fx: round((it.fx ?? 0) + dx), fy: round((it.fy ?? 0) + dy), tx: round((it.tx ?? 0) + dx), ty: round((it.ty ?? 0) + dy) });
+          Object.assign(copy, shiftArrow(it, dx, dy));
           copy.from = it.from ? ids.get(it.from) : undefined;
           copy.to = it.to ? ids.get(it.to) : undefined;
         }
@@ -852,14 +1262,15 @@ export function mountBoard(o: BoardOptions): BoardHandle {
 
   // ── Zeiger ────────────────────────────────────────────────────────────────
 
+  /** Finger auf der Fläche (für Zwei-Finger-Zoom). Stift und Maus zählen nicht. */
   const pointers = new Map<number, Pt>();
   let pinch: { d: number; mid: Pt; z: number; x: number; y: number } | null = null;
+  /** Zeiger, dem der laufende Zug gehört (andere Finger, Handballen: egal). */
+  let owner: { id: number; pen: boolean } | null = null;
   let lastTap = { t: 0, x: 0, y: 0, id: '' };
   let spaceDown = false;
   let lastPointer: Pt | null = null;
   let hoverTarget: string | null = null;
-  /** Mit Apple Pencil o. ä. gezeichnet: Finger zeichnen dann nicht (Handballen). */
-  let penUsed = false;
 
   const itemIdAt = (target: EventTarget | null): string | null => {
     const n = (target as Element | null)?.closest?.('[data-id]') as HTMLElement | null;
@@ -884,44 +1295,348 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     if (id) nodes.get(id)?.classList.add('is-target');
   }
 
+  /** Stil für neue Linien/Pfeile aus den zuletzt gewählten Einstellungen. */
+  const lineStyle = (line: boolean): Partial<Item> => ({
+    c: lastInk, hd: line ? 'none' : undefined, sw: lastWidth === 2 ? undefined : lastWidth, ds: lastDash, cv: lastCurve ? 1 : undefined,
+  });
+
+  // Linie/Pfeil Punkt für Punkt: Klick setzt einen Wendepunkt, Klick auf den
+  // letzten Punkt (bzw. Doppelklick, ↵, Esc, ✓) beendet, Klick auf ein
+  // Element macht das Ende dort fest.
+
+  function startPoly(start: Pt, from: string | null, line: boolean) {
+    const id = addItem({ t: 'arrow', x: 0, y: 0, w: 0, h: 0, z: topZ(false), fx: round(start.x), fy: round(start.y), tx: round(start.x), ty: round(start.y), from: from || undefined, ...lineStyle(line) });
+    if (!id) return;
+    poly = { id, fixed: [start] };
+    flushNow();
+    renderCtx();
+    paintOverlay();
+  }
+
+  function polyAim(p: Pt, shift: boolean): Pt {
+    const last = poly!.fixed[poly!.fixed.length - 1];
+    return shift ? snapAngle(last, p) : p;
+  }
+
+  function polyPreview(p: Pt, shift: boolean) {
+    if (!poly) return;
+    const it = cache.get(poly.id);
+    if (!it) { poly = null; return; }
+    const q = polyAim(p, shift);
+    const to = connectableAt(q, it.from);
+    setHover(to);
+    patch(poly.id, { tx: round(q.x), ty: round(q.y), to: to || undefined });
+  }
+
+  function polyClick(p: Pt, shift: boolean) {
+    if (!poly) return;
+    const it = cache.get(poly.id);
+    if (!it) { poly = null; return; }
+    const last = poly.fixed[poly.fixed.length - 1];
+    const q = polyAim(p, shift);
+    if (Math.hypot(q.x - last.x, q.y - last.y) * view.z < 10) { finishPoly(); return; }
+    const to = connectableAt(q, it.from);
+    if (to) {
+      patch(poly.id, { wp: poly.fixed.length > 1 ? flat(poly.fixed.slice(1)) : undefined, tx: round(q.x), ty: round(q.y), to });
+      poly.fixed.push(q);
+      finishPoly(true);
+      return;
+    }
+    poly.fixed.push(q);
+    patch(poly.id, { wp: flat(poly.fixed.slice(1)), tx: round(q.x), ty: round(q.y), to: undefined });
+  }
+
+  function finishPoly(attached = false) {
+    if (!poly) return;
+    const { id, fixed } = poly;
+    poly = null;
+    setHover(null);
+    flushNow();
+    const it = cache.get(id);
+    if (it && !attached) {
+      if (fixed.length < 2) tx(() => items.delete(id));
+      else {
+        const end = fixed[fixed.length - 1];
+        patch(id, { wp: fixed.length > 2 ? flat(fixed.slice(1, -1)) : undefined, tx: round(end.x), ty: round(end.y), to: undefined });
+      }
+    }
+    undo.stopCapturing();
+    setTool('select');
+    flushNow();
+    if (cache.has(id)) select([id]);
+  }
+
+  // ── Radierer ──────────────────────────────────────────────────────────────
+
+  /** Radiert entlang a→b: Striche werden zerschnitten, alles andere ganz entfernt (beim Loslassen). */
+  function eraseAlong(a: Pt, b: Pt, d: Extract<Drag, { kind: 'erase' }>) {
+    const r = ERASER_R / view.z;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.max(1, Math.ceil(len / (r / 2)));
+    const samples: Pt[] = [];
+    for (let i = 0; i <= n; i++) samples.push({ x: a.x + (b.x - a.x) * (i / n), y: a.y + (b.y - a.y) * (i / n) });
+    const reach = rectOf(a, b);
+    const cuts: [Item, { pts: number[]; pr: number[] | null }[]][] = [];
+    for (const it of cache.values()) {
+      if (it.t === 'frame' || d.doomed.has(it.id)) continue;
+      const half = it.t === 'stroke' ? (it.hl ? MARKER_W : PEN_W)[it.sw || 2] / 2 : it.t === 'arrow' ? (LINE_W[it.sw || 2] || 2) / 2 : 0;
+      const bx = bounds(it);
+      const pad = r + half;
+      if (!overlaps({ x: bx.x - pad, y: bx.y - pad, w: bx.w + pad * 2, h: bx.h + pad * 2 }, reach)) continue;
+      if (it.t === 'stroke') {
+        const runs = cutStroke(it, samples, r + half);
+        if (runs) cuts.push([it, runs]);
+      } else if (hitsWhole(it, samples, pad)) {
+        d.doomed.add(it.id);
+        nodes.get(it.id)?.classList.add('is-doomed');
+      }
+    }
+    if (!cuts.length) return;
+    tx(() => {
+      for (const [it, runs] of cuts) {
+        items.delete(it.id);
+        for (const run of runs) {
+          let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+          for (let i = 0; i < run.pts.length; i += 2) { x1 = Math.min(x1, run.pts[i]); x2 = Math.max(x2, run.pts[i]); y1 = Math.min(y1, run.pts[i + 1]); y2 = Math.max(y2, run.pts[i + 1]); }
+          const fields: Omit<Item, 'id'> = {
+            t: 'stroke', x: round(x1), y: round(y1), w: Math.max(1, round(x2 - x1)), h: Math.max(1, round(y2 - y1)), z: it.z, c: it.c,
+            pts: run.pts.map((v, i) => round(v - (i % 2 ? y1 : x1))), pr: run.pr || undefined, sw: it.sw, hl: it.hl,
+          };
+          const m = new Y.Map<unknown>();
+          for (const [k, v] of Object.entries(fields)) if (v !== undefined) m.set(k, v);
+          items.set(rid(), m);
+        }
+      }
+    });
+    flushNow();
+  }
+
+  /** Strich ohne die Punkte im Radius: übrige Stücke (absolut), null = nicht getroffen. */
+  function cutStroke(it: Item, samples: Pt[], rr: number): { pts: number[]; pr: number[] | null }[] | null {
+    const src = it.pts || [];
+    const pr = it.pr?.length ? it.pr : null;
+    const P: Pt[] = [];
+    for (let i = 0; i + 1 < src.length; i += 2) P.push({ x: it.x + src[i], y: it.y + src[i + 1] });
+    if (!P.length) return null;
+    const near = (q: Pt) => samples.some(s => Math.hypot(s.x - q.x, s.y - q.y) <= rr);
+    const segNear = (a: Pt, b: Pt) => samples.some(s => segDist(s, a, b) <= rr * 1.5);
+    if (P.length === 1 ? !near(P[0]) : !P.some((q, i) => i < P.length - 1 && segNear(q, P[i + 1]))) return null;
+    // Getroffene Stücke fein unterteilen, damit der Schnitt dem Radierer folgt.
+    const dense: Pt[] = [], dpr: number[] = [];
+    const step = Math.max(rr / 3, 0.5);
+    for (let i = 0; i < P.length; i++) {
+      dense.push(P[i]); dpr.push(pr?.[i] ?? 0.5);
+      const nb = P[i + 1];
+      if (!nb) continue;
+      const len = Math.hypot(nb.x - P[i].x, nb.y - P[i].y);
+      if (len <= step || !segNear(P[i], nb)) continue;
+      const k = Math.ceil(len / step);
+      for (let j = 1; j < k; j++) {
+        dense.push({ x: P[i].x + (nb.x - P[i].x) * (j / k), y: P[i].y + (nb.y - P[i].y) * (j / k) });
+        dpr.push((pr?.[i] ?? 0.5) + ((pr?.[i + 1] ?? 0.5) - (pr?.[i] ?? 0.5)) * (j / k));
+      }
+    }
+    const runs: { pts: number[]; pr: number[] | null }[] = [];
+    let cur: { pts: number[]; pr: number[] | null } | null = null;
+    let removed = false;
+    dense.forEach((q, i) => {
+      if (near(q)) { removed = true; if (cur && cur.pts.length >= 4) runs.push(cur); cur = null; return; }
+      cur ??= { pts: [], pr: pr ? [] : null };
+      cur.pts.push(round(q.x), round(q.y));
+      cur.pr?.push(Math.round(dpr[i] * 100) / 100);
+    });
+    if (cur && (cur as { pts: number[] }).pts.length >= 4) runs.push(cur);
+    return removed ? runs : null;
+  }
+
+  function hitsWhole(it: Item, samples: Pt[], pad: number): boolean {
+    if (it.t === 'arrow') {
+      let p = arrowPoints(it);
+      if (it.cv && p.length > 2) p = [p[0], ...curveSegments(p).flatMap(seg => [0.25, 0.5, 0.75, 1].map(t => bezierAt(seg, t)))];
+      return samples.some(s => p.some((q, i) => i < p.length - 1 && segDist(s, q, p[i + 1]) <= pad));
+    }
+    const b = bounds(it);
+    return samples.some(s => contains({ x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 }, s));
+  }
+
+  function endErase(d: Extract<Drag, { kind: 'erase' }>, commit: boolean) {
+    for (const id of d.doomed) nodes.get(id)?.classList.remove('is-doomed');
+    if (commit && d.doomed.size) {
+      const ids = new Set([...d.doomed].filter(id => cache.has(id)));
+      for (const it of cache.values()) if (it.t === 'arrow' && ((it.from && ids.has(it.from)) || (it.to && ids.has(it.to)))) ids.add(it.id);
+      tx(() => { for (const id of ids) items.delete(id); });
+      select([...selected].filter(id => !ids.has(id)));
+    }
+    undo.stopCapturing();
+  }
+
+  // ── Spuren: Laserpointer (auch von anderen) und Radierer ──────────────────
+
+  interface Trail { pts: { x: number; y: number; t: number }[]; path: SVGPathElement; ms: number; size: number }
+  const trailSvg = svg('svg', { class: 'b-trails' });
+  overlay.prepend(trailSvg);
+  const trails = new Map<string, Trail>();
+  let trailReq = 0;
+
+  function trail(key: string, cls: string, ms: number, size: number): Trail {
+    let t = trails.get(key);
+    if (!t) {
+      t = { pts: [], path: svg('path', { class: cls }) as SVGPathElement, ms, size };
+      trailSvg.append(t.path);
+      trails.set(key, t);
+    }
+    return t;
+  }
+
+  function trailPush(key: string, cls: string, p: Pt, ms: number, size: number) {
+    trail(key, cls, ms, size).pts.push({ x: p.x, y: p.y, t: performance.now() });
+    if (!trailReq) trailReq = requestAnimationFrame(paintTrails);
+  }
+
+  function paintTrails() {
+    trailReq = 0;
+    const now = performance.now();
+    let alive = false;
+    for (const [key, t] of trails) {
+      t.pts = t.pts.filter(q => now - q.t < t.ms);
+      if (!t.pts.length) { t.path.remove(); trails.delete(key); continue; }
+      alive = true;
+      const input = t.pts.map(q => { const s = toScreen(q); return [s.x, s.y, 1 - (now - q.t) / t.ms]; });
+      if (input.length === 1) input.push([input[0][0] + 0.01, input[0][1], input[0][2]]);
+      t.path.setAttribute('d', outlinePath(getStroke(input, { size: t.size, thinning: 0.9, smoothing: 0.5, streamline: 0.4, simulatePressure: false, start: { taper: false, cap: true }, end: { cap: true } })));
+    }
+    if (alive) trailReq = requestAnimationFrame(paintTrails);
+  }
+
+  let laserSent = 0;
+  function sendLaser(force = false) {
+    const now = performance.now();
+    if (!force && now - laserSent < 40) return;
+    laserSent = now;
+    const t = trails.get('laser');
+    publish('laser', t ? t.pts.flatMap(q => [round(q.x), round(q.y), Math.round(now - q.t)]) : null);
+  }
+
+  // Eigener Kreis um den Radierer.
+  const eraserRing = el('div', { class: 'b-eraser' });
+  overlay.append(eraserRing);
+  function placeRing(sp: Pt | null) {
+    const on = !!sp && tool === 'eraser' && canEdit;
+    eraserRing.style.display = on ? 'block' : 'none';
+    if (on) eraserRing.style.transform = `translate(${sp!.x - ERASER_R}px, ${sp!.y - ERASER_R}px)`;
+  }
+
+  // ── Stift-Modus ───────────────────────────────────────────────────────────
+
+  const PEN_KEY = 'md:board:pen';
+  let penMode = store.get(PEN_KEY) === '1';
+  const penBtn = ctxButton(ICON.penmode, 'Nur der Stift zeichnet', () => setPenMode(!penMode));
+  penBtn.classList.add('b-penmode');
+  const penSep = el('span', { class: 'b-sep', 'aria-hidden': 'true' });
+  tools.append(penSep, penBtn);
+  function setPenMode(on: boolean, auto = false) {
+    penMode = on;
+    if (!auto || store.get(PEN_KEY) === null) store.set(PEN_KEY, on ? '1' : '0');
+    syncPenBtn();
+    if (auto) o.toast('Stift-Modus: Finger verschieben, der Stift zeichnet.');
+  }
+  function syncPenBtn() {
+    const seen = store.get(PEN_KEY) !== null;
+    penBtn.hidden = penSep.hidden = !seen;
+    penBtn.setAttribute('aria-pressed', String(penMode));
+  }
+  syncPenBtn();
+
+  // ── Zeiger: Ereignisse ────────────────────────────────────────────────────
+
+  const startPan = (sp: Pt, tapId: string | null) => {
+    drag = { kind: 'pan', sx: sp.x, sy: sp.y, vx: view.x, vy: view.y, moved: false, tapId };
+    root.classList.add('is-panning');
+  };
+
+  function activateEmbed(id: string) {
+    if (playing.has(id)) { liveEmbed = id; draw(id); } else playEmbed(id);
+  }
+
   root.addEventListener('pointerdown', e => {
     const target = e.target as HTMLElement;
-    if (target.closest('.b-tools, .b-zoom, .b-ctx, .b-follow')) return;
+    if (target.closest('.b-tools, .b-zoom, .b-ctx, .b-follow, .b-pop')) return;
     if (editing && target.closest('.is-editing')) return;
     if (editing) endEdit();
+    if (liveEmbed && itemIdAt(target) !== liveEmbed) releaseEmbed();
+    closePop();
     if (e.button === 2) return;
+    const touch = e.pointerType === 'touch';
+    const pen = e.pointerType === 'pen';
+    // Erster Strich mit Apple Pencil o. ä.: Stift-Modus an (außer schon bewusst aus).
+    if (pen && !penMode && store.get(PEN_KEY) === null) setPenMode(true, true);
+    // Handballen beim Zeichnen mit dem Stift: ignorieren.
+    if (touch && penMode && owner?.pen) { e.preventDefault(); return; }
     // Fokus steuern wir selbst (sonst nimmt das Board ihn einer gerade geöffneten Notiz weg).
     e.preventDefault();
     viewed = true;
     root.focus({ preventScroll: true });
     const sp = local2(e.clientX, e.clientY);
-    pointers.set(e.pointerId, sp);
     try { root.setPointerCapture(e.pointerId); } catch { /* egal */ }
 
-    if (pointers.size === 2) {
-      // Zwei Finger: Zoomen und Verschieben. Was der erste Finger begonnen hat, fällt weg.
-      if (drag?.kind === 'stroke') drag.node.remove();
-      drag = null;
-      const [a, b] = [...pointers.values()];
-      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, z: view.z, x: view.x, y: view.y };
-      marquee.style.display = 'none';
-      return;
+    if (touch) {
+      pointers.set(e.pointerId, sp);
+      if (pointers.size === 2) {
+        // Zwei Finger: Zoomen und Verschieben. Was der erste Finger begonnen hat, fällt weg.
+        if (drag?.kind === 'stroke') drag.node.remove();
+        if (drag?.kind === 'erase') endErase(drag, false);
+        drag = null;
+        owner = null;
+        const [a, b] = [...pointers.values()];
+        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, z: view.z, x: view.x, y: view.y };
+        marquee.style.display = 'none';
+        placeRing(null);
+        return;
+      }
+      if (pointers.size > 2) return;
     }
-    if (pointers.size > 2) return;
+    if (drag && owner && owner.id !== e.pointerId) return;
+    owner = { id: e.pointerId, pen };
 
     const p = toWorld(sp);
     const handleKind = target.closest<HTMLElement>('[data-handle]')?.dataset.handle;
+    const handleIndex = Number(target.closest<HTMLElement>('[data-handle]')?.dataset.i);
     const hitId = itemIdAt(target);
-    const touch = e.pointerType === 'touch';
+    const hit = hitId ? cache.get(hitId) : undefined;
 
     // Doppelt tippen/klicken: Text bearbeiten oder neue Notiz.
     const now = performance.now();
     const double = now - lastTap.t < 380 && Math.hypot(sp.x - lastTap.x, sp.y - lastTap.y) < 14 && (hitId || '') === lastTap.id;
     lastTap = { t: now, x: sp.x, y: sp.y, id: hitId || '' };
 
-    if (e.button === 1 || spaceDown || tool === 'hand' || !canEdit) {
-      drag = { kind: 'pan', sx: sp.x, sy: sp.y, vx: view.x, vy: view.y, moved: false, tapId: hitId };
-      root.classList.add('is-panning');
+    if (e.button === 1 || spaceDown || tool === 'hand' || !canEdit) { startPan(sp, hitId); return; }
+
+    // Stift-Modus: Finger verschieben nur (Tippen wählt aus, doppelt tippen bearbeitet).
+    if (touch && penMode) {
+      if (hitId && target.closest('[data-play]')) { select([hitId]); activateEmbed(hitId); owner = null; return; }
+      if (double && hit && TEXTUAL.has(hit.t)) { owner = null; startEdit(hitId!, false); return; }
+      if (double && hit?.t === 'embed') { owner = null; activateEmbed(hit.id); return; }
+      startPan(sp, hitId);
+      return;
+    }
+
+    // Finger: Ziehen verschiebt, Tippen setzt den nächsten Punkt.
+    if (poly && touch) { startPan(sp, null); if (drag?.kind === 'pan') drag.tapPoly = true; return; }
+    if (poly) { polyClick(p, e.shiftKey); owner = null; return; }
+
+    // Seitentaste am Stift (Radier-Ende): radieren, egal welches Werkzeug.
+    if ((pen && e.buttons & 32) || tool === 'eraser') {
+      drag = { kind: 'erase', last: p, doomed: new Set() };
+      undo.stopCapturing();
+      eraseAlong(p, p, drag);
+      placeRing(sp);
+      trailPush('erase', 'b-trail-erase', p, 200, ERASER_R * 2);
+      return;
+    }
+    if (tool === 'laser') {
+      drag = { kind: 'laser' };
+      trailPush('laser', 'b-trail-laser', p, LASER_MS, 7);
+      sendLaser(true);
       return;
     }
 
@@ -934,6 +1649,27 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     if ((handleKind === 'from' || handleKind === 'to') && selected.size === 1) {
       drag = { kind: 'end', id: [...selected][0], end: handleKind };
       undo.stopCapturing();
+      return;
+    }
+    if ((handleKind === 'wp' || handleKind === 'mid') && selected.size === 1 && Number.isFinite(handleIndex)) {
+      const id = [...selected][0];
+      const it = cache.get(id);
+      if (!it) return;
+      const wp = [...(it.wp || [])];
+      undo.stopCapturing();
+      if (handleKind === 'wp' && double) {
+        // Doppelt auf einen Wendepunkt: entfernen.
+        wp.splice(handleIndex * 2, 2);
+        patch(id, { wp: wp.length ? wp : undefined });
+        owner = null;
+        return;
+      }
+      if (handleKind === 'mid') {
+        wp.splice(handleIndex * 2, 0, round(p.x), round(p.y));
+        patch(id, { wp });
+        flushNow();
+      }
+      drag = { kind: 'wp', id, i: handleIndex };
       return;
     }
 
@@ -954,58 +1690,53 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       undo.stopCapturing();
       return;
     }
-    if (tool === 'arrow') {
-      drag = { kind: 'arrow', start: p, from: connectableAt(p), id: null };
+    if (tool === 'arrow' || tool === 'line') {
+      drag = { kind: 'arrow', start: p, from: connectableAt(p), id: null, line: tool === 'line' };
       undo.stopCapturing();
       return;
     }
     if (tool === 'pen') {
-      if (touch && penUsed) {
-        // Mit Stift gezeichnet: Finger verschiebt nur (Handballen).
-        drag = { kind: 'pan', sx: sp.x, sy: sp.y, vx: view.x, vy: view.y, moved: false, tapId: null };
-        return;
-      }
-      if (e.pointerType === 'pen') penUsed = true;
-      const node = el('div', { class: 'b-item b-stroke is-drawing', 'data-c': lastInk });
+      const node = el('div', { class: `b-item b-stroke is-drawing${lastMarker ? ' is-marker' : ''}`, 'data-c': lastInk });
       node.style.zIndex = String(topZ(false));
       const s = svg('svg', { class: 'b-svg' });
       const path = svg('path', { class: 'line' }) as SVGPathElement;
       s.append(path);
       node.append(s);
       itemLayer.append(node);
-      drag = { kind: 'stroke', pts: [round(p.x), round(p.y)], node, path };
-      path.setAttribute('d', strokePath(drag.pts));
+      drag = { kind: 'stroke', pts: [round(p.x), round(p.y)], pr: pen ? [Math.round(Math.max(0.05, e.pressure) * 100) / 100] : null, node, path };
+      path.setAttribute('d', inkPath(drag.pts, drag.pr, lastWidth, lastMarker, false));
       return;
     }
 
     // Auswählen
-    if (hitId && voteActive() && VOTABLE.has(cache.get(hitId)?.t || '')) {
+    if (hitId && voteActive() && VOTABLE.has(hit?.t || '')) {
       const dot = target.closest<HTMLElement>('.b-dot');
       castVote(hitId, dot ? -1 : 1);
+      owner = null;
       return;
     }
+    if (hitId && target.closest('[data-play]')) { select([hitId]); activateEmbed(hitId); owner = null; return; }
     if (hitId) {
-      if (double && TEXTUAL.has(cache.get(hitId)?.t || '')) { startEdit(hitId, false); return; }
+      if (double && TEXTUAL.has(hit?.t || '')) { owner = null; startEdit(hitId, false); return; }
+      if (double && hit?.t === 'embed') { owner = null; activateEmbed(hitId); return; }
       let clickId: string | null = null;
       if (e.shiftKey) {
         const next = new Set(selected);
         if (next.has(hitId)) next.delete(hitId); else next.add(hitId);
         select(next);
-        if (!next.has(hitId)) return;
+        if (!next.has(hitId)) { owner = null; return; }
       } else if (!selected.has(hitId)) select([hitId]);
       else clickId = hitId;
       drag = { kind: 'move', start: p, orig: moveSet(), moved: false, clickId };
       return;
     }
     if (double) {
+      owner = null;
       const id = addNote(p);
       if (id) startEdit(id);
       return;
     }
-    if (touch) {
-      drag = { kind: 'pan', sx: sp.x, sy: sp.y, vx: view.x, vy: view.y, moved: false, tapId: null };
-      return;
-    }
+    if (touch) { startPan(sp, null); return; }
     drag = { kind: 'marquee', start: p, base: e.shiftKey ? new Set(selected) : new Set() };
     if (!e.shiftKey) select([]);
   });
@@ -1025,11 +1756,20 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     return out;
   }
 
+  /** Alle Zwischenpunkte des Ereignisses (Apple Pencil liefert mehr als ein pointermove). */
+  const samplesOf = (e: PointerEvent): PointerEvent[] => {
+    const list = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+    return list.length ? list : [e];
+  };
+
   root.addEventListener('pointermove', e => {
     const sp = local2(e.clientX, e.clientY);
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, sp);
     lastPointer = toWorld(sp);
-    if (e.pointerType !== 'touch') publish('cursor', { x: round(lastPointer.x), y: round(lastPointer.y) });
+    if (e.pointerType !== 'touch') {
+      publish('cursor', { x: round(lastPointer.x), y: round(lastPointer.y) });
+      if (!drag || owner?.id === e.pointerId) placeRing(sp);
+    }
 
     if (pinch && pointers.size === 2) {
       const [a, b] = [...pointers.values()];
@@ -1041,7 +1781,9 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       applyView();
       return;
     }
-    if (!drag) return;
+    // Linie Punkt für Punkt: Vorschau folgt Maus bzw. schwebendem Stift.
+    if (poly && !drag && e.pointerType !== 'touch') { polyPreview(lastPointer, e.shiftKey); return; }
+    if (!drag || (owner && owner.id !== e.pointerId)) return;
     const p = toWorld(sp);
 
     switch (drag.kind) {
@@ -1058,9 +1800,8 @@ export function mountBoard(o: BoardOptions): BoardHandle {
         drag.moved = true;
         const changes: [string, Partial<Item>][] = [];
         for (const it of drag.orig.values()) {
-          if (it.t === 'arrow') {
-            changes.push([it.id, { fx: round((it.fx ?? 0) + dx), fy: round((it.fy ?? 0) + dy), tx: round((it.tx ?? 0) + dx), ty: round((it.ty ?? 0) + dy) }]);
-          } else changes.push([it.id, { x: round(it.x + dx), y: round(it.y + dy) }]);
+          if (it.t === 'arrow') changes.push([it.id, shiftArrow(it, dx, dy)]);
+          else changes.push([it.id, { x: round(it.x + dx), y: round(it.y + dy) }]);
         }
         patchMany(changes);
         break;
@@ -1081,7 +1822,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
         const it = drag.orig;
         let w = Math.max(it.t === 'text' ? 40 : 24, it.w + p.x - drag.start.x);
         let h = Math.max(24, it.h + p.y - drag.start.y);
-        if (it.t === 'image' || (e.shiftKey && it.t !== 'text')) {
+        if (KEEP_RATIO.has(it.t) || (e.shiftKey && it.t !== 'text')) {
           const ratio = it.w / it.h;
           if (w / h > ratio) h = w / ratio; else w = h * ratio;
         }
@@ -1094,59 +1835,101 @@ export function mountBoard(o: BoardOptions): BoardHandle {
           if (Math.hypot(r.w * view.z, r.h * view.z) < 6) return;
           drag.id = drag.t === 'frame'
             ? addItem({ t: 'frame', x: round(r.x), y: round(r.y), w: round(r.w), h: round(r.h), z: topZ(true), text: '' })
-            : addItem({ t: 'shape', x: round(r.x), y: round(r.y), w: round(r.w), h: round(r.h), z: topZ(false), s: 'rect', c: lastInk, text: '' });
+            : addItem({ t: 'shape', x: round(r.x), y: round(r.y), w: round(r.w), h: round(r.h), z: topZ(false), s: 'rect', c: lastInk, sw: lastWidth === 2 ? undefined : lastWidth, ds: lastDash, text: '' });
         } else patch(drag.id, { x: round(r.x), y: round(r.y), w: round(Math.max(r.w, 8)), h: round(Math.max(r.h, 8)) });
         break;
       }
       case 'arrow': {
-        const to = connectableAt(p, drag.from || undefined);
+        const q = e.shiftKey ? snapAngle(drag.start, p) : p;
+        const to = connectableAt(q, drag.from || undefined);
         setHover(to);
         if (!drag.id) {
-          if (Math.hypot((p.x - drag.start.x) * view.z, (p.y - drag.start.y) * view.z) < 6) return;
-          drag.id = addItem({ t: 'arrow', x: 0, y: 0, w: 0, h: 0, z: topZ(false), c: lastInk, fx: round(drag.start.x), fy: round(drag.start.y), tx: round(p.x), ty: round(p.y), from: drag.from || undefined, to: to || undefined });
-        } else patch(drag.id, { tx: round(p.x), ty: round(p.y), to: to || undefined });
+          if (Math.hypot((q.x - drag.start.x) * view.z, (q.y - drag.start.y) * view.z) < 6) return;
+          drag.id = addItem({ t: 'arrow', x: 0, y: 0, w: 0, h: 0, z: topZ(false), fx: round(drag.start.x), fy: round(drag.start.y), tx: round(q.x), ty: round(q.y), from: drag.from || undefined, to: to || undefined, ...lineStyle(drag.line) });
+        } else patch(drag.id, { tx: round(q.x), ty: round(q.y), to: to || undefined });
         break;
       }
       case 'end': {
         const it = cache.get(drag.id);
         if (!it) return;
         const other = drag.end === 'from' ? it.to : it.from;
-        const hit = connectableAt(p, other);
+        const pts = arrowPoints(it);
+        const anchor = drag.end === 'from' ? pts[1] : pts[pts.length - 2];
+        const q = e.shiftKey && anchor ? snapAngle(anchor, p) : p;
+        const hit = connectableAt(q, other);
         setHover(hit);
         patch(drag.id, drag.end === 'from'
-          ? { fx: round(p.x), fy: round(p.y), from: hit || undefined }
-          : { tx: round(p.x), ty: round(p.y), to: hit || undefined });
+          ? { fx: round(q.x), fy: round(q.y), from: hit || undefined }
+          : { tx: round(q.x), ty: round(q.y), to: hit || undefined });
+        break;
+      }
+      case 'wp': {
+        const it = cache.get(drag.id);
+        if (!it?.wp) return;
+        const pts = arrowPoints(it);
+        const q = e.shiftKey ? snapAngle(pts[drag.i], p) : p;
+        const wp = [...it.wp];
+        wp[drag.i * 2] = round(q.x);
+        wp[drag.i * 2 + 1] = round(q.y);
+        patch(drag.id, { wp });
         break;
       }
       case 'stroke': {
-        const pts = drag.pts;
-        const lx = pts[pts.length - 2], ly = pts[pts.length - 1];
-        if (Math.hypot(p.x - lx, p.y - ly) * view.z < 2) return;
-        pts.push(round(p.x), round(p.y));
-        drag.path.setAttribute('d', strokePath(pts));
+        const { pts, pr } = drag;
+        let added = false;
+        for (const ev of samplesOf(e)) {
+          const q = toWorld(local2(ev.clientX, ev.clientY));
+          const lx = pts[pts.length - 2], ly = pts[pts.length - 1];
+          if (Math.hypot(q.x - lx, q.y - ly) * view.z < 1.2) continue;
+          pts.push(round(q.x), round(q.y));
+          pr?.push(Math.round(Math.max(0.05, ev.pressure) * 100) / 100);
+          added = true;
+        }
+        if (added) drag.path.setAttribute('d', inkPath(pts, pr, lastWidth, lastMarker, false));
+        break;
+      }
+      case 'erase': {
+        for (const ev of samplesOf(e)) {
+          const q = toWorld(local2(ev.clientX, ev.clientY));
+          eraseAlong(drag.last, q, drag);
+          drag.last = q;
+          trailPush('erase', 'b-trail-erase', q, 200, ERASER_R * 2);
+        }
+        placeRing(sp);
+        break;
+      }
+      case 'laser': {
+        for (const ev of samplesOf(e)) trailPush('laser', 'b-trail-laser', toWorld(local2(ev.clientX, ev.clientY)), LASER_MS, 7);
+        sendLaser();
         break;
       }
     }
-    if (drag && drag.kind !== 'pan' && drag.kind !== 'marquee') paintOverlay();
+    if (drag && drag.kind !== 'pan' && drag.kind !== 'marquee' && drag.kind !== 'laser' && drag.kind !== 'erase') paintOverlay();
   });
 
   function endPointer(e: PointerEvent) {
     pointers.delete(e.pointerId);
-    if (pinch) { if (pointers.size < 2) pinch = null; drag = null; return; }
+    if (pinch) { if (pointers.size < 2) pinch = null; drag = null; owner = null; return; }
+    if (owner && owner.id !== e.pointerId) return;
+    owner = null;
     const d = drag;
     drag = null;
     root.classList.remove('is-panning');
     marquee.style.display = 'none';
     setHover(null);
+    if (e.pointerType === 'touch') placeRing(null);
     if (!d) return;
     if (d.kind === 'pan' && !d.moved && e.type === 'pointerup') {
       // Tippen ohne Bewegen: auswählen bzw. Auswahl aufheben.
       if (d.tapId && voteActive() && VOTABLE.has(cache.get(d.tapId)?.t || '') && canEdit) castVote(d.tapId, (e.target as Element).closest?.('.b-dot') ? -1 : 1);
+      else if (d.tapPoly) polyClick(toWorld(local2(e.clientX, e.clientY)), false);
       else select(d.tapId && canEdit ? [d.tapId] : []);
     }
     if (d.kind === 'move' && !d.moved && d.clickId && !e.shiftKey) {
-      // Titel eines schon gewählten Bereichs angeklickt: umbenennen.
-      if (selected.size === 1 && cache.get(d.clickId)?.t === 'frame') startEdit(d.clickId);
+      // Schon gewählt und nochmal angeklickt: Bereich umbenennen, Video bedienen.
+      const t = cache.get(d.clickId)?.t;
+      if (selected.size === 1 && t === 'frame') startEdit(d.clickId);
+      else if (selected.size === 1 && t === 'embed') activateEmbed(d.clickId);
       else select([d.clickId]);
     }
     if (d.kind === 'create') {
@@ -1155,7 +1938,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
         const w = d.t === 'frame' ? 640 : 180, h = d.t === 'frame' ? 420 : 120;
         id = d.t === 'frame'
           ? addItem({ t: 'frame', x: round(d.start.x - w / 2), y: round(d.start.y - h / 2), w, h, z: topZ(true), text: '' })
-          : addItem({ t: 'shape', x: round(d.start.x - w / 2), y: round(d.start.y - h / 2), w, h, z: topZ(false), s: 'rect', c: lastInk, text: '' });
+          : addItem({ t: 'shape', x: round(d.start.x - w / 2), y: round(d.start.y - h / 2), w, h, z: topZ(false), s: 'rect', c: lastInk, sw: lastWidth === 2 ? undefined : lastWidth, ds: lastDash, text: '' });
       }
       setTool('select');
       flushNow();
@@ -1163,9 +1946,11 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       else if (id) select([id]);
     }
     if (d.kind === 'arrow') {
-      setTool('select');
-      flushNow();
-      if (d.id) select([d.id]);
+      if (d.id) {
+        setTool('select');
+        flushNow();
+        select([d.id]);
+      } else if (e.type === 'pointerup') startPoly(d.start, d.from, d.line);
     }
     if (d.kind === 'stroke') {
       d.node.remove();
@@ -1174,14 +1959,25 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
       for (let i = 0; i < pts.length; i += 2) { x1 = Math.min(x1, pts[i]); x2 = Math.max(x2, pts[i]); y1 = Math.min(y1, pts[i + 1]); y2 = Math.max(y2, pts[i + 1]); }
       const rel = pts.map((v, i) => round(v - (i % 2 ? y1 : x1)));
-      addItem({ t: 'stroke', x: x1, y: y1, w: Math.max(1, round(x2 - x1)), h: Math.max(1, round(y2 - y1)), z: topZ(false), c: lastInk, pts: rel });
+      addItem({
+        t: 'stroke', x: x1, y: y1, w: Math.max(1, round(x2 - x1)), h: Math.max(1, round(y2 - y1)), z: topZ(false), c: lastInk, pts: rel,
+        pr: d.pr || undefined, sw: lastWidth === 2 ? undefined : lastWidth, hl: lastMarker ? 1 : undefined,
+      });
     }
-    if (d.kind === 'resize' || d.kind === 'move' || d.kind === 'end') undo.stopCapturing();
+    if (d.kind === 'erase') endErase(d, e.type === 'pointerup');
+    if (d.kind === 'laser') {
+      sendLaser(true);
+      // Danach nichts mehr mitschicken (sonst sähe, wer neu dazukommt, eine alte Spur).
+      setTimeout(() => { if (drag?.kind !== 'laser') publish('laser', null); }, LASER_MS);
+    }
+    if (d.kind === 'resize' || d.kind === 'move' || d.kind === 'end' || d.kind === 'wp') undo.stopCapturing();
     paintOverlay();
   }
   root.addEventListener('pointerup', endPointer);
   root.addEventListener('pointercancel', endPointer);
-  root.addEventListener('pointerleave', e => { if (e.pointerType !== 'touch' && !drag) publish('cursor', null); });
+  root.addEventListener('pointerleave', e => {
+    if (e.pointerType !== 'touch' && !drag) { publish('cursor', null); placeRing(null); }
+  });
 
   root.addEventListener('wheel', e => {
     e.preventDefault();
@@ -1220,7 +2016,8 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     if (mod && key === '-') { e.preventDefault(); zoomAt(view.z / 1.25); return; }
     if (mod && key === '0') { e.preventDefault(); zoomAt(1); return; }
     if (e.shiftKey && (e.code === 'Digit1')) { e.preventDefault(); fitAll(); return; }
-    if (e.key === 'Escape') { if (following !== null) stopFollow(); select([]); setTool('select'); return; }
+    if (poly && (e.key === 'Escape' || e.key === 'Enter')) { e.preventDefault(); finishPoly(); return; }
+    if (e.key === 'Escape') { closePop(); releaseEmbed(); if (following !== null) stopFollow(); select([]); setTool('select'); return; }
     if (!canEdit) return;
     if (mod && key === 'z') { e.preventDefault(); if (e.shiftKey) undo.redo(); else undo.undo(); return; }
     if (mod && key === 'y') { e.preventDefault(); undo.redo(); return; }
@@ -1240,14 +2037,14 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
       const orig = moveSet();
       patchMany([...orig.values()].map(it => (it.t === 'arrow'
-        ? [it.id, { fx: (it.fx ?? 0) + dx, fy: (it.fy ?? 0) + dy, tx: (it.tx ?? 0) + dx, ty: (it.ty ?? 0) + dy }]
+        ? [it.id, shiftArrow(it, dx, dy)]
         : [it.id, { x: it.x + dx, y: it.y + dy }])));
       return;
     }
     const shortcut = TOOLS.find(([, , k]) => k.toLowerCase() === key);
     if (shortcut && !e.altKey) {
       e.preventDefault();
-      if (shortcut[0] === 'image') pickImage(); else setTool(shortcut[0]);
+      if (shortcut[0] === 'insert') pickImage(); else setTool(shortcut[0]);
     }
   });
   addEventListener('keyup', e => {
@@ -1288,13 +2085,17 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     }
     e.preventDefault();
     if (list?.length) {
-      const b = union(list.map(i => (i.t === 'arrow' ? rectOf({ x: i.fx ?? 0, y: i.fy ?? 0 }, { x: i.tx ?? 0, y: i.ty ?? 0 }) : { x: i.x, y: i.y, w: i.w, h: i.h }))) || { x: 0, y: 0, w: 0, h: 0 };
+      const b = union(list.map(i => (i.t === 'arrow'
+        ? union([{ x: i.fx ?? 0, y: i.fy ?? 0 }, { x: i.tx ?? 0, y: i.ty ?? 0 }, ...pairs(i.wp)].map(q => ({ ...q, w: 0, h: 0 })))!
+        : { x: i.x, y: i.y, w: i.w, h: i.h }))) || { x: 0, y: 0, w: 0, h: 0 };
       const ids = insertCopies(list, round(at.x - (b.x + b.w / 2)), round(at.y - (b.y + b.h / 2)));
       flushNow();
       select(ids);
       return;
     }
-    pasteText(e.clipboardData.getData('text/plain'), at);
+    const plain = e.clipboardData.getData('text/plain');
+    if (placeVideo(plain, at)) return;
+    pasteText(plain, at);
   });
 
   /** Eingefügter Text: jede Zeile eine Notiz, im Raster. */
@@ -1351,14 +2152,21 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   }
 
   root.addEventListener('dragover', e => {
-    if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); e.stopPropagation(); }
+    const types = [...(e.dataTransfer?.types || [])];
+    if (types.includes('Files') || types.includes('text/uri-list')) { e.preventDefault(); e.stopPropagation(); }
   });
   root.addEventListener('drop', e => {
     const files = [...(e.dataTransfer?.files || [])];
-    if (!files.length) return;
+    const at = toWorld(local2(e.clientX, e.clientY));
+    if (!files.length) {
+      // Video-Link aus einem anderen Fenster hereingezogen.
+      const url = (e.dataTransfer?.getData('text/uri-list') || '').split('\n').find(l => l && !l.startsWith('#'))?.trim();
+      if (url && placeVideo(url, at)) { e.preventDefault(); e.stopPropagation(); }
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
-    placeImages(files, toWorld(local2(e.clientX, e.clientY)));
+    placeImages(files, at);
   });
 
   // ── Abstimmen ─────────────────────────────────────────────────────────────
@@ -1521,7 +2329,8 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     }, 50);
   }
 
-  interface PeerState { user?: { name?: string; color?: string }; cursor?: Pt | null; sel?: string[]; view?: Box; summon?: number }
+  interface PeerState { user?: { name?: string; color?: string }; cursor?: Pt | null; sel?: string[]; view?: Box; summon?: number; laser?: number[] | null }
+  const laserSeen = new Map<number, string>();
   const cursorNodes = new Map<number, HTMLElement>();
   const peerSel = new Map<string, string>();
   const loadedAt = Date.now();
@@ -1541,6 +2350,16 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     for (const [client, st] of states) {
       if (client === ydoc.clientID) continue;
       for (const id of st.sel || []) peerSel.set(id, st.user?.color || '#888');
+      // Laserpointer der anderen: Punkte mit Alter, hier nachgezeichnet.
+      const key = st.laser ? st.laser.join(',') : '';
+      if (key && laserSeen.get(client) !== key) {
+        laserSeen.set(client, key);
+        const t = trail(`laser-${client}`, 'b-trail-laser', LASER_MS, 7);
+        const now = performance.now();
+        t.pts = [];
+        for (let i = 0; i + 2 < st.laser!.length; i += 3) t.pts.push({ x: st.laser![i], y: st.laser![i + 1], t: now - st.laser![i + 2] });
+        if (!trailReq) trailReq = requestAnimationFrame(paintTrails);
+      }
       // Jemand holt alle zu sich.
       if (st.summon && st.summon > loadedAt && st.summon !== seenSummon.get(client)) {
         seenSummon.set(client, st.summon);
@@ -1613,6 +2432,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
 
   // ── Start ─────────────────────────────────────────────────────────────────
 
+  setTool('select');
   function setEditable(on: boolean) {
     canEdit = on;
     root.classList.toggle('is-readonly', !on);

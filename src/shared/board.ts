@@ -10,8 +10,9 @@
 // Suche) entsteht hier: Bereiche werden Überschriften, Notizen darin Listen.
 
 import * as Y from 'yjs';
+import { videoOf, videoUrl } from './video';
 
-export type ItemType = 'note' | 'frame' | 'shape' | 'text' | 'arrow' | 'stroke' | 'image';
+export type ItemType = 'note' | 'frame' | 'shape' | 'text' | 'arrow' | 'stroke' | 'image' | 'embed';
 
 export interface Item {
   id: string;
@@ -27,12 +28,26 @@ export interface Item {
   text?: string;
   /** Form: rect, ellipse, diamond. */
   s?: string;
-  /** Pfeil: Anfang/Ende als Punkt, optional an einem Element festgemacht. */
+  /** Pfeil/Linie: Anfang/Ende als Punkt, optional an einem Element festgemacht. */
   fx?: number; fy?: number; tx?: number; ty?: number;
   from?: string; to?: string;
+  /** Pfeil/Linie: Wendepunkte dazwischen (absolut), flach [x0, y0, x1, y1, …]. */
+  wp?: number[];
+  /** Pfeil/Linie: Spitzen. Fehlt = am Ende, `none` = Linie, `both` = beide Enden. */
+  hd?: 'none' | 'both';
+  /** Pfeil/Linie: 1 = gerundet durch die Wendepunkte statt Ecken. */
+  cv?: number;
+  /** Strichstärke 1 (dünn), 2 (normal, Standard), 3 (dick). */
+  sw?: number;
+  /** Strichart für Pfeile, Linien, Formen: gestrichelt bzw. gepunktet. */
+  ds?: 'dash' | 'dot';
   /** Stift: Punkte relativ zu x/y, flach [x0, y0, x1, y1, …]. */
   pts?: number[];
-  /** Bild: Adresse (/i/…). */
+  /** Stift: Druck je Punkt (0–1), nur mit Apple Pencil o. ä. */
+  pr?: number[];
+  /** Stift: 1 = Textmarker (breit, durchscheinend). */
+  hl?: number;
+  /** Bild: Adresse (/i/…). Einbettung: Adresse des Videos. */
   src?: string;
 }
 
@@ -82,6 +97,10 @@ const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim();
 function listItem(it: Item, votes: number): string | null {
   const suffix = votes ? ` · ${votes} ${votes === 1 ? 'Stimme' : 'Stimmen'}` : '';
   if (it.t === 'image') return it.src ? `- ![](${it.src})${suffix}` : null;
+  if (it.t === 'embed') {
+    const v = it.src ? videoOf(it.src) : null;
+    return v ? `- [${v.kind === 'youtube' ? 'YouTube' : 'Vimeo'}](${videoUrl(v)})${suffix}` : null;
+  }
   const text = (it.text || '').trim();
   if (!text) return null;
   const [first, ...rest] = text.split('\n').map(l => l.trimEnd());
@@ -97,7 +116,7 @@ export function boardMarkdown(doc: Y.Doc): string {
   const counts = vote && !vote.active && vote.show ? voteCounts(doc, vote.id) : new Map<string, number>();
 
   const frames = readingOrder(items.filter(i => i.t === 'frame'));
-  const content = items.filter(i => i.t === 'note' || i.t === 'shape' || i.t === 'text' || i.t === 'image');
+  const content = items.filter(i => i.t === 'note' || i.t === 'shape' || i.t === 'text' || i.t === 'image' || i.t === 'embed');
   const groups = new Map<Item | null, Item[]>();
   for (const it of content) {
     const c = center(it);
@@ -129,7 +148,7 @@ export function boardMarkdown(doc: Y.Doc): string {
   };
   const links = items
     .filter(i => i.t === 'arrow' && label(i.from) && label(i.to))
-    .map(i => `- ${label(i.from)} → ${label(i.to)}`);
+    .map(i => `- ${label(i.from)} ${i.hd === 'none' ? '–' : i.hd === 'both' ? '↔' : '→'} ${label(i.to)}`);
   if (links.length) parts.push(`## Verbindungen\n\n${links.join('\n')}`);
 
   return parts.join('\n\n') + '\n';
