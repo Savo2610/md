@@ -1999,6 +1999,22 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   }
   root.addEventListener('pointerup', endPointer);
   root.addEventListener('pointercancel', endPointer);
+  // Zeiger verloren, ohne dass pointerup kam (Safari): wie Loslassen behandeln.
+  root.addEventListener('lostpointercapture', e => { if (owner?.id === e.pointerId) endPointer(e); });
+
+  // Safari auf dem iPad: Stift-Berührungen lösen sonst eigene Gesten aus
+  // (Doppeltippen, Scribble, Lupe). Die brechen den Strich ab, schlucken die
+  // nächsten und verschieben den Fokus (z. B. auf ⋯ oben rechts). Wie in
+  // tldraw/Excalidraw: Touch-Ereignisse des Stifts auf der Fläche abfangen.
+  // Finger bleiben unberührt (Bearbeiten von Notizen braucht die Tastatur).
+  const UI = '.b-tools, .b-zoom, .b-ctx, .b-follow, .b-pop, .is-editing, [data-play], input, textarea, button';
+  const stylusGuard = (e: TouchEvent) => {
+    const t = [...e.changedTouches].find(x => (x as Touch & { touchType?: string }).touchType === 'stylus');
+    if (!t || (e.target as Element | null)?.closest?.(UI)) return;
+    if (e.cancelable) e.preventDefault();
+  };
+  for (const type of ['touchstart', 'touchmove', 'touchend'] as const) root.addEventListener(type, stylusGuard, { passive: false });
+
   root.addEventListener('pointerleave', e => {
     if (e.pointerType !== 'touch' && !drag) { publish('cursor', null); placeRing(null); }
   });
