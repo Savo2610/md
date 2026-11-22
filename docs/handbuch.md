@@ -68,12 +68,16 @@ Ein Cloudflare Worker, ein Durable Object pro Dokument, Bilder in R2.
   Elementen; Klick, Klick, … setzt Wendepunkte, Klick auf den letzten Punkt
   bzw. ↵ beendet; ausgewählt: Punkte ziehen, Griff dazwischen ziehen fügt einen
   ein, Doppelklick entfernt; Shift rastet auf 15°), Text, Stift (mit Druck,
-  perfect-freehand; auch als Textmarker), Radierer (zerschneidet Striche,
-  entfernt anderes beim Loslassen; auch die Radiertaste am Stift),
-  Laserpointer (für alle sichtbar, über Awareness), Bilder (R2 wie im Editor;
-  am Tablet/Handy auch „Foto aufnehmen“) und YouTube/Vimeo-Videos (Einfügen →
-  Video, oder Link einfügen/hereinziehen; erst Vorschaubild, Player erst nach
-  ▶). Strichstärke, Strichart, Spitzen, Kurve unter „Strich“ in der Leiste.
+  perfect-freehand; auch als Textmarker), Radierer (entfernt alles Berührte
+  ganz, beim Loslassen; auch die Radiertaste am Stift), Laserpointer (nur
+  sichtbar, wenn noch jemand im Board ist; über Awareness), Bilder (R2 wie im
+  Editor; am Tablet/Handy auch „Foto aufnehmen“) und YouTube/Vimeo-Videos
+  (Link einfügen oder hereinziehen; erst Vorschaubild, Player erst nach ▶).
+  Strichstärke, Strichart, Spitzen, Kurve unter „Strich“ in der Leiste;
+  Linien sind standardmäßig Kurven, Pfeile eckig. Eigenes Kontextmenü
+  (Rechtsklick bzw. langes Drücken mit dem Finger): Kopieren, Ausschneiden,
+  Einfügen (liest die Zwischenablage, auch Video-Links), Duplizieren, Ebenen,
+  Löschen bzw. auf der Fläche Einfügen, Notiz, Alles auswählen, Alles zeigen.
   Stift-Modus: schaltet sich beim ersten Apple-Pencil-Strich ein (Knopf rechts
   in den Werkzeugen); dann zeichnet nur der Stift, Finger verschieben und
   zoomen, der Handballen wird ignoriert. Doppelklick auf die Fläche: neue Notiz;

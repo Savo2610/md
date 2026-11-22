@@ -22,7 +22,7 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { getStroke } from 'perfect-freehand';
 import { Provider } from './provider';
 import { uploadImage } from './images';
-import { el, store, menu, dialog } from './ui';
+import { el, store, menu } from './ui';
 import { boardMarkdown, readItem, voteCounts, MAX_ITEMS, type Item, type Timer, type Vote } from '../shared/board';
 import { videoOf, videoUrl, videoEmbed } from '../shared/video';
 import type { EditorStatus, Peer } from './editor';
@@ -120,11 +120,14 @@ const ICON = {
   pen: svgIcon('<path d="M3.5 16.5c2-.3 3-1 4-2l8-8a1.8 1.8 0 0 0-2.5-2.5l-8 8c-1 1-1.7 2-2 4z"/>'),
   eraser: svgIcon('<path d="M8 16.5h8.5M11.5 4.2l4.3 4.3a1.3 1.3 0 0 1 0 1.8L9.6 16.5H6.4l-2.6-2.6a1.3 1.3 0 0 1 0-1.8l5.9-7.9a1.3 1.3 0 0 1 1.8 0zM6.7 8.6l5.7 5.7"/>'),
   laser: svgIcon('<circle cx="13" cy="7" r="2.6"/><path d="M3.5 16.5l7.3-7.3M13 2v1.3M13 10.7V12M18 7h-1.3M9.3 7H8M16.5 3.5l-.9.9M10.4 9.6l-.9.9M16.5 10.5l-.9-.9"/>'),
-  insert: svgIcon('<rect x="3" y="3" width="14" height="14" rx="2"/><path d="M10 6.5v7M6.5 10h7"/>'),
   image: svgIcon('<rect x="3" y="4" width="14" height="12" rx="1.5"/><circle cx="7.5" cy="8.3" r="1.3"/><path d="M3.5 14.5l4-4 3 3 2-2 4 3.5"/>'),
   camera: svgIcon('<path d="M3 7.2A1.7 1.7 0 0 1 4.7 5.5h1.8L8 3.5h4l1.5 2h1.8A1.7 1.7 0 0 1 17 7.2v7.1a1.7 1.7 0 0 1-1.7 1.7H4.7A1.7 1.7 0 0 1 3 14.3z"/><circle cx="10" cy="10.5" r="3"/>'),
-  video: svgIcon('<rect x="2.5" y="4.5" width="15" height="11" rx="2.5"/><path d="M8.5 7.6v4.8l4-2.4z" class="fill"/>'),
   penmode: svgIcon('<path d="M9.5 16.5c1.6-.3 2.5-.9 3.3-1.7l4-4a1.6 1.6 0 0 0-2.2-2.2l-4 4c-.8.8-1.4 1.7-1.7 3.3z"/><path d="M6 12.5V5.2a1 1 0 0 1 2 0V10M8 9.5V3.8a1 1 0 0 1 2 0V8.6M4 9.4a1 1 0 0 1 2 0v3.6c0 2 .8 3.5 2.3 3.5"/>'),
+  copy: svgIcon('<rect x="7" y="7" width="9.5" height="9.5" rx="1.5"/><path d="M13 7V4.5A1 1 0 0 0 12 3.5H4.5a1 1 0 0 0-1 1V12a1 1 0 0 0 1 1H7"/>'),
+  cut: svgIcon('<circle cx="6" cy="14.5" r="2.3"/><circle cx="14" cy="14.5" r="2.3"/><path d="M7.6 12.8L14.5 3.5M12.4 12.8L5.5 3.5"/>'),
+  paste: svgIcon('<path d="M7 4.5H5.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-11a1 1 0 0 0-1-1H13"/><rect x="7" y="3" width="6" height="3" rx="1"/>'),
+  all: svgIcon('<path d="M3.5 6V4.5a1 1 0 0 1 1-1H6M14 3.5h1.5a1 1 0 0 1 1 1V6M16.5 14v1.5a1 1 0 0 1-1 1H14M6 16.5H4.5a1 1 0 0 1-1-1V14M9 3.5h2M9 16.5h2M3.5 9v2M16.5 9v2"/>'),
+  fit: svgIcon('<path d="M3.5 7.5v-4h4M12.5 3.5h4v4M16.5 12.5v4h-4M7.5 16.5h-4v-4"/>'),
   check: svgIcon('<path d="M4.5 10.5l3.5 3.5 7.5-8"/>'),
   style: svgIcon('<path d="M3.5 5h13" stroke-width="1"/><path d="M3.5 10h13" stroke-width="2"/><path d="M3.5 15.5h13" stroke-width="3.2"/>'),
   w1: svgIcon('<path d="M4 10h12" stroke-width="1"/>'),
@@ -166,7 +169,7 @@ const TOOLS: [Tool | 'insert', string, string][] = [
   ['pen', 'Stift', 'P'],
   ['eraser', 'Radierer', 'E'],
   ['laser', 'Laserpointer', 'K'],
-  ['insert', 'Einfügen', 'I'],
+  ['insert', 'Bild', 'I'],
 ];
 
 const rid = () => Math.random().toString(36).slice(2, 10);
@@ -896,7 +899,11 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   let lastInk = store.get('md:board:ink') || 'fg';
   let lastWidth = Number(store.get('md:board:sw')) || 2;
   let lastDash = (store.get('md:board:ds') || undefined) as Item['ds'];
-  let lastCurve = store.get('md:board:cv') === '1';
+  // Kurve: für Linien standardmäßig an, für Pfeile aus (je eigens gemerkt).
+  let lineCurve = store.get('md:board:cv:line') !== '0';
+  let arrowCurve = store.get('md:board:cv:arrow') === '1';
+  /** Ob sich eine Wahl der Kurve auf Linien (ohne Spitzen) oder Pfeile bezieht. */
+  let styleIsLine = true;
   let lastMarker = store.get('md:board:hl') === '1';
   let styleOpen = false;
 
@@ -913,12 +920,15 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     stroke: ['hl', 'sw'], arrow: ['sw', 'ds', 'hd', 'cv'], shape: ['sw', 'ds'],
     pen: ['hl', 'sw'], line: ['sw', 'ds', 'cv'], 'tool-arrow': ['sw', 'ds', 'cv'], 'tool-shape': ['sw', 'ds'],
   };
-  const defaults = (): Partial<Item> => ({ sw: lastWidth === 2 ? undefined : lastWidth, ds: lastDash, cv: lastCurve ? 1 : undefined, hl: lastMarker ? 1 : undefined });
+  const defaults = (): Partial<Item> => ({ sw: lastWidth === 2 ? undefined : lastWidth, ds: lastDash, cv: (tool === 'arrow' ? arrowCurve : lineCurve) ? 1 : undefined, hl: lastMarker ? 1 : undefined });
 
   function setDefault(key: StyleKey, v: StyleOpt['v']) {
     if (key === 'sw') { lastWidth = (v as number) || 2; store.set('md:board:sw', String(lastWidth)); }
     if (key === 'ds') { lastDash = v as Item['ds']; store.set('md:board:ds', (v as string) || ''); }
-    if (key === 'cv') { lastCurve = !!v; store.set('md:board:cv', v ? '1' : '0'); }
+    if (key === 'cv') {
+      if (styleIsLine) lineCurve = !!v; else arrowCurve = !!v;
+      store.set(`md:board:cv:${styleIsLine ? 'line' : 'arrow'}`, v ? '1' : '0');
+    }
     if (key === 'hl') { lastMarker = !!v; store.set('md:board:hl', v ? '1' : '0'); }
   }
 
@@ -937,6 +947,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       const cur = new Set<unknown>(targets.length ? fits.map(t => t[key]) : [defaults()[key]]);
       return el('div', { class: 'b-ctx-group' }, ...STYLE[key].map(opt => ctxButton(opt.icon, opt.title, () => {
         if (fits.length) patchMany(fits.map(t => [t.id, { [key]: opt.v }]));
+        styleIsLine = fits.length ? fits[0].hd === 'none' : tool !== 'arrow';
         if (key !== 'hd') setDefault(key, opt.v);
         renderCtx();
         paintOverlay();
@@ -1016,7 +1027,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   const toolButtons = new Map<string, HTMLButtonElement>();
   for (const [t, label, key] of TOOLS) {
     const b = el('button', { type: 'button', title: `${label} (${key})`, 'aria-label': label, 'data-tool': t });
-    b.innerHTML = ICON[t];
+    b.innerHTML = ICON[t === 'insert' ? 'image' : t];
     b.addEventListener('click', () => (t === 'insert' ? insertMenu(b) : setTool(t)));
     if (t !== 'insert') toolButtons.set(t, b);
     tools.append(b);
@@ -1037,7 +1048,16 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   const zoomIn = ctxButton(svgIcon('<path d="M5 10h10M10 5v10"/>'), 'Vergrößern (⌘+)', () => zoomAt(view.z * 1.25));
   zoomBar.append(zoomOut, zoomLabel, zoomIn);
 
+  /** Laserpointer nur, wenn noch jemand im Board ist. */
+  function syncLaser() {
+    const b = toolButtons.get('laser');
+    if (!b) return;
+    b.hidden = !peers.length;
+    if (b.hidden && tool === 'laser') setTool('select');
+  }
+
   function setTool(t: Tool) {
+    if (t === 'laser' && !peers.length) return;
     closePop();
     if (poly && t !== 'select') finishPoly();
     tool = t;
@@ -1058,42 +1078,45 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   function insertMenu(anchor: HTMLElement) {
     if (pop) { closePop(); return; }
     if (!canEdit) return;
-    const entries: [string, string, () => void][] = [[ICON.image, 'Bild', pickImage]];
-    if (touchDevice) entries.push([ICON.camera, 'Foto aufnehmen', () => cameraInput.click()]);
-    entries.push([ICON.video, 'Video', askVideo]);
+    // Ohne Kamera gibt es nur eine Wahl: gleich die Dateiauswahl.
+    if (!touchDevice) { pickImage(); return; }
+    const ar = anchor.getBoundingClientRect(), rr = root.getBoundingClientRect();
+    openPop([[ICON.image, 'Bild', pickImage], [ICON.camera, 'Foto aufnehmen', () => cameraInput.click()]],
+      { x: ar.left - rr.left + ar.width / 2, y: ar.top - rr.top - 8 }, 'above');
+  }
+
+  type PopEntry = [icon: string, label: string, run: () => void, hint?: string, danger?: boolean] | null;
+  /** Kleines Menü an einem Punkt (Bildschirm, relativ zur Fläche); null = Trennlinie. */
+  function openPop(entries: PopEntry[], at: Pt, place: 'above' | 'at') {
+    closePop();
     pop = el('div', { class: 'b-pop', role: 'menu' });
-    for (const [icon, label, run] of entries) {
-      const b = el('button', { type: 'button', role: 'menuitem' });
+    for (const entry of entries) {
+      if (!entry) { if (pop.lastElementChild && !pop.lastElementChild.matches('hr')) pop.append(el('hr')); continue; }
+      const [icon, label, run, hint, danger] = entry;
+      const b = el('button', { type: 'button', role: 'menuitem', class: danger ? 'danger' : '' });
       b.innerHTML = icon;
       b.append(el('span', {}, label));
-      b.addEventListener('click', () => { closePop(); run(); });
+      if (hint) b.append(el('kbd', {}, hint));
+      b.addEventListener('click', () => {
+        if (performance.now() - popOpenedAt < 350) return; // Loslassen nach langem Drücken
+        closePop();
+        run();
+      });
       pop.append(b);
     }
+    if (pop.lastElementChild?.matches('hr')) pop.lastElementChild.remove();
     root.append(pop);
-    const ar = anchor.getBoundingClientRect(), rr = root.getBoundingClientRect();
-    pop.style.left = `${clamp(ar.left - rr.left + ar.width / 2 - pop.offsetWidth / 2, 8, root.clientWidth - pop.offsetWidth - 8)}px`;
-    pop.style.top = `${ar.top - rr.top - pop.offsetHeight - 8}px`;
+    const w = pop.offsetWidth, h = pop.offsetHeight;
+    const left = place === 'above' ? at.x - w / 2 : at.x;
+    let top = place === 'above' ? at.y - h : at.y;
+    if (place === 'at' && top + h > root.clientHeight - 8) top = Math.max(8, at.y - h);
+    pop.style.left = `${clamp(left, 8, root.clientWidth - w - 8)}px`;
+    pop.style.top = `${clamp(top, 8, root.clientHeight - h - 8)}px`;
   }
 
   function pickImage() {
     if (!canEdit) return;
     fileInput.click();
-  }
-
-  function askVideo() {
-    const input = el('input', { type: 'url', placeholder: 'YouTube- oder Vimeo-Link', 'aria-label': 'Link', autocomplete: 'off', inputmode: 'url', required: '' }) as HTMLInputElement;
-    const ok = el('button', { type: 'submit', class: 't boxed' }, 'Einbetten');
-    const form = el('form', { class: 'sheet' }, el('div', { class: 'field-line' }, input, ok));
-    const d = dialog('Video einbetten', form);
-    input.addEventListener('input', () => input.setCustomValidity(''));
-    form.addEventListener('submit', e => {
-      e.preventDefault();
-      const v = videoOf(input.value);
-      if (!v) { input.setCustomValidity('Kein YouTube- oder Vimeo-Link'); input.reportValidity(); return; }
-      d.close();
-      placeVideo(input.value, viewCenter());
-    });
-    setTimeout(() => input.focus(), 30);
   }
 
   function placeVideo(url: string, at: Pt): boolean {
@@ -1302,7 +1325,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
 
   /** Stil für neue Linien/Pfeile aus den zuletzt gewählten Einstellungen. */
   const lineStyle = (line: boolean): Partial<Item> => ({
-    c: lastInk, hd: line ? 'none' : undefined, sw: lastWidth === 2 ? undefined : lastWidth, ds: lastDash, cv: lastCurve ? 1 : undefined,
+    c: lastInk, hd: line ? 'none' : undefined, sw: lastWidth === 2 ? undefined : lastWidth, ds: lastDash, cv: (line ? lineCurve : arrowCurve) ? 1 : undefined,
   });
 
   // Linie/Pfeil Punkt für Punkt: Klick setzt einen Wendepunkt, Klick auf den
@@ -1373,7 +1396,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
 
   // ── Radierer ──────────────────────────────────────────────────────────────
 
-  /** Radiert entlang a→b: Striche werden zerschnitten, alles andere ganz entfernt (beim Loslassen). */
+  /** Radiert entlang a→b: Getroffenes wird markiert und beim Loslassen ganz entfernt. */
   function eraseAlong(a: Pt, b: Pt, d: Extract<Drag, { kind: 'erase' }>) {
     const r = ERASER_R / view.z;
     const len = Math.hypot(b.x - a.x, b.y - a.y);
@@ -1381,80 +1404,27 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     const samples: Pt[] = [];
     for (let i = 0; i <= n; i++) samples.push({ x: a.x + (b.x - a.x) * (i / n), y: a.y + (b.y - a.y) * (i / n) });
     const reach = rectOf(a, b);
-    const cuts: [Item, { pts: number[]; pr: number[] | null }[]][] = [];
     for (const it of cache.values()) {
       if (it.t === 'frame' || d.doomed.has(it.id)) continue;
       const half = it.t === 'stroke' ? (it.hl ? MARKER_W : PEN_W)[it.sw || 2] / 2 : it.t === 'arrow' ? (LINE_W[it.sw || 2] || 2) / 2 : 0;
       const bx = bounds(it);
       const pad = r + half;
       if (!overlaps({ x: bx.x - pad, y: bx.y - pad, w: bx.w + pad * 2, h: bx.h + pad * 2 }, reach)) continue;
-      if (it.t === 'stroke') {
-        const runs = cutStroke(it, samples, r + half);
-        if (runs) cuts.push([it, runs]);
-      } else if (hitsWhole(it, samples, pad)) {
+      if (hitsWhole(it, samples, pad)) {
         d.doomed.add(it.id);
         nodes.get(it.id)?.classList.add('is-doomed');
       }
     }
-    if (!cuts.length) return;
-    tx(() => {
-      for (const [it, runs] of cuts) {
-        items.delete(it.id);
-        for (const run of runs) {
-          let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
-          for (let i = 0; i < run.pts.length; i += 2) { x1 = Math.min(x1, run.pts[i]); x2 = Math.max(x2, run.pts[i]); y1 = Math.min(y1, run.pts[i + 1]); y2 = Math.max(y2, run.pts[i + 1]); }
-          const fields: Omit<Item, 'id'> = {
-            t: 'stroke', x: round(x1), y: round(y1), w: Math.max(1, round(x2 - x1)), h: Math.max(1, round(y2 - y1)), z: it.z, c: it.c,
-            pts: run.pts.map((v, i) => round(v - (i % 2 ? y1 : x1))), pr: run.pr || undefined, sw: it.sw, hl: it.hl,
-          };
-          const m = new Y.Map<unknown>();
-          for (const [k, v] of Object.entries(fields)) if (v !== undefined) m.set(k, v);
-          items.set(rid(), m);
-        }
-      }
-    });
-    flushNow();
-  }
-
-  /** Strich ohne die Punkte im Radius: übrige Stücke (absolut), null = nicht getroffen. */
-  function cutStroke(it: Item, samples: Pt[], rr: number): { pts: number[]; pr: number[] | null }[] | null {
-    const src = it.pts || [];
-    const pr = it.pr?.length ? it.pr : null;
-    const P: Pt[] = [];
-    for (let i = 0; i + 1 < src.length; i += 2) P.push({ x: it.x + src[i], y: it.y + src[i + 1] });
-    if (!P.length) return null;
-    const near = (q: Pt) => samples.some(s => Math.hypot(s.x - q.x, s.y - q.y) <= rr);
-    const segNear = (a: Pt, b: Pt) => samples.some(s => segDist(s, a, b) <= rr * 1.5);
-    if (P.length === 1 ? !near(P[0]) : !P.some((q, i) => i < P.length - 1 && segNear(q, P[i + 1]))) return null;
-    // Getroffene Stücke fein unterteilen, damit der Schnitt dem Radierer folgt.
-    const dense: Pt[] = [], dpr: number[] = [];
-    const step = Math.max(rr / 3, 0.5);
-    for (let i = 0; i < P.length; i++) {
-      dense.push(P[i]); dpr.push(pr?.[i] ?? 0.5);
-      const nb = P[i + 1];
-      if (!nb) continue;
-      const len = Math.hypot(nb.x - P[i].x, nb.y - P[i].y);
-      if (len <= step || !segNear(P[i], nb)) continue;
-      const k = Math.ceil(len / step);
-      for (let j = 1; j < k; j++) {
-        dense.push({ x: P[i].x + (nb.x - P[i].x) * (j / k), y: P[i].y + (nb.y - P[i].y) * (j / k) });
-        dpr.push((pr?.[i] ?? 0.5) + ((pr?.[i + 1] ?? 0.5) - (pr?.[i] ?? 0.5)) * (j / k));
-      }
-    }
-    const runs: { pts: number[]; pr: number[] | null }[] = [];
-    let cur: { pts: number[]; pr: number[] | null } | null = null;
-    let removed = false;
-    dense.forEach((q, i) => {
-      if (near(q)) { removed = true; if (cur && cur.pts.length >= 4) runs.push(cur); cur = null; return; }
-      cur ??= { pts: [], pr: pr ? [] : null };
-      cur.pts.push(round(q.x), round(q.y));
-      cur.pr?.push(Math.round(dpr[i] * 100) / 100);
-    });
-    if (cur && (cur as { pts: number[] }).pts.length >= 4) runs.push(cur);
-    return removed ? runs : null;
   }
 
   function hitsWhole(it: Item, samples: Pt[], pad: number): boolean {
+    if (it.t === 'stroke') {
+      const src = it.pts || [];
+      const p: Pt[] = [];
+      for (let i = 0; i + 1 < src.length; i += 2) p.push({ x: it.x + src[i], y: it.y + src[i + 1] });
+      if (p.length === 1) p.push(p[0]);
+      return samples.some(s => p.some((q, i) => i < p.length - 1 && segDist(s, q, p[i + 1]) <= pad));
+    }
     if (it.t === 'arrow') {
       let p = arrowPoints(it);
       if (it.cv && p.length > 2) p = [p[0], ...curveSegments(p).flatMap(seg => [0.25, 0.5, 0.75, 1].map(t => bezierAt(seg, t)))];
@@ -1593,6 +1563,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       pointers.set(e.pointerId, sp);
       if (pointers.size === 2) {
         // Zwei Finger: Zoomen und Verschieben. Was der erste Finger begonnen hat, fällt weg.
+        clearPress();
         if (drag?.kind === 'stroke') drag.node.remove();
         if (drag?.kind === 'erase') endErase(drag, false);
         drag = null;
@@ -1618,6 +1589,13 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     const now = performance.now();
     const double = now - lastTap.t < 380 && Math.hypot(sp.x - lastTap.x, sp.y - lastTap.y) < 14 && (hitId || '') === lastTap.id;
     lastTap = { t: now, x: sp.x, y: sp.y, id: hitId || '' };
+
+    // Langes Drücken mit dem Finger: Kontextmenü (nur, wo der Finger nicht zeichnet).
+    clearPress();
+    if (touch && (penMode || tool === 'select' || tool === 'hand' || !canEdit)) {
+      const pid = e.pointerId;
+      press = { id: pid, sp, timer: setTimeout(() => { press = null; longPress(sp, hitId, pid); }, 500) };
+    }
 
     if (e.button === 1 || spaceDown || tool === 'hand' || !canEdit) { startPan(sp, hitId); return; }
 
@@ -1775,6 +1753,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   root.addEventListener('pointermove', e => {
     const sp = local2(e.clientX, e.clientY);
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, sp);
+    if (press?.id === e.pointerId && Math.hypot(sp.x - press.sp.x, sp.y - press.sp.y) > 8) clearPress();
     lastPointer = toWorld(sp);
     if (e.pointerType !== 'touch') {
       publish('cursor', { x: round(lastPointer.x), y: round(lastPointer.y) });
@@ -1917,6 +1896,21 @@ export function mountBoard(o: BoardOptions): BoardHandle {
     if (drag && drag.kind !== 'pan' && drag.kind !== 'marquee' && drag.kind !== 'laser' && drag.kind !== 'erase') paintOverlay();
   });
 
+  let press: { id: number; sp: Pt; timer: ReturnType<typeof setTimeout> } | null = null;
+  function clearPress() { if (press) { clearTimeout(press.timer); press = null; } }
+
+  function longPress(sp: Pt, hitId: string | null, pid: number) {
+    if (owner?.id !== pid || pinch) return;
+    // Was der Finger angefangen hat, zurücknehmen.
+    if (drag?.kind === 'pan') { view.x = drag.vx; view.y = drag.vy; applyView(); }
+    if (drag?.kind === 'move' && drag.moved) patchMany([...drag.orig.values()].map(it => [it.id, it.t === 'arrow' ? shiftArrow(it, 0, 0) : { x: it.x, y: it.y }]));
+    drag = null;
+    owner = null;
+    root.classList.remove('is-panning');
+    lastTap = { t: 0, x: 0, y: 0, id: '' };
+    openContext(sp, hitId);
+  }
+
   /** Finger/Handballen fallen weg; ein gerade erst begonnenes Verschieben bzw. Zoomen wird zurückgenommen. */
   function dropTouches() {
     const recent = performance.now() - touchAt < 800;
@@ -1931,6 +1925,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   }
 
   function endPointer(e: PointerEvent) {
+    if (press?.id === e.pointerId) clearPress();
     if (e.pointerType === 'pen') penUpAt = performance.now();
     pointers.delete(e.pointerId);
     if (pinch) { if (pointers.size < 2) pinch = null; drag = null; owner = null; return; }
@@ -2095,35 +2090,81 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   const CLIP = 'data-md-board';
   let memoryClip: Item[] | null = null;
 
-  function writeClip(e: ClipboardEvent): boolean {
-    if (!selected.size || !e.clipboardData) return false;
+  const plainOf = (list: Item[]) => list.filter(i => i.text?.trim()).sort((a, b) => a.y - b.y || a.x - b.x).map(i => i.text!.trim()).join('\n');
+
+  /** Auswahl für die Zwischenablage: Text (lesbar) und HTML (mit den Elementen). */
+  function clipOf(): { plain: string; html: string } | null {
+    if (!selected.size) return null;
     const list = snapshot(selected);
     memoryClip = list;
-    const plain = list.filter(i => i.text?.trim()).sort((a, b) => a.y - b.y || a.x - b.x).map(i => i.text!.trim()).join('\n');
+    const plain = plainOf(list);
     const json = JSON.stringify(list).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
     const esc = plain.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-    e.clipboardData.setData('text/plain', plain);
-    e.clipboardData.setData('text/html', `<div ${CLIP}="${json}">${esc.replace(/\n/g, '<br>')}</div>`);
+    return { plain, html: `<div ${CLIP}="${json}">${esc.replace(/\n/g, '<br>')}</div>` };
+  }
+
+  function writeClip(e: ClipboardEvent): boolean {
+    const c = e.clipboardData ? clipOf() : null;
+    if (!c) return false;
+    e.clipboardData!.setData('text/plain', c.plain);
+    e.clipboardData!.setData('text/html', c.html);
     e.preventDefault();
     return true;
+  }
+
+  /** Kopieren ohne Tastatur (Kontextmenü). */
+  function copySelection(): boolean {
+    const c = clipOf();
+    if (!c) return false;
+    const blob = (text: string, type: string) => new Blob([text], { type });
+    navigator.clipboard?.write([new ClipboardItem({ 'text/plain': blob(c.plain, 'text/plain'), 'text/html': blob(c.html, 'text/html') })])
+      .catch(() => navigator.clipboard.writeText(c.plain))
+      .catch(() => { /* bleibt im Speicher (memoryClip) */ });
+    return true;
+  }
+
+  /** Einfügen ohne Tastatur (Kontextmenü): liest die Zwischenablage selbst. */
+  async function pasteFromClipboard(at: Pt) {
+    try {
+      const files: File[] = [];
+      let html = '', plain = '';
+      for (const item of await navigator.clipboard.read()) {
+        const img = item.types.find(t => t.startsWith('image/'));
+        if (img) { files.push(new File([await item.getType(img)], 'bild', { type: img })); continue; }
+        if (item.types.includes('text/html')) html = await (await item.getType('text/html')).text();
+        if (item.types.includes('text/plain')) plain = await (await item.getType('text/plain')).text();
+      }
+      pasteData(files, html, plain, at);
+    } catch {
+      try { pasteData([], '', await navigator.clipboard.readText(), at); }
+      catch {
+        if (memoryClip?.length) pasteData([], '', plainOf(memoryClip), at);
+        else o.toast('Kein Zugriff auf die Zwischenablage.');
+      }
+    }
   }
 
   addEventListener('copy', e => { if (!editing && !typingElsewhere(e)) writeClip(e); });
   addEventListener('cut', e => { if (!editing && !typingElsewhere(e) && canEdit && writeClip(e)) removeSelected(); });
   addEventListener('paste', e => {
     if (editing || typingElsewhere(e) || !canEdit || !e.clipboardData) return;
-    const files = [...e.clipboardData.files].filter(f => f.type.startsWith('image/'));
+    const files = [...e.clipboardData.files];
     const at = lastPointer && contains({ x: -view.x / view.z, y: -view.y / view.z, w: root.clientWidth / view.z, h: root.clientHeight / view.z }, lastPointer) ? lastPointer : viewCenter();
-    if (files.length) { e.preventDefault(); placeImages(files, at); return; }
-    const html = e.clipboardData.getData('text/html');
+    e.preventDefault();
+    pasteData(files, e.clipboardData.getData('text/html'), e.clipboardData.getData('text/plain'), at);
+  });
+
+  /** Bilder, Board-Elemente, Video-Links oder Text (eine Notiz pro Zeile) einfügen. */
+  function pasteData(allFiles: File[], html: string, plain: string, at: Pt) {
+    const files = allFiles.filter(f => f.type.startsWith('image/'));
+    if (files.length) { placeImages(files, at); return; }
     let list: Item[] | null = null;
     const m = new RegExp(`${CLIP}="([^"]*)"`).exec(html);
     if (m) {
       try { list = JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&amp;/g, '&')); } catch { list = null; }
-    } else if (memoryClip && e.clipboardData.getData('text/plain') === memoryClip.filter(i => i.text?.trim()).sort((a, b) => a.y - b.y || a.x - b.x).map(i => i.text!.trim()).join('\n') && memoryClip.length) {
+    } else if (memoryClip?.length && plain === plainOf(memoryClip)) {
       list = memoryClip;
     }
-    e.preventDefault();
     if (list?.length) {
       const b = union(list.map(i => (i.t === 'arrow'
         ? union([{ x: i.fx ?? 0, y: i.fy ?? 0 }, { x: i.tx ?? 0, y: i.ty ?? 0 }, ...pairs(i.wp)].map(q => ({ ...q, w: 0, h: 0 })))!
@@ -2133,9 +2174,55 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       select(ids);
       return;
     }
-    const plain = e.clipboardData.getData('text/plain');
     if (placeVideo(plain, at)) return;
     pasteText(plain, at);
+  }
+
+  // ── Kontextmenü: Rechtsklick bzw. langes Drücken mit dem Finger ───────────
+
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform) || navigator.maxTouchPoints > 0;
+  const keyHint = (k: string) => (touchDevice ? undefined : isMac ? `⌘${k}` : `Strg+${k}`);
+  let popOpenedAt = 0;
+
+  function openContext(sp: Pt, hitId: string | null) {
+    const at = toWorld(sp);
+    if (editing) endEdit();
+    if (hitId && canEdit && !selected.has(hitId)) select([hitId]);
+    else if (!hitId) select([]);
+    const has = selected.size > 0;
+    const entries: PopEntry[] = [];
+    if (canEdit && has) {
+      entries.push(
+        [ICON.copy, 'Kopieren', () => { copySelection(); }, keyHint('C')],
+        [ICON.cut, 'Ausschneiden', () => { if (copySelection()) removeSelected(); }, keyHint('X')],
+        [ICON.paste, 'Einfügen', () => pasteFromClipboard(at), keyHint('V')],
+        [ICON.dup, 'Duplizieren', duplicate, keyHint('D')],
+        null,
+        [ICON.front, 'Nach vorne', () => restack(true)],
+        [ICON.back, 'Nach hinten', () => restack(false)],
+        null,
+        [ICON.trash, 'Löschen', removeSelected, touchDevice ? undefined : '⌫', true],
+      );
+    } else if (canEdit) {
+      entries.push(
+        [ICON.paste, 'Einfügen', () => pasteFromClipboard(at), keyHint('V')],
+        [ICON.note, 'Notiz', () => { const id = addNote(at); if (id) startEdit(id); }],
+        null,
+        [ICON.all, 'Alles auswählen', () => select(cache.keys()), keyHint('A')],
+      );
+    }
+    entries.push([ICON.fit, 'Alles zeigen', fitAll, touchDevice ? undefined : '⇧1']);
+    openPop(entries, sp, 'at');
+    popOpenedAt = performance.now();
+  }
+
+  root.addEventListener('contextmenu', e => {
+    const target = e.target as HTMLElement;
+    // Beim Schreiben bleibt das Menü des Browsers (Rechtschreibung, Einsetzen …).
+    if (target.closest('.is-editing, input, textarea')) return;
+    e.preventDefault();
+    if (target.closest('.b-tools, .b-zoom, .b-ctx, .b-pop, .b-follow')) return;
+    openContext(local2(e.clientX, e.clientY), itemIdAt(target));
   });
 
   /** Eingefügter Text: jede Zeile eine Notiz, im Raster. */
@@ -2383,6 +2470,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
       .filter(([client, st]) => client !== ydoc.clientID && st.user)
       .map(([client, st]) => ({ name: String(st.user!.name || 'Gast'), color: String(st.user!.color || '#888'), id: client }));
     report();
+    syncLaser();
 
     // Auswahl der anderen
     for (const id of peerSel.keys()) nodes.get(id)?.classList.remove('peer-sel');
@@ -2473,6 +2561,7 @@ export function mountBoard(o: BoardOptions): BoardHandle {
   // ── Start ─────────────────────────────────────────────────────────────────
 
   setTool('select');
+  syncLaser();
   function setEditable(on: boolean) {
     canEdit = on;
     root.classList.toggle('is-readonly', !on);
