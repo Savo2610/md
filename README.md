@@ -112,7 +112,8 @@ dasselbe sehen. Jedes Board lässt sich auch als Markdown abrufen.
 
 Sag einem Agenten „veröffentliche das auf md.veerka.mp“. Er findet dort die
 Anleitung ([/llms.txt](https://md.veerka.mp/llms.txt)), legt das Dokument mit
-einer Anfrage an und antwortet mit dem Bearbeiten-Link. Ohne Schlüssel gehen
+einer Anfrage an und antwortet mit dem Bearbeiten-Link. Auf Wunsch schickt er
+es mir direkt, dann steht es mit dem Tag „Agent“ in meiner Liste. Ohne Schlüssel gehen
 20 Dokumente am Tag. Chat-Assistenten, die keine Anfragen schicken können,
 geben stattdessen einen Link `md.veerka.mp/#text=…` aus. Ein Klick darauf legt
 das Dokument an.

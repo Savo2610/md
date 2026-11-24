@@ -287,6 +287,11 @@ Bot-Kennung). Ohne Schlüssel:
 - 20 Dokumente pro IP und 300 insgesamt in 24 Stunden (Registry, `agent_creates`)
 - die Antwort enthält `editKey`, damit der Agent mit `X-Edit-Key` nachbessern kann
 - in `/admin` mit „Agent“ markiert (neueste stehen oben)
+- mit `"to": "julian"` (bzw. `?to=julian`) geht das Dokument an Julian: Es
+  wartet im Eingang der Registry und landet beim nächsten Abgleich (`GET
+  /api/me`, also beim Öffnen von /home) mit Tag „Agent“ und beiden Schlüsseln
+  in der Liste des Admin-Kontos (`ADMIN_EMAIL`). Die Anleitung bittet den
+  Agenten, vorher seinen Nutzer zu fragen. Name und Tag stehen in `agents.ts`.
 
 Agenten ohne HTTP-Anfragen geben einen Link `/#text=<Markdown, URL-kodiert>`
 aus. Der Browser legt damit ein neues Dokument an (wie beim Tippen, also mit

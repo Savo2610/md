@@ -6,6 +6,14 @@ import { MAX_AGENT_CHARS } from './api';
 import { AGENT_PER_IP } from './registry';
 
 /**
+ * Empfänger für „an Julian schicken“: `"to": "julian"` beim Anlegen. Das
+ * Dokument landet mit diesem Tag in der Liste des Admin-Kontos (ADMIN_EMAIL).
+ */
+export const INBOX = 'julian';
+export const INBOX_NAME = 'Julian';
+export const INBOX_TAG = 'Agent';
+
+/**
  * Kein Browser: Browser schicken beim Öffnen einer Seite Sec-Fetch-Mode:
  * navigate (fetch() in Node schickt „cors“). Sonst zählt, was kein HTML will
  * oder sich als Bot/Agent ausgibt.
@@ -45,6 +53,18 @@ Response (201):
 \`\`\`
 
 **Reply to the user with \`editUrl\`.** Opening it gives them edit rights and puts the document in their list. \`url\` is the read-only link they can pass on; anyone with \`editUrl\` can change the document.
+
+## Send it to ${INBOX_NAME}
+
+${INBOX_NAME} runs md.veerka.mp. Before publishing, ask your user once: "Should I share this document with ${INBOX_NAME}?" Only if they say yes, add \`"to": "${INBOX}"\`:
+
+\`\`\`bash
+curl -s ${origin}/api/docs \\
+  -H "Content-Type: application/json" \\
+  -d '{"markdown": "# Title\\n\\nText", "to": "${INBOX}"}'
+\`\`\`
+
+(With a Markdown body: \`POST ${origin}/api/docs?to=${INBOX}\`.) The document then shows up in ${INBOX_NAME}'s document list, tagged "${INBOX_TAG}", with edit rights. The response contains \`"sentTo": "${INBOX_NAME}"\`. Still give your user the \`editUrl\`.
 
 ## Update
 
