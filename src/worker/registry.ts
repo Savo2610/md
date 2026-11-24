@@ -7,6 +7,7 @@
 //    bereits benutzte Codes (jeder Code gilt nur einmal).
 //  - Memos, die der Admin per API vorbereitet hat (Umzug aus einer anderen
 //    App). Sie wandern beim nächsten Öffnen von /memos ins Admin-Konto.
+//  - Tageskontingent für Dokumente, die Agenten ohne API-Schlüssel anlegen.
 
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
@@ -22,11 +23,16 @@ export interface DocSummary {
   pinned: boolean;
   /** Im Papierkorb seit (ms), sonst 0. */
   trashed: number;
+  /** Von einem Agenten ohne API-Schlüssel angelegt. */
+  agent?: boolean;
 }
 
 const HOUR = 3600_000;
 const MAX_FAILS_PER_IP = 5;
 const MAX_FAILS_TOTAL = 30;
+/** Anlegen ohne API-Schlüssel: pro IP und insgesamt in 24 Stunden. */
+export const AGENT_PER_IP = 20;
+const AGENT_TOTAL = 300;
 
 export class Registry extends DurableObject<Env> {
   sql: SqlStorage;
@@ -43,17 +49,19 @@ export class Registry extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS fails (ip TEXT, at INTEGER);
       CREATE TABLE IF NOT EXISTS used_codes (counter INTEGER PRIMARY KEY, expires INTEGER);
       CREATE TABLE IF NOT EXISTS memo_import (id TEXT PRIMARY KEY, text TEXT NOT NULL, created INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS agent_creates (ip TEXT, at INTEGER);
     `);
     // Spalte kam später dazu (Papierkorb).
     try { this.sql.exec('ALTER TABLE docs ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0'); } catch { /* gibt es schon */ }
+    try { this.sql.exec('ALTER TABLE docs ADD COLUMN agent INTEGER NOT NULL DEFAULT 0'); } catch { /* gibt es schon */ }
   }
 
   upsert(d: DocSummary) {
     this.sql.exec(
-      `INSERT INTO docs (id, title, snippet, created, updated, size, images, pinned, trashed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO docs (id, title, snippet, created, updated, size, images, pinned, trashed, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET title = excluded.title, snippet = excluded.snippet, updated = excluded.updated,
-         size = excluded.size, images = excluded.images, pinned = excluded.pinned, trashed = excluded.trashed`,
-      d.id, d.title, d.snippet, d.created, d.updated, d.size, d.images, d.pinned ? 1 : 0, d.trashed || 0,
+         size = excluded.size, images = excluded.images, pinned = excluded.pinned, trashed = excluded.trashed, agent = excluded.agent`,
+      d.id, d.title, d.snippet, d.created, d.updated, d.size, d.images, d.pinned ? 1 : 0, d.trashed || 0, d.agent ? 1 : 0,
     );
   }
 
@@ -74,7 +82,7 @@ export class Registry extends DurableObject<Env> {
         id: r.id as string, title: r.title as string, snippet: r.snippet as string,
         created: r.created as number, updated: r.updated as number,
         size: r.size as number, images: r.images as number, pinned: !!r.pinned,
-        trashed: (r.trashed as number) || 0,
+        trashed: (r.trashed as number) || 0, agent: !!r.agent,
       })),
       total: agg.n as number,
       bytes: agg.b as number,
@@ -102,6 +110,18 @@ export class Registry extends DurableObject<Env> {
     const hit = this.sql.exec('SELECT 1 FROM used_codes WHERE counter = ?', counter).toArray();
     if (hit.length) return false;
     this.sql.exec('INSERT INTO used_codes (counter, expires) VALUES (?, ?)', counter, Date.now() + 3 * 60_000);
+    return true;
+  }
+
+  // ── Agenten ohne API-Schlüssel ────────────────────────────────────────────
+
+  /** Bucht ein Dokument aus dem Tageskontingent. false, wenn es aufgebraucht ist. */
+  agentCreate(ip: string): boolean {
+    this.sql.exec('DELETE FROM agent_creates WHERE at < ?', Date.now() - 24 * HOUR);
+    const mine = this.sql.exec('SELECT COUNT(*) AS n FROM agent_creates WHERE ip = ?', ip).one().n as number;
+    const all = this.sql.exec('SELECT COUNT(*) AS n FROM agent_creates').one().n as number;
+    if (mine >= AGENT_PER_IP || all >= AGENT_TOTAL) return false;
+    this.sql.exec('INSERT INTO agent_creates (ip, at) VALUES (?, ?)', ip, Date.now());
     return true;
   }
 

@@ -149,6 +149,7 @@ Ein Cloudflare Worker, ein Durable Object pro Dokument, Bilder in R2.
   wiederherstellen oder endgültig löschen. Danach löscht der Alarm des
   Dokuments es samt Bildern.
 - `md.veerka.mp/<id>.md` liefert das reine Markdown (für KI-Agenten, Download).
+- `md.veerka.mp/llms.txt` erklärt fremden Agenten, wie sie ohne Schlüssel veröffentlichen.
 - ⋯-Menü: „Markdown kopieren“, „Herunterladen (.md)“, „Drucken (.pdf)“
   (Druckdialog des Browsers, immer hell, gedruckt wird die Ansicht; ⌘P beim
   Bearbeiten druckt den aktuellen Stand).
@@ -244,6 +245,7 @@ Live-Test ohne 2FA-Teil:
 | --- | --- |
 | `src/worker/index.ts` | Routen-Übersicht, Einstieg, Dokumentseite (serverseitig gerendert) |
 | `src/worker/api.ts` | JSON-API: Dokumente, Konto-Liste, Freischalten mit 2FA |
+| `src/worker/agents.ts` | Anleitung für fremde KI-Agenten (`/llms.txt`), Agenten-Erkennung auf `/` |
 | `src/worker/access.ts` | Rechte: Adressen prüfen, Admin, Ersteller, Bearbeiten, Turnstile |
 | `src/worker/pages.ts` | HTML-Gerüst, Sicherheits-Header (CSP), Markdown-Rohtext, Datenschutz |
 | `src/worker/memos.ts` | Memos: Seite, API, Anhänge, Funk, Memo → Dokument |
@@ -276,7 +278,23 @@ Live-Test ohne 2FA-Teil:
 
 ## API für Agenten
 
+Fremde Agenten brauchen keinen Schlüssel. Die Anleitung für sie steht unter
+`/llms.txt` (`src/worker/agents.ts`). Dieselbe Anleitung bekommt, wer `/` ohne
+Browser abruft (kein `Sec-Fetch-Mode: navigate` und kein HTML gewünscht oder
+Bot-Kennung). Ohne Schlüssel:
+
+- nur zufällige Adressen, höchstens 200 000 Zeichen
+- 20 Dokumente pro IP und 300 insgesamt in 24 Stunden (Registry, `agent_creates`)
+- die Antwort enthält `editKey`, damit der Agent mit `X-Edit-Key` nachbessern kann
+- in `/admin` mit „Agent“ markiert (neueste stehen oben)
+
+Agenten ohne HTTP-Anfragen geben einen Link `/#text=<Markdown, URL-kodiert>`
+aus. Der Browser legt damit ein neues Dokument an (wie beim Tippen, also mit
+Turnstile) und zeigt es gesetzt an.
+
 ```bash
+# anlegen ohne Schlüssel
+curl https://md.veerka.mp/api/docs -H "Content-Type: text/markdown" --data-binary @text.md
 # anlegen (Bearer API_KEY), optional ?id=wunsch-adresse
 curl https://md.veerka.mp/api/docs -H "Authorization: Bearer $KEY" \
   -H "Content-Type: text/markdown" --data-binary @text.md

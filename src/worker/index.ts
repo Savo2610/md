@@ -2,8 +2,11 @@
 //
 // Adressen:
 //   /                    neues Dokument mit zufälliger ID (Weiterleitung;
-//                        /#board → neues Whiteboard, /#pack → neue Packliste;
-//                        der Browser behält das #…)
+//                        /#board → neues Whiteboard, /#pack → neue Packliste,
+//                        /#text=<Markdown> → neues Dokument mit diesem Text;
+//                        der Browser behält das #…). Agenten statt Browser
+//                        bekommen hier die Anleitung aus /llms.txt.
+//   /llms.txt            Anleitung für KI-Agenten (agents.ts)
 //   /<id>                Dokument ansehen; gibt es das noch nicht, öffnet
 //                        sich der Editor und legt es beim ersten Tippen an
 //   /<id>.md             reines Markdown (für Agenten, ?download=1 zum Speichern)
@@ -21,7 +24,8 @@
 //   /datenschutz         Datenschutzerklärung
 //
 // API (JSON, api.ts):
-//   POST   /api/docs                 Agent legt Dokument an (Bearer API_KEY)
+//   POST   /api/docs                 Agent legt Dokument an (Bearer API_KEY; ohne Schlüssel
+//                                    zufällige Adresse, 200 000 Zeichen, 20 pro Tag und IP)
 //   GET    /api/docs/<id>            Dokument als JSON
 //   PUT    /api/docs/<id>            Inhalt ersetzen (Bearer API_KEY/Admin oder X-Edit-Key)
 //   DELETE /api/docs/<id>            endgültig löschen (Admin; Ersteller nur aus dem Papierkorb)
@@ -68,6 +72,7 @@ import { randomId } from './crypto';
 import { auth, currentUser } from './auth';
 import { normalizeId } from './access';
 import { api } from './api';
+import { agentGuide, isAgent } from './agents';
 import { accountStub, docStub, type Env } from './env';
 import { serveFile } from './files';
 import { ratesFor } from './fx';
@@ -103,8 +108,9 @@ export default {
       // (Claude-User, ChatGPT-User …), halten sich an robots.txt. Aus
       // Suchmaschinen hält die Seiten der Header X-Robots-Tag: noindex fern.
       // Trainings-Crawler sperrt Cloudflare (verwaltete robots.txt davor).
-      return text('# Dokumente sind per noindex von Suchmaschinen ausgenommen.\n', 200, { 'cache-control': 'public, max-age=86400' });
+      return text('# Dokumente sind per noindex von Suchmaschinen ausgenommen.\n# KI-Agenten: https://md.veerka.mp/llms.txt\n', 200, { 'cache-control': 'public, max-age=86400' });
     }
+    if (path === '/llms.txt') return agentGuide(url.origin);
     if (path.startsWith('/auth/')) {
       try {
         return await auth(req, env, url);
@@ -124,7 +130,7 @@ export default {
     if (req.method !== 'GET' && req.method !== 'HEAD') return fail(405, 'Methode nicht erlaubt.');
 
     switch (path) {
-      case '/': return redirect(`/${randomId()}`);
+      case '/': return isAgent(req) ? agentGuide(url.origin) : redirect(`/${randomId()}`);
       case '/home': return page(req, 'md', APP, { page: 'home', ...accountBoot(await currentUser(req, env), env) });
       case '/admin': return page(req, 'Übersicht', APP, { page: 'admin', admin: accountBoot(await currentUser(req, env), env).admin });
       case '/memos': return memosPage(req, env, ctx);
