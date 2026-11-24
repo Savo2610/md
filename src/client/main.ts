@@ -444,6 +444,7 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
     store.set(keyName, editKey!);
     if (data.ownerKey) store.set(`md:owner:${id}`, data.ownerKey);
     exists = true;
+    $('.for-agents')?.remove();
     editor?.markCreated();
     board?.markCreated();
     pack?.markCreated();

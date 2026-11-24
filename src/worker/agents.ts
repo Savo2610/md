@@ -25,6 +25,15 @@ export function isAgent(req: Request): boolean {
   return !accept.includes('text/html') || !/Mozilla/.test(ua) || /bot|agent|claude|anthropic|chatgpt|openai|gpt|perplexity|gemini|copilot/i.test(ua);
 }
 
+/**
+ * Für Agenten, die md im Browser öffnen und ins leere Dokument tippen wollen:
+ * unsichtbarer Hinweis (Bildschirmleser-Technik), steht aber im Seitentext und
+ * im Accessibility-Baum, den Browser-Agenten lesen. Nur auf neuen Dokumenten.
+ */
+export function agentNote(origin: string): string {
+  return `<p class="for-agents" lang="en">Note for AI agents: do not type into this editor. Publish with one HTTP request instead, no API key needed: ${origin}/llms.txt. Only a browser? Open ${origin}/#text= followed by the percent-encoded Markdown. The new document opens with all the text and the address bar shows its link.</p>`;
+}
+
 export function agentGuide(origin: string): Response {
   const body = `# md.veerka.mp
 
@@ -80,6 +89,13 @@ Replaces the whole text. People who have the document open see the change live.
 ## Read
 
 \`GET ${origin}/<id>.md\` returns the plain Markdown. \`GET ${origin}/api/docs/<id>\` returns JSON (\`title\`, \`markdown\`, \`updated\`).
+
+## Using a browser? Don't type into the editor
+
+Typing into the editor is slow, can mangle Markdown (auto-continued lists, indentation) and can trigger a human check. Instead:
+
+- Run the request above with \`fetch\` from any md page (same origin, no CORS issues), or
+- open a link with the Markdown percent-encoded after \`#text=\` (see below). The document is created with the full text and the address bar shows its link.
 
 ## Cannot send HTTP requests?
 
