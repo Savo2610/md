@@ -297,6 +297,11 @@ Agenten ohne HTTP-Anfragen geben einen Link `/#text=<Markdown, URL-kodiert>`
 aus. Der Browser legt damit ein neues Dokument an (wie beim Tippen, also mit
 Turnstile) und zeigt es gesetzt an.
 
+Agenten, die md im Browser öffnen und tippen wollen, sehen auf neuen, leeren
+Dokumenten einen unsichtbaren Hinweis (`.for-agents`, `agentNote()`): Er steht
+im Seitentext und im Accessibility-Baum und verweist auf die API und auf
+`/#text=`. Sobald das Dokument angelegt ist, entfernt das Skript ihn.
+
 ```bash
 # anlegen ohne Schlüssel
 curl https://md.veerka.mp/api/docs -H "Content-Type: text/markdown" --data-binary @text.md

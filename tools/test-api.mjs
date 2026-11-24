@@ -66,6 +66,11 @@ r = await fetch(`${BASE}/`, { redirect: 'manual', headers: { 'user-agent': 'Mozi
 ok(r.status === 200 && (await r.text()).startsWith('# md.veerka.mp'), '/ für Agenten: Anleitung');
 r = await fetch(`${BASE}/`, { redirect: 'manual', headers: { 'user-agent': 'Mozilla/5.0 (Macintosh) Safari/605.1.15', accept: 'text/html', 'sec-fetch-mode': 'navigate' } });
 ok(r.status === 302, '/ im Browser: neues Dokument');
+const HTML = { accept: 'text/html', 'user-agent': 'Mozilla/5.0 (Macintosh) Safari/605.1.15' };
+r = await fetch(`${BASE}/leer-${Date.now()}`, { headers: HTML });
+ok((await r.text()).includes('class="for-agents"'), 'Neues Dokument: Hinweis für Browser-Agenten');
+r = await fetch(`${BASE}/${id}`, { headers: HTML });
+ok(!(await r.text()).includes('for-agents'), 'Bestehendes Dokument: kein Hinweis');
 
 r = await fetch(`${BASE}/api/docs`, { method: 'POST', headers: { ...API, 'content-type': 'application/json' }, body: JSON.stringify({ id, markdown: 'x' }) });
 ok(r.status === 409, 'Gleiche ID nochmal → 409');

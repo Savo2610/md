@@ -72,7 +72,7 @@ import { randomId } from './crypto';
 import { auth, currentUser } from './auth';
 import { normalizeId } from './access';
 import { api } from './api';
-import { agentGuide, isAgent } from './agents';
+import { agentGuide, agentNote, isAgent } from './agents';
 import { accountStub, docStub, type Env } from './env';
 import { serveFile } from './files';
 import { ratesFor } from './fx';
@@ -198,7 +198,8 @@ async function docPage(req: Request, env: Env, ctx: ExecutionContext, id: string
     // Angemeldet braucht es keinen Spam-Schutz.
     const siteKey = user ? undefined : env.TURNSTILE_SITEKEY;
     if (asPack) return page(req, 'Packliste', APP, { ...common, exists: false, kind: 'pack', siteKey }, 200, PACK_APP);
-    return page(req, 'Neues Dokument', APP, { ...common, exists: false, siteKey });
+    const app = `<main id="app">${agentNote(new URL(req.url).origin)}</main>`;
+    return page(req, 'Neues Dokument', app, { ...common, exists: false, siteKey });
   }
 
   const acc = user ? accountStub(env, user.sub) : null;
