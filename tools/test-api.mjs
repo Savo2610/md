@@ -241,7 +241,7 @@ await fetch(`${BASE}/api/docs/${board}-neu`, { method: 'DELETE', headers: API })
 // ── Sonstiges ───────────────────────────────────────────────────────────────
 r = await fetch(`${BASE}/Gro%C3%9Fe%20K%C3%BCche`, { redirect: 'manual' });
 ok(r.status === 301 && r.headers.get('location') === `/${encodeURIComponent('große-küche')}`, 'Adresse wird normalisiert (Kleinbuchstaben, Bindestriche)');
-r = await fetch(`${BASE}/`, { redirect: 'manual', headers: { 'sec-fetch-mode': 'navigate', accept: 'text/html' } });
+r = await fetch(`${BASE}/`, { redirect: 'manual', headers: { 'user-agent': 'Mozilla/5.0 (Macintosh) Safari/605.1.15', accept: 'text/html' } });
 ok(r.status === 302 && /^\/[a-z0-9]{10}$/.test(r.headers.get('location')), 'Startseite leitet auf zufällige ID um');
 r = await fetch(`${BASE}/robots.txt`);
 ok(!/^Disallow: \/\s*$/m.test((await r.text()).split('END Cloudflare Managed Content').pop()), 'robots.txt sperrt KI-Assistenten nicht');
@@ -263,6 +263,15 @@ if (!LIVE && vars.DEV_LOGIN === '1') {
   if (vars.ADMIN_EMAIL === 'test@localhost') {
     r = await fetch(`${BASE}/api/admin/docs`, { headers: C });
     ok(r.status === 200, 'Admin-Konto (ADMIN_EMAIL) kommt ohne Code in die Übersicht');
+    r = await fetch(`${BASE}/api/docs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ markdown: '# An Julian\n\nText.', to: 'julian' }) });
+    const sent = await j(r);
+    ok(r.status === 201 && sent.sentTo === 'Julian', 'Agent schickt Dokument an Julian');
+    r = await fetch(`${BASE}/api/me`, { headers: C });
+    const got = (await j(r)).docs.find(x => x.id === sent.id);
+    ok(got && got.tags.includes('Agent') && got.editKey === sent.editKey && got.ownerKey && got.title === 'An Julian', 'Kommt mit Tag „Agent“ und Schlüsseln in der Liste des Admin-Kontos an');
+    r = await fetch(`${BASE}/api/docs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"markdown":"x","to":"bob"}' });
+    ok(r.status === 400, 'Unbekannter Empfänger → 400');
+    await fetch(`${BASE}/api/docs/${sent.id}`, { method: 'DELETE', headers: API });
     r = await fetch(`${BASE}/api/docs/${id}/pin`, { method: 'POST', headers: { ...C, 'content-type': 'application/json', origin: 'https://evil.example' }, body: '{"pinned":true}' });
     ok(r.status === 401, 'Admin per Cookie: fremde Herkunft abgelehnt');
     r = await fetch(`${BASE}/admin`, { headers: C });

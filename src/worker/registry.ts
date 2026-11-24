@@ -8,6 +8,8 @@
 //  - Memos, die der Admin per API vorbereitet hat (Umzug aus einer anderen
 //    App). Sie wandern beim nächsten Öffnen von /memos ins Admin-Konto.
 //  - Tageskontingent für Dokumente, die Agenten ohne API-Schlüssel anlegen.
+//  - Eingang: Dokumente, die Agenten dem Admin geschickt haben. Sie wandern
+//    beim nächsten Abgleich (/api/me) in die Dokumentliste des Admin-Kontos.
 
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
@@ -26,6 +28,8 @@ export interface DocSummary {
   /** Von einem Agenten ohne API-Schlüssel angelegt. */
   agent?: boolean;
 }
+
+export interface InboxDoc { id: string; title: string; editKey: string; ownerKey: string | null; at: number }
 
 const HOUR = 3600_000;
 const MAX_FAILS_PER_IP = 5;
@@ -50,6 +54,7 @@ export class Registry extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS used_codes (counter INTEGER PRIMARY KEY, expires INTEGER);
       CREATE TABLE IF NOT EXISTS memo_import (id TEXT PRIMARY KEY, text TEXT NOT NULL, created INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS agent_creates (ip TEXT, at INTEGER);
+      CREATE TABLE IF NOT EXISTS inbox (id TEXT PRIMARY KEY, title TEXT, edit_key TEXT, owner_key TEXT, at INTEGER);
     `);
     // Spalte kam später dazu (Papierkorb).
     try { this.sql.exec('ALTER TABLE docs ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0'); } catch { /* gibt es schon */ }
@@ -123,6 +128,19 @@ export class Registry extends DurableObject<Env> {
     if (mine >= AGENT_PER_IP || all >= AGENT_TOTAL) return false;
     this.sql.exec('INSERT INTO agent_creates (ip, at) VALUES (?, ?)', ip, Date.now());
     return true;
+  }
+
+  // ── Eingang fürs Admin-Konto ────────────────────────────────────────────
+
+  sendToAdmin(d: InboxDoc) {
+    this.sql.exec('INSERT OR REPLACE INTO inbox (id, title, edit_key, owner_key, at) VALUES (?, ?, ?, ?, ?)', d.id, d.title, d.editKey, d.ownerKey, d.at);
+  }
+
+  /** Alles aus dem Eingang (und leeren). */
+  takeInbox(): InboxDoc[] {
+    const rows = this.sql.exec('SELECT * FROM inbox ORDER BY at').toArray();
+    this.sql.exec('DELETE FROM inbox');
+    return rows.map(r => ({ id: r.id as string, title: r.title as string, editKey: r.edit_key as string, ownerKey: (r.owner_key as string) || null, at: r.at as number }));
   }
 
   // ── Memos-Umzug ───────────────────────────────────────────────────────────

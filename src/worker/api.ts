@@ -5,6 +5,8 @@ import { MAX_CHARS, docKind } from './doc';
 import { packUmzug } from './packliste';
 import { accountStub, docStub, registry, type Env } from './env';
 import { AGENT_PER_IP } from './registry';
+import { INBOX, INBOX_NAME, INBOX_TAG } from './agents';
+import { titleOf } from '../shared/title';
 import { clearSessionCookie, currentUser } from './auth';
 import type { AccountDoc } from './account';
 import { canEdit, isAdmin, isAdminUser, isOwner, normalizeId, turnstileOk } from './access';
@@ -56,7 +58,8 @@ async function docs(req: Request, env: Env, url: URL, parts: string[]): Promise<
   if (!parts.length && method === 'POST') {
     const keyed = await isAdmin(req, env);
     if (!keyed && req.headers.get('authorization')) return fail(401, 'API key is wrong. Leave out the Authorization header to publish without a key.');
-    const { markdown, id: wanted } = await readMarkdownBody(req);
+    const { markdown, id: wanted, to } = await readMarkdownBody(req);
+    if (to && to.toLowerCase() !== INBOX) return fail(400, `Unknown recipient "${to}". The only recipient is "${INBOX}".`);
     if (!keyed) {
       if (wanted) return fail(403, 'A custom id needs an API key. Leave out "id" to get a random address.');
       if (!markdown.trim()) return fail(400, 'Empty document. Send the Markdown as the request body.');
@@ -69,7 +72,9 @@ async function docs(req: Request, env: Env, url: URL, parts: string[]): Promise<
     if (!id) return fail(400, BAD_ID);
     const editKey = await docStub(env, id).create(id, markdown, undefined, 'md', undefined, !keyed);
     if (!editKey) return fail(409, 'Diese ID ist schon vergeben.');
-    return json({ id, url: docUrl(req, id), editUrl: `${docUrl(req, id)}#edit=${editKey}`, raw: `${docUrl(req, id)}.md`, editKey }, 201);
+    // An Julian: landet mit Tag „Agent“ in der Dokumentliste des Admin-Kontos.
+    if (to) await registry(env).sendToAdmin({ id, title: titleOf(markdown), editKey, ownerKey: await docStub(env, id).ownerKey(), at: Date.now() });
+    return json({ id, url: docUrl(req, id), editUrl: `${docUrl(req, id)}#edit=${editKey}`, raw: `${docUrl(req, id)}.md`, editKey, ...(to ? { sentTo: INBOX_NAME } : {}) }, 201);
   }
 
   const id = parts[0] ? normalizeId(parts[0]) : null;
@@ -198,12 +203,17 @@ async function docs(req: Request, env: Env, url: URL, parts: string[]): Promise<
   return fail(404, 'Unbekannt.');
 }
 
-async function readMarkdownBody(req: Request): Promise<{ markdown: string; id?: string }> {
+async function readMarkdownBody(req: Request): Promise<{ markdown: string; id?: string; to?: string }> {
+  const query = new URL(req.url).searchParams;
   if ((req.headers.get('content-type') || '').includes('application/json')) {
-    const body = await readJson<{ markdown: string; content: string; id: string }>(req);
-    return { markdown: String(body.markdown ?? body.content ?? ''), id: typeof body.id === 'string' ? body.id : undefined };
+    const body = await readJson<{ markdown: string; content: string; id: string; to: string }>(req);
+    return {
+      markdown: String(body.markdown ?? body.content ?? ''),
+      id: typeof body.id === 'string' ? body.id : undefined,
+      to: typeof body.to === 'string' ? body.to.trim() || undefined : query.get('to') || undefined,
+    };
   }
-  return { markdown: await req.text(), id: new URL(req.url).searchParams.get('id') || undefined };
+  return { markdown: await req.text(), id: query.get('id') || undefined, to: query.get('to')?.trim() || undefined };
 }
 
 // ── Konto: /api/me/… ────────────────────────────────────────────────────────
@@ -215,7 +225,14 @@ async function me(req: Request, env: Env, parts: string[], ctx: ExecutionContext
   const acc = accountStub(env, user.sub);
 
   if (!parts.length) {
-    if (req.method === 'GET') return json({ user: accountBoot(user, env).user, docs: await acc.list() });
+    if (req.method === 'GET') {
+      // Admin: was Agenten geschickt haben, kommt jetzt in die Liste.
+      if (isAdminUser(user, env)) {
+        const inbox = await registry(env).takeInbox();
+        if (inbox.length) await acc.upsert(inbox.map(d => ({ id: d.id, title: d.title, editKey: d.editKey, ownerKey: d.ownerKey, opened: d.at, tags: [INBOX_TAG] })));
+      }
+      return json({ user: accountBoot(user, env).user, docs: await acc.list() });
+    }
     if (req.method === 'DELETE') {
       await acc.destroy();
       await deleteAllMemoFiles(env, user.sub);
