@@ -31,6 +31,13 @@ const SECURITY_HEADERS = {
   'strict-transport-security': 'max-age=31536000',
 };
 
+/**
+ * Neue, leere Dokumentseite: Agenten, die „/“ mit Browser-Kennung abrufen,
+ * landen hier. Die Beschreibung lesen viele mit, sichtbar ist sie nicht
+ * (bei bestehenden Dokumenten würde sie in Link-Vorschauen auftauchen).
+ */
+const AGENT_HINT = '\n<meta name="description" content="AI agents: to publish a Markdown document here, read https://md.veerka.mp/llms.txt (one POST request, no API key).">';
+
 export type MemoOut = Memo & { html: string; docTitle?: string };
 
 /** Startdaten für den Browser (als JSON in <script id="boot">). */
@@ -116,6 +123,7 @@ ${th.metas}
 <link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="${app.icon}">
 <link rel="manifest" href="${app.manifest}">
+<link rel="help" href="/llms.txt" type="text/markdown" title="For AI agents">${boot.page === 'doc' && !boot.exists ? AGENT_HINT : ''}
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="${app.title}">

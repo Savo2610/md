@@ -43,8 +43,29 @@ let d = await j(r);
 ok(r.status === 201 && d.url.endsWith(id) && d.editUrl.includes('#edit='), 'POST /api/docs legt Dokument an');
 const editKey = d.editUrl.split('#edit=')[1];
 
-r = await fetch(`${BASE}/api/docs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"markdown":"x"}' });
-ok(r.status === 401, 'POST /api/docs ohne Schlüssel → 401');
+// Ohne Schlüssel (fremde Agenten): zufällige Adresse, Bearbeiten mit X-Edit-Key.
+r = await fetch(`${BASE}/api/docs`, { method: 'POST', headers: { 'content-type': 'text/markdown' }, body: '# Fremder Agent\n\nHallo.' });
+d = await j(r);
+ok(r.status === 201 && /^[a-z0-9]+$/.test(d.id) && d.editKey && d.editUrl.endsWith(`#edit=${d.editKey}`), 'POST /api/docs ohne Schlüssel legt Dokument an');
+const anon = d;
+r = await fetch(`${BASE}/api/docs/${anon.id}`, { method: 'PUT', headers: { 'x-edit-key': anon.editKey, 'content-type': 'text/markdown' }, body: '# Fremder Agent\n\nNeu.' });
+ok(r.ok && (await (await fetch(`${BASE}/${anon.id}.md`)).text()).endsWith('Neu.'), 'PUT mit X-Edit-Key aus der Antwort');
+r = await fetch(`${BASE}/api/docs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: `${id}-x`, markdown: 'x' }) });
+ok(r.status === 403, 'Ohne Schlüssel keine eigene Adresse → 403');
+r = await fetch(`${BASE}/api/docs`, { method: 'POST', headers: { 'content-type': 'text/markdown' }, body: '  ' });
+ok(r.status === 400, 'Ohne Schlüssel leer → 400');
+r = await fetch(`${BASE}/api/docs`, { method: 'POST', headers: { 'content-type': 'text/markdown' }, body: 'x'.repeat(200_001) });
+ok(r.status === 413, 'Ohne Schlüssel zu lang → 413');
+r = await fetch(`${BASE}/api/docs`, { method: 'POST', headers: { authorization: 'Bearer falsch', 'content-type': 'application/json' }, body: '{"markdown":"x"}' });
+ok(r.status === 401, 'Falscher Schlüssel → 401');
+
+// Anleitung für Agenten
+r = await fetch(`${BASE}/llms.txt`);
+ok(r.headers.get('content-type').startsWith('text/markdown') && (await r.text()).includes('/api/docs'), 'GET /llms.txt');
+r = await fetch(`${BASE}/`, { redirect: 'manual', headers: { 'user-agent': 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-User/1.0)', accept: 'text/html' } });
+ok(r.status === 200 && (await r.text()).startsWith('# md.veerka.mp'), '/ für Agenten: Anleitung');
+r = await fetch(`${BASE}/`, { redirect: 'manual', headers: { 'user-agent': 'Mozilla/5.0 (Macintosh) Safari/605.1.15', accept: 'text/html', 'sec-fetch-mode': 'navigate' } });
+ok(r.status === 302, '/ im Browser: neues Dokument');
 
 r = await fetch(`${BASE}/api/docs`, { method: 'POST', headers: { ...API, 'content-type': 'application/json' }, body: JSON.stringify({ id, markdown: 'x' }) });
 ok(r.status === 409, 'Gleiche ID nochmal → 409');
@@ -197,6 +218,7 @@ ok(r.status === 404, 'Gelöschtes Dokument ist weg');
 r = await fetch(`${BASE}/api/admin/docs`, { headers: { authorization: `Bearer ${admin}` } });
 ok(!(await j(r)).docs.some(x => x.id === id2), 'Und aus der Übersicht verschwunden');
 await fetch(`${BASE}/api/docs/${id}`, { method: 'DELETE', headers: API });
+await fetch(`${BASE}/api/docs/${anon.id}`, { method: 'DELETE', headers: API });
 
 // ── Whiteboard ──────────────────────────────────────────────────────────────
 const board = `${id}-board`;
@@ -219,7 +241,7 @@ await fetch(`${BASE}/api/docs/${board}-neu`, { method: 'DELETE', headers: API })
 // ── Sonstiges ───────────────────────────────────────────────────────────────
 r = await fetch(`${BASE}/Gro%C3%9Fe%20K%C3%BCche`, { redirect: 'manual' });
 ok(r.status === 301 && r.headers.get('location') === `/${encodeURIComponent('große-küche')}`, 'Adresse wird normalisiert (Kleinbuchstaben, Bindestriche)');
-r = await fetch(`${BASE}/`, { redirect: 'manual' });
+r = await fetch(`${BASE}/`, { redirect: 'manual', headers: { 'sec-fetch-mode': 'navigate', accept: 'text/html' } });
 ok(r.status === 302 && /^\/[a-z0-9]{10}$/.test(r.headers.get('location')), 'Startseite leitet auf zufällige ID um');
 r = await fetch(`${BASE}/robots.txt`);
 ok(!/^Disallow: \/\s*$/m.test((await r.text()).split('END Cloudflare Managed Content').pop()), 'robots.txt sperrt KI-Assistenten nicht');

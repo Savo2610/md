@@ -4,7 +4,8 @@
 //   meta     Schlüssel/Wert: id, created, updated, accessed, editKey, ownerKey,
 //            pinned, imageBytes, markdown (letzter Stand als Text), title,
 //            flushedSeq, trashed (Zeitpunkt, wenn im Papierkorb),
-//            kind ('board' für Whiteboards, 'pack' für Packlisten, sonst leer: Markdown)
+//            kind ('board' für Whiteboards, 'pack' für Packlisten, sonst leer: Markdown),
+//            agent ('1': von einem Agenten ohne API-Schlüssel angelegt)
 //
 // Whiteboards (src/shared/board.ts) und Packlisten (src/shared/pack.ts)
 // liegen im selben Objekt, nur mit anderen Yjs-Typen. Der Schnappschuss
@@ -202,7 +203,7 @@ export class Doc extends DurableObject<Env> {
    * Legt das Dokument an. `from` übernimmt Schlüssel, Bilder und Metadaten
    * eines umbenannten Dokuments.
    */
-  async create(id: string, initial = '', from?: MoveData, kind: DocKind = 'md', state?: Uint8Array): Promise<string | null> {
+  async create(id: string, initial = '', from?: MoveData, kind: DocKind = 'md', state?: Uint8Array, agent = false): Promise<string | null> {
     if (this.exists()) return null;
     this.sql.exec(`
       CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT);
@@ -216,6 +217,7 @@ export class Doc extends DurableObject<Env> {
       pinned: from?.pinned ? 1 : 0, imageBytes: from?.imageBytes ?? 0, imgPrefix: from?.imgPrefix ?? id,
       flushedSeq: 0, markdown: '',
       ...((from?.kind ?? kind) !== 'md' ? { kind: from?.kind ?? kind } : {}),
+      ...(agent ? { agent: 1 } : {}),
     };
     for (const [k, v] of Object.entries(meta)) this.set(k, v);
     if (from?.state) Y.applyUpdate(this.load(), from.state);
@@ -437,6 +439,7 @@ export class Doc extends DurableObject<Env> {
       images: this.num('imageBytes'),
       pinned: this.get('pinned') === '1',
       trashed: this.num('trashed'),
+      agent: this.get('agent') === '1',
     });
   }
 

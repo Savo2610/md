@@ -110,15 +110,20 @@ dasselbe sehen. Jedes Board lässt sich auch als Markdown abrufen.
 
 ## Für KI-Agenten
 
-Jedes Dokument gibt es als reines Markdown. Mit API-Schlüssel legen Agenten
-Dokumente an und schreiben sie fort.
+Sag einem Agenten „veröffentliche das auf md.veerka.mp“. Er findet dort die
+Anleitung ([/llms.txt](https://md.veerka.mp/llms.txt)), legt das Dokument mit
+einer Anfrage an und antwortet mit dem Bearbeiten-Link. Ohne Schlüssel gehen
+20 Dokumente am Tag. Chat-Assistenten, die keine Anfragen schicken können,
+geben stattdessen einen Link `md.veerka.mp/#text=…` aus. Ein Klick darauf legt
+das Dokument an.
 
 ```bash
-curl https://md.veerka.mp/<adresse>.md
+curl https://md.veerka.mp/api/docs -H "Content-Type: text/markdown" --data-binary @bericht.md
 
-curl https://md.veerka.mp/api/docs -H "Authorization: Bearer $KEY" \
-  -H "Content-Type: text/markdown" --data-binary @bericht.md
+curl https://md.veerka.mp/<adresse>.md
 ```
+
+Mit API-Schlüssel gibt es keine Grenze und eigene Adressen (`?id=…`).
 
 ## Selbst betreiben
 

@@ -4,6 +4,7 @@ import { randomId, randomToken, signToken, verifyTotp } from './crypto';
 import { MAX_CHARS, docKind } from './doc';
 import { packUmzug } from './packliste';
 import { accountStub, docStub, registry, type Env } from './env';
+import { AGENT_PER_IP } from './registry';
 import { clearSessionCookie, currentUser } from './auth';
 import type { AccountDoc } from './account';
 import { canEdit, isAdmin, isAdminUser, isOwner, normalizeId, turnstileOk } from './access';
@@ -16,6 +17,8 @@ import { accountBoot } from './pages';
 const ADMIN_TTL = 12 * 3600;
 const MAX_IMAGE = 6 * 1024 * 1024;
 const IMAGE_TYPES: Record<string, string> = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/avif': 'avif' };
+/** Höchstlänge für Dokumente von Agenten ohne API-Schlüssel. */
+export const MAX_AGENT_CHARS = 200_000;
 const BAD_ID = 'Ungültige Adresse. Erlaubt: Buchstaben, Ziffern, - und _ (max. 80).';
 
 const docUrl = (req: Request, id: string) => `${origin(req)}/${encodeURIComponent(id)}`;
@@ -47,15 +50,26 @@ export async function api(req: Request, env: Env, url: URL, ctx: ExecutionContex
 async function docs(req: Request, env: Env, url: URL, parts: string[]): Promise<Response> {
   const method = req.method;
 
-  // POST /api/docs – Agent legt ein Dokument an.
+  // POST /api/docs – Agent legt ein Dokument an. Mit API-Schlüssel ohne
+  // Grenzen und mit Wunsch-Adresse; ohne (fremde Agenten, Anleitung in
+  // /llms.txt) nur zufällige Adressen, kürzere Texte und ein Tageskontingent.
   if (!parts.length && method === 'POST') {
-    if (!(await isAdmin(req, env))) return fail(401, 'API-Schlüssel fehlt oder ist falsch.');
+    const keyed = await isAdmin(req, env);
+    if (!keyed && req.headers.get('authorization')) return fail(401, 'API key is wrong. Leave out the Authorization header to publish without a key.');
     const { markdown, id: wanted } = await readMarkdownBody(req);
+    if (!keyed) {
+      if (wanted) return fail(403, 'A custom id needs an API key. Leave out "id" to get a random address.');
+      if (!markdown.trim()) return fail(400, 'Empty document. Send the Markdown as the request body.');
+      if (markdown.length > MAX_AGENT_CHARS) return fail(413, `Too long: at most ${MAX_AGENT_CHARS} characters without an API key.`);
+      const { success } = await env.CREATE_LIMIT.limit({ key: `agent:${ip(req)}` });
+      if (!success || !(await registry(env).agentCreate(ip(req)))) return fail(429, `Daily limit reached (${AGENT_PER_IP} documents per day). Try again tomorrow.`);
+    }
+    if (markdown.length > MAX_CHARS) return fail(413, 'Text zu lang.');
     const id = wanted ? normalizeId(wanted) : randomId();
     if (!id) return fail(400, BAD_ID);
-    const editKey = await docStub(env, id).create(id, markdown);
+    const editKey = await docStub(env, id).create(id, markdown, undefined, 'md', undefined, !keyed);
     if (!editKey) return fail(409, 'Diese ID ist schon vergeben.');
-    return json({ id, url: docUrl(req, id), editUrl: `${docUrl(req, id)}#edit=${editKey}`, raw: `${docUrl(req, id)}.md` }, 201);
+    return json({ id, url: docUrl(req, id), editUrl: `${docUrl(req, id)}#edit=${editKey}`, raw: `${docUrl(req, id)}.md`, editKey }, 201);
   }
 
   const id = parts[0] ? normalizeId(parts[0]) : null;

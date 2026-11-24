@@ -93,6 +93,14 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
   /** Board oder Packliste: eigene Oberfläche statt Editor und Ansicht. */
   const isApp = isBoard || isPack;
   const kindHere: DocKind | undefined = isBoard ? 'board' : isPack ? 'pack' : undefined;
+  // Neues Dokument mit Text aus dem Link: /#text=<Markdown, URL-kodiert>
+  // (für Chat-Agenten, die nur Links ausgeben können, siehe /llms.txt).
+  const textHash = /^#text=([\s\S]*)$/.exec(location.hash);
+  let linked = '';
+  if (textHash) {
+    history.replaceState(null, '', location.pathname + location.search);
+    try { linked = decodeURIComponent(textHash[1]); } catch { linked = textHash[1]; }
+  }
 
   const app = $('#app')!;
   const article: HTMLElement = $<HTMLElement>('#view') ?? (isApp ? el('article', { class: 'doc', id: 'view' }) : app.appendChild(el('article', { class: 'doc', id: 'view' })));
@@ -887,6 +895,14 @@ function startDoc(boot: Boot, host?: HTMLElement): DocSession {
       if (ed.text()) return;
       ed.view.dispatch({ changes: { from: 0, insert: imported }, userEvent: 'input.paste' });
       toast('Importiert. Die Adresse kannst du unter „Teilen“ ändern.');
+    });
+  } else if (linked.trim() && !exists && !isApp) {
+    // Text aus dem Link: anlegen und gleich fertig gesetzt zeigen.
+    loadEditor().then(async ed => {
+      await ed.whenLocal();
+      if (ed.text()) return;
+      ed.view.dispatch({ changes: { from: 0, insert: linked }, userEvent: 'input.paste' });
+      if (await create()) setMode('view', false);
     });
   }
 

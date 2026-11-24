@@ -4,7 +4,7 @@ import { $, el, toast, ask, adminToken, adminHeaders, isAdmin, setAdminToken, co
 
 interface DocSummary {
   id: string; title: string; snippet: string; created: number; updated: number;
-  size: number; images: number; pinned: boolean; trashed: number;
+  size: number; images: number; pinned: boolean; trashed: number; agent?: boolean;
 }
 
 const fmtDate = (t: number) => new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -112,6 +112,7 @@ async function list(main: HTMLElement, q = '') {
       if (r.ok) { row.remove(); toast('Gelöscht.'); } else toast('Löschen fehlgeschlagen.');
     });
     const status = el('div', { class: 'meta' }, `/${d.id}`);
+    if (d.agent) status.append(el('span', { class: 'badge quiet', title: 'Ohne API-Schlüssel von einem Agenten angelegt' }, 'Agent'));
     if (d.trashed) {
       const back = el('button', { type: 'button', class: 't boxed small' }, 'Wiederherstellen');
       back.addEventListener('click', async () => {
